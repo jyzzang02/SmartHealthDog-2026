@@ -60,9 +60,9 @@ try:
     # CAT_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in CAT_MODELS_NAMES.items()}
 
     ## For CPU inference (uncomment if no GPU available)
-    DOG_MODELS = {name: load_learner(path, cpu=True) for path, name in DOG_MODELS_NAMES.items()}
+    DOG_MODELS = {name: load_learner(path, cpu=False) for path, name in DOG_MODELS_NAMES.items()}
     DOG_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in DOG_MODELS_NAMES.items()}
-    CAT_MODELS = {name: load_learner(path, cpu=True) for path, name in CAT_MODELS_NAMES.items()}
+    CAT_MODELS = {name: load_learner(path, cpu=False) for path, name in CAT_MODELS_NAMES.items()}
     CAT_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in CAT_MODELS_NAMES.items()}
     
     # Combine all models and hashes into single dictionaries

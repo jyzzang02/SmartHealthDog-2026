@@ -1,6 +1,9 @@
 # celeryconfig.py
 import os
 
+from dotenv import load_dotenv
+load_dotenv()
+
 # --- Backend Authentication Credentials ---
 # Load credentials from environment variables.
 # The second argument to .get() is an optional default value, 
