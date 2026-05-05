@@ -37,14 +37,14 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
 
   const validateEmail = (text: string) => {
     setEmail(text);
-    
+
     if (text === '') {
       setEmailError('');
       return;
     }
 
-    const emailRegex = /^[^\s@]+@[^\s@]+\.(com|kr|net|org|edu|gov|mil|co\.kr|ac\.kr|go\.kr|or\.kr)$/i;
-    
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/i;
+
     if (!emailRegex.test(text)) {
       setEmailError('잘못된 이메일 형식입니다.');
     } else {
@@ -59,16 +59,10 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
     try {
       const tokens = await login(email, password);
       await storeAuthTokens(tokens);
-      Alert.alert('로그인 완료', '환영합니다!', [
-        {
-          text: '확인',
-          onPress: () =>
-            navigation.reset({
-              index: 0,
-              routes: [{ name: 'Main' }],
-            }),
-        },
-      ]);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Main' }],
+      });
     } catch (error) {
       console.error('[login] 로그인 실패', error);
       if (isApiError(error)) {
@@ -197,4 +191,3 @@ const styles = StyleSheet.create({
 });
 
 export default OrdinaryLogin;
-

@@ -1,4 +1,3 @@
-console.log("📢 HomeScreen Loaded");
 import React from 'react';
 import { ScrollView, View, Text, StyleSheet } from 'react-native';
 import PetHealthCard from '../components/PetHealthCard';
@@ -6,8 +5,8 @@ import ProfileCard from '../components/ProfileCard';
 import BannerSlider from '../components/BannerSlider';
 import Header from '../components/Header';
 
-
 export default function HomeScreen() {
+  console.log('HomeScreen Loaded');
   return (
     <ScrollView style={styles.container}>
       <Header />

@@ -26,7 +26,7 @@ class ApiError extends Error {
   }
 }
 
-const API_BASE_URL = 'https://dev.puppydoc.ovh';
+const API_BASE_URL = 'http://10.0.2.2:8088';
 
 const parseErrorResponse = async (response: Response) => {
   const fallbackMessage = `요청을 처리하지 못했습니다. (HTTP ${response.status})`;
