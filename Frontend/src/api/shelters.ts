@@ -78,6 +78,18 @@ export interface PetDetail {
   };
 }
 
+export interface ShelterPetsParams {
+  status?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ShelterPetsResponse {
+  items: PetDetail[];
+  total?: number;
+  page?: { limit: number; offset: number };
+}
+
 const parseJsonSafe = async (response: Response) => {
   try {
     return await response.json();
@@ -224,3 +236,34 @@ export const getShelterPetDetail = async (
   return (data as { pet: PetDetail })?.pet ?? ({} as PetDetail);
 };
 
+export const getShelterPets = async (
+  shelterId: number,
+  params: ShelterPetsParams = {}
+): Promise<ShelterPetsResponse> => {
+  const query = new URLSearchParams();
+  if (params.status) query.append('status', params.status);
+  if (params.limit !== undefined) query.append('limit', String(params.limit));
+  if (params.offset !== undefined) query.append('offset', String(params.offset));
+
+  const url = `${API_BASE_URL}/api/shelters/${shelterId}/pets${query.toString() ? `?${query.toString()}` : ''}`;
+  const response = await authorizedFetch(url, { method: 'GET' });
+
+  if (!response.ok) {
+    const errorText = await readErrorBody(response);
+    if (errorText) console.log('[shelters] pets error body', errorText);
+    const data = await parseJsonSafe(response);
+    const message =
+      data?.message ||
+      errorText ||
+      `입양 동물 목록을 불러오지 못했습니다. (HTTP ${response.status})`;
+    throw new Error(message);
+  }
+
+  const data = await parseJsonSafe(response);
+  const items = (data?.items || data?.pets || []) as PetDetail[];
+  return {
+    items,
+    total: data?.total,
+    page: data?.page,
+  };
+};

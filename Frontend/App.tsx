@@ -58,6 +58,10 @@ export type RootStackParamList = {
   Main: undefined;
   AnimalDetail: {
     animalData: {
+      id?: number;
+      shelterId?: number;
+      shelterName?: string;
+      shelterPhone?: string;
       type: '강아지' | '고양이';
       tags: string[];
       breed: string;
