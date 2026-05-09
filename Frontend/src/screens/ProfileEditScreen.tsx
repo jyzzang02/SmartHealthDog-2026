@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useState } from "react";
 import {
   View,
   Text,
@@ -7,11 +7,44 @@ import {
   Image,
   TextInput,
   TouchableOpacity,
+  Alert,
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
+import { logout } from "../api/auth";
+import { clearAuthTokens, getStoredRefreshToken } from "../storage/tokenStorage";
 
 const ProfileEditScreen = () => {
   const navigation = useNavigation();
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
+
+  const performLogout = useCallback(async () => {
+    setIsLoggingOut(true);
+    try {
+      const refreshToken = await getStoredRefreshToken();
+      if (refreshToken) {
+        await logout(refreshToken);
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "로그아웃에 실패했습니다.";
+      Alert.alert("로그아웃 실패", message);
+    } finally {
+      await clearAuthTokens();
+      setIsLoggingOut(false);
+      navigation.reset({
+        index: 0,
+        routes: [{ name: "Login" as never }],
+      });
+    }
+  }, [navigation]);
+
+  const handleLogout = useCallback(() => {
+    if (isLoggingOut) return;
+    Alert.alert("로그아웃", "정말 로그아웃할까요?", [
+      { text: "취소", style: "cancel" },
+      { text: "로그아웃", style: "destructive", onPress: performLogout },
+    ]);
+  }, [isLoggingOut, performLogout]);
 
   return (
     <View style={styles.wrapper}>
@@ -74,8 +107,10 @@ const ProfileEditScreen = () => {
         </View>
 
         {/* 로그아웃 */}
-        <TouchableOpacity>
-          <Text style={styles.logoutText}>로그아웃</Text>
+        <TouchableOpacity onPress={handleLogout} disabled={isLoggingOut}>
+          <Text style={styles.logoutText}>
+            {isLoggingOut ? "로그아웃 중..." : "로그아웃"}
+          </Text>
         </TouchableOpacity>
 
         <View style={{ height: 120 }} />

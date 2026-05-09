@@ -217,6 +217,21 @@ export const refreshAuthToken = async (
   return response.json();
 };
 
+export const logout = async (refreshToken: string) => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ refreshToken }),
+  });
+
+  if (!response.ok) {
+    const { message, codes } = await parseErrorResponse(response);
+    throw new ApiError(message, response.status, codes);
+  }
+};
+
 export const isApiError = (error: unknown): error is ApiError => {
   return error instanceof ApiError;
 };
