@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -11,11 +11,49 @@ import {
 } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import { logout } from "../api/auth";
+import { getMyProfile, updateMyProfile, UserProfile } from "../api/users";
 import { clearAuthTokens, getStoredRefreshToken } from "../storage/tokenStorage";
 
 const ProfileEditScreen = () => {
   const navigation = useNavigation();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [nickname, setNickname] = useState("");
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true);
+  const [profileError, setProfileError] = useState<string | null>(null);
+  const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadProfile = async () => {
+      setIsLoadingProfile(true);
+      setProfileError(null);
+      try {
+        const data = await getMyProfile();
+        if (!isMounted) return;
+        setProfile(data);
+        setNickname(data.nickname ?? "");
+      } catch (error) {
+        if (!isMounted) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "프로필 정보를 불러오지 못했습니다.";
+        setProfileError(message);
+      } finally {
+        if (isMounted) {
+          setIsLoadingProfile(false);
+        }
+      }
+    };
+
+    loadProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
 
   const performLogout = useCallback(async () => {
     setIsLoggingOut(true);
@@ -46,10 +84,34 @@ const ProfileEditScreen = () => {
     ]);
   }, [isLoggingOut, performLogout]);
 
+  const handleSaveProfile = useCallback(async () => {
+    if (isSavingProfile) return;
+    const trimmedNickname = nickname.trim();
+    if (!trimmedNickname) {
+      Alert.alert("오류", "닉네임을 입력해 주세요.");
+      return;
+    }
+
+    setIsSavingProfile(true);
+    try {
+      const updated = await updateMyProfile({ nickname: trimmedNickname });
+      setProfile(updated);
+      setNickname(updated.nickname ?? trimmedNickname);
+      Alert.alert("저장 완료", "프로필이 저장되었습니다.");
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "프로필 저장에 실패했습니다.";
+      Alert.alert("오류", message);
+    } finally {
+      setIsSavingProfile(false);
+    }
+  }, [isSavingProfile, nickname]);
+
   return (
     <View style={styles.wrapper}>
       <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-        
         {/* 🔙 헤더 */}
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -65,9 +127,23 @@ const ProfileEditScreen = () => {
           <Text style={styles.headerTitle}>내 프로필</Text>
         </View>
 
+        {isLoadingProfile && (
+          <Text style={styles.loadingText}>프로필 불러오는 중...</Text>
+        )}
+        {!!profileError && !isLoadingProfile && (
+          <Text style={styles.errorText}>{profileError}</Text>
+        )}
+
         {/* 이미지 */}
         <View style={styles.imageBox}>
-          <View style={styles.imagePlaceholder} />
+          {profile?.profilePicture ? (
+            <Image
+              source={{ uri: profile.profilePicture }}
+              style={styles.profileImage}
+            />
+          ) : (
+            <View style={styles.imagePlaceholder} />
+          )}
 
           <TouchableOpacity style={styles.editTag}>
             <Image
@@ -82,14 +158,16 @@ const ProfileEditScreen = () => {
         <Text style={styles.label}>닉네임</Text>
         <TextInput
           style={styles.input}
-          placeholder="이서영"
+          placeholder="닉네임"
           placeholderTextColor="#999"
+          value={nickname}
+          onChangeText={setNickname}
         />
 
         {/* 이메일 */}
         <Text style={styles.label}>이메일 아이디</Text>
         <View style={styles.emailBox}>
-          <Text style={styles.emailText}>822angel@gmail.com</Text>
+          <Text style={styles.emailText}>{profile?.email ?? "-"}</Text>
         </View>
 
         {/* 주소 */}
@@ -117,8 +195,14 @@ const ProfileEditScreen = () => {
       </ScrollView>
 
       {/* 저장 버튼 */}
-      <TouchableOpacity style={styles.saveBtn}>
-        <Text style={styles.saveBtnText}>저장하기</Text>
+      <TouchableOpacity
+        style={styles.saveBtn}
+        onPress={handleSaveProfile}
+        disabled={isSavingProfile}
+      >
+        <Text style={styles.saveBtnText}>
+          {isSavingProfile ? "저장 중..." : "저장하기"}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -169,6 +253,7 @@ const styles = StyleSheet.create({
     marginTop: 24,
     justifyContent: "center",
     alignItems: "center",
+    overflow: "hidden",
   },
 
   imagePlaceholder: {
@@ -285,5 +370,22 @@ const styles = StyleSheet.create({
     color: "#fff",
     fontSize: 16,
     fontWeight: "600",
+  },
+
+  errorText: {
+    fontSize: 12,
+    color: "#EF5F5F",
+    marginTop: 8,
+  },
+
+  loadingText: {
+    fontSize: 12,
+    color: "#7B7C7D",
+    marginTop: 8,
+  },
+
+  profileImage: {
+    width: "100%",
+    height: "100%",
   },
 });
