@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
+import { getMyPets, PetListItem } from "../api/pets";
 import { useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
@@ -29,28 +30,79 @@ const MyPageScreen = () => {
   };
   const hasUserImage = !!user.imageUrl;
 
-  const petList = [
-    {
-      name: "뽀삐",
-      type: "골든리트리버",
-      gender: "여",
-      birth: "25-11-04",
-      imageUrl: require("../assets/img_adoptDog.png"),
-      healthInfo: ["4.2kg", "치주염"],
-      condition: "양호",
-    },
-    {
-      name: "나비",
-      type: "페르시안",
-      gender: "남",
-      birth: "2022-01-01",
-      imageUrl: require("../assets/img_adoptCat.png"),
-      healthInfo: ["슬개골", "알러지"],
-      condition: "주의",
-    },
-  ];
-
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [petList, setPetList] = useState<PetListItem[]>([]);
+  const [isPetsLoading, setIsPetsLoading] = useState(false);
+  const [petsError, setPetsError] = useState<string | null>(null);
+
+  const mapSpeciesLabel = (species?: string) => {
+    if (!species) return "";
+    const normalized = species.toLowerCase();
+    if (normalized.includes("dog") || normalized.includes("강아지")) return "강아지";
+    if (normalized.includes("cat") || normalized.includes("고양이")) return "고양이";
+    return species;
+  };
+
+  const mapGenderLabel = (sex?: string) => {
+    if (!sex) return "";
+    const normalized = sex.toLowerCase();
+    if (normalized.includes("female") || normalized.includes("여")) return "여";
+    if (normalized.includes("male") || normalized.includes("남")) return "남";
+    return sex;
+  };
+
+  const formatBirthDate = (birthDate?: string) => {
+    if (!birthDate) return "";
+    const [datePart] = birthDate.split("T");
+    return datePart;
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadPets = async () => {
+      setIsPetsLoading(true);
+      setPetsError(null);
+      try {
+        const data = await getMyPets();
+        if (!isMounted) return;
+        setPetList(data);
+      } catch (error) {
+        if (!isMounted) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "반려동물 정보를 불러오지 못했습니다.";
+        setPetsError(message);
+        setPetList([]);
+      } finally {
+        if (isMounted) {
+          setIsPetsLoading(false);
+        }
+      }
+    };
+
+    loadPets();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const petCards = useMemo(
+    () =>
+      petList.map((pet) => ({
+        id: pet.id,
+        name: pet.name || "이름 없음",
+        type: pet.breed || mapSpeciesLabel(pet.species) || "",
+        gender: mapGenderLabel(pet.sex) || "",
+        birth: formatBirthDate(pet.birthDate) || "",
+        imageUrl: require("../assets/img_adoptDog.png"),
+        healthInfo: [],
+        condition: "정보없음",
+      })),
+    [petList]
+  );
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
@@ -88,9 +140,16 @@ const MyPageScreen = () => {
       {/* 🔹 반려동물 프로필 */}
       <Text style={styles.sectionTitle}>반려동물 프로필</Text>
 
-      {petList.length === 1 && <PetProfileCard {...petList[0]} />}
+      {isPetsLoading && (
+        <Text style={styles.helperText}>반려동물 정보를 불러오는 중...</Text>
+      )}
+      {!!petsError && !isPetsLoading && (
+        <Text style={styles.errorText}>{petsError}</Text>
+      )}
 
-      {petList.length > 1 && (
+      {petCards.length === 1 && <PetProfileCard {...petCards[0]} />}
+
+      {petCards.length > 1 && (
         <>
           <ScrollView
             horizontal
@@ -107,11 +166,11 @@ const MyPageScreen = () => {
             }}
             scrollEventThrottle={16}
           >
-            {petList.map((pet, idx) => (
+            {petCards.map((pet, idx) => (
               <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
                 <PetProfileCard
                   {...pet}
-                  onPressEdit={() => navigation.navigate("PetEdit")}
+                  onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
                 />
               </View>
             ))}
@@ -119,7 +178,7 @@ const MyPageScreen = () => {
 
           {/* Dots */}
           <View style={styles.dotContainer}>
-            {petList.map((_, i) => (
+            {petCards.map((_, i) => (
               <View
                 key={i}
                 style={[styles.dot, currentIndex === i && styles.activeDot]}
@@ -141,7 +200,6 @@ const MyPageScreen = () => {
           간단한 테스트로 알아보아요
         </Text>
       </TouchableOpacity>
-
     </ScrollView>
   );
 };
@@ -246,5 +304,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: "#555",
     lineHeight: 18,
+  },
+
+  helperText: {
+    fontSize: 12,
+    color: "#7B7C7D",
+    paddingHorizontal: 20,
+    marginTop: 8,
+  },
+  errorText: {
+    fontSize: 12,
+    color: "#EF5F5F",
+    paddingHorizontal: 20,
+    marginTop: 8,
   },
 });
