@@ -1,22 +1,28 @@
 import React, { useMemo, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, Dimensions, TouchableOpacity, Modal, Animated } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  Dimensions,
+  TouchableOpacity,
+  Modal,
+  Animated,
+} from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import {
   WALK_RECORDS_THIS_WEEK as WALK_RECORDS,
-  PET_COLORS,
-  PET_BADGE_BG_COLORS,
   getPetColor,
   getPetBadgeColor,
   parseDistanceKm,
 } from '../data/walkRecords';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const WALK_SHEET_HEIGHT = 420;
 
-// 산책 팁 더미데이터 (20자 이내)
 const WALK_TIPS = [
   '여름에는 지면 온도 확인이 필수에요! 🔥',
   '산책 후 발바닥 체크는 꼭! 🐾',
@@ -31,6 +37,7 @@ const getDayLabel = (dateText: string) => {
   const normalized = dateText.replace(/\./g, '-');
   const date = new Date(normalized);
   const dayIndex = date.getDay();
+
   return DAYS[dayIndex] ?? '일';
 };
 
@@ -39,6 +46,7 @@ export default function WalkScreen() {
   const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
   const [selectedPet, setSelectedPet] = useState<string | null>(null);
   const bottomSheetY = useRef(new Animated.Value(WALK_SHEET_HEIGHT)).current;
+
   const [randomTip, setRandomTip] = useState(() => {
     const randomIndex = Math.floor(Math.random() * WALK_TIPS.length);
     return WALK_TIPS[randomIndex];
@@ -49,7 +57,6 @@ export default function WalkScreen() {
     setRandomTip(WALK_TIPS[randomIndex]);
   }, []);
 
-  // 화면 재진입 시마다 팁 새로고침
   useFocusEffect(
     useCallback(() => {
       refreshTip();
@@ -58,18 +65,24 @@ export default function WalkScreen() {
 
   const petOptions = useMemo(() => {
     const petMap = new Map<string, any>();
+
     WALK_RECORDS.forEach((record) => {
       if (!petMap.has(record.petName)) {
         petMap.set(record.petName, record.petImage);
       }
     });
-    return Array.from(petMap.entries()).map(([name, image]) => ({ name, image }));
+
+    return Array.from(petMap.entries()).map(([name, image]) => ({
+      name,
+      image,
+    }));
   }, []);
 
   const openBottomSheet = () => {
     setSelectedPet(null);
     setBottomSheetVisible(true);
     bottomSheetY.setValue(WALK_SHEET_HEIGHT);
+
     Animated.spring(bottomSheetY, {
       toValue: 0,
       useNativeDriver: false,
@@ -90,11 +103,14 @@ export default function WalkScreen() {
   const handleStartWalk = () => {
     const pet = petOptions.find((p) => p.name === selectedPet);
     if (!pet) return;
+
     closeBottomSheet();
-    navigation.navigate('WalkActive', { petName: pet.name, petImage: pet.image });
+    navigation.navigate('WalkActive', {
+      petName: pet.name,
+      petImage: pet.image,
+    });
   };
 
-  // 산책 기록을 기반으로 요일별 산책 그래프 데이터 생성 (거리 총합 km)
   const weeklyData = useMemo(() => {
     const totals: Record<string, { [pet: string]: number }> = {};
 
@@ -117,45 +133,66 @@ export default function WalkScreen() {
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
           <View style={styles.titleSection}>
-            <Text style={styles.titleLine}>
+            <Text style={styles.titleLine} numberOfLines={1}>
               <Text style={styles.titlePrimary}>오늘도 건강하</Text>
               <Text style={styles.titleHighlight}>개</Text>
             </Text>
-            <Text style={styles.subtitle}>산책해 볼까요?</Text>
-            <Text style={styles.tipText}>{randomTip}</Text>
+
+            <Text style={styles.subtitle} numberOfLines={1}>
+              산책해 볼까요?
+            </Text>
+
+            <Text style={styles.tipText} numberOfLines={1}>
+              {randomTip}
+            </Text>
           </View>
-          
-          {/* 산책 시작 아이콘 */}
-          <TouchableOpacity style={styles.startIconContainer} activeOpacity={0.8} onPress={openBottomSheet}>
-            <Image source={require('../assets/icon_startWalk.png')} style={styles.startIcon} />
+
+          <TouchableOpacity
+            style={styles.startIconContainer}
+            activeOpacity={0.8}
+            onPress={openBottomSheet}
+          >
+            <Image
+              source={require('../assets/icon_startWalk.png')}
+              style={styles.startIcon}
+            />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 요일별 산책 그래프 섹션 */}
       <View style={styles.graphSection}>
         <View style={styles.graphHeader}>
           <Text style={styles.graphTitle}>요일별 산책 그래프</Text>
-          <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('WalkWeeklyReport')}>
-            <Image source={require('../assets/btn_more.png')} style={styles.graphMoreButton} />
+
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => navigation.navigate('WalkWeeklyReport')}
+          >
+            <Image
+              source={require('../assets/btn_more.png')}
+              style={styles.graphMoreButton}
+            />
           </TouchableOpacity>
         </View>
-        
+
         <View style={styles.graphContainer}>
           {weeklyData.map((item, index) => {
             const totalHeight = item.pet1 + item.pet2;
-            const maxHeight = 120; // 최대 막대 높이
-            const scaledTotal = totalHeight > 0 ? (totalHeight / 5) * (maxHeight / 2) : 0; // km 단위, 적당히 스케일링
-            const scaledPet1 = totalHeight > 0 ? (item.pet1 / totalHeight) * scaledTotal : 0;
-            const scaledPet2 = totalHeight > 0 ? (item.pet2 / totalHeight) * scaledTotal : 0;
+            const maxHeight = 110;
+            const scaledTotal =
+              totalHeight > 0 ? (totalHeight / 5) * (maxHeight / 2) : 0;
+            const scaledPet1 =
+              totalHeight > 0 ? (item.pet1 / totalHeight) * scaledTotal : 0;
+            const scaledPet2 =
+              totalHeight > 0 ? (item.pet2 / totalHeight) * scaledTotal : 0;
+
             const hasPet1 = scaledPet1 > 0;
             const hasPet2 = scaledPet2 > 0;
             const barRadius = 4;
-            
+
             return (
               <View key={index} style={styles.barColumn}>
                 <View style={styles.barWrapper}>
@@ -172,6 +209,7 @@ export default function WalkScreen() {
                       },
                     ]}
                   />
+
                   <View
                     style={[
                       styles.barSegment,
@@ -186,6 +224,7 @@ export default function WalkScreen() {
                     ]}
                   />
                 </View>
+
                 <Text style={styles.dayText}>{item.day}</Text>
               </View>
             );
@@ -193,7 +232,6 @@ export default function WalkScreen() {
         </View>
       </View>
 
-      {/* 하단 시트 - 산책 기록 리스트 */}
       <View style={styles.bottomSheet}>
         <ScrollView
           style={styles.recordScrollView}
@@ -208,21 +246,40 @@ export default function WalkScreen() {
             >
               <View style={styles.recordCard}>
                 <Image source={record.petImage} style={styles.petImage} />
+
                 <View style={styles.recordInfo}>
-                  <View style={[styles.petNameBadge, { backgroundColor: getPetBadgeColor(record.petName) }]}>
-                    <Text style={[styles.petNameText, { color: getPetColor(record.petName) }]}>
+                  <View
+                    style={[
+                      styles.petNameBadge,
+                      { backgroundColor: getPetBadgeColor(record.petName) },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.petNameText,
+                        { color: getPetColor(record.petName) },
+                      ]}
+                    >
                       {record.petName}
                     </Text>
                   </View>
+
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>산책일시</Text>
                     <Text style={styles.infoValue}>{record.date}</Text>
                   </View>
+
                   <View style={styles.infoRow}>
                     <Text style={styles.infoLabel}>이동거리</Text>
                     <Text style={styles.infoValue}>{record.distance}</Text>
                   </View>
-                  <Text style={[styles.durationText, { color: getPetColor(record.petName) }]}>
+
+                  <Text
+                    style={[
+                      styles.durationText,
+                      { color: getPetColor(record.petName) },
+                    ]}
+                  >
                     {record.duration}
                   </Text>
                 </View>
@@ -232,10 +289,19 @@ export default function WalkScreen() {
         </ScrollView>
       </View>
 
-      {/* 산책 시작 바텀시트 */}
-      <Modal visible={isBottomSheetVisible} transparent animationType="none" onRequestClose={closeBottomSheet}>
+      <Modal
+        visible={isBottomSheetVisible}
+        transparent
+        animationType="none"
+        onRequestClose={closeBottomSheet}
+      >
         <View style={styles.bottomSheetOverlay}>
-          <TouchableOpacity style={styles.bottomSheetBackground} activeOpacity={1} onPress={closeBottomSheet} />
+          <TouchableOpacity
+            style={styles.bottomSheetBackground}
+            activeOpacity={1}
+            onPress={closeBottomSheet}
+          />
+
           <Animated.View
             style={[
               styles.selectionSheetContainer,
@@ -249,12 +315,15 @@ export default function WalkScreen() {
             </View>
 
             <View style={styles.selectionSheetContent}>
-              <Text style={styles.sheetTitle}>산책할 반려동물을 선택해주세요</Text>
+              <Text style={styles.sheetTitle}>
+                산책할 반려동물을 선택해주세요
+              </Text>
 
               <View style={styles.petCardsRow}>
                 {petOptions.map((pet, index) => {
                   const isLast = index === petOptions.length - 1;
                   const isSelected = selectedPet === pet.name;
+
                   return (
                     <TouchableOpacity
                       key={pet.name}
@@ -274,7 +343,12 @@ export default function WalkScreen() {
               </View>
 
               <View style={styles.selectionButtonContainer}>
-                <CustomButton text="산책하기" onPress={handleStartWalk} disabled={!selectedPet} width={350} />
+                <CustomButton
+                  text="산책하기"
+                  onPress={handleStartWalk}
+                  disabled={!selectedPet}
+                  width={350}
+                />
               </View>
             </View>
           </Animated.View>
@@ -293,7 +367,7 @@ const styles = StyleSheet.create({
   headerContainer: {
     paddingHorizontal: 20,
     paddingTop: 48,
-    marginBottom: 12,
+    marginBottom: 4,
   },
 
   headerRow: {
@@ -304,45 +378,50 @@ const styles = StyleSheet.create({
 
   titleSection: {
     flex: 1,
+    paddingRight: 12,
   },
 
   titleLine: {
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 28,
+    lineHeight: 34,
+    fontWeight: '700',
   },
 
   titlePrimary: {
     color: '#0081D5',
-    fontSize: 32,
-    fontWeight: '600',
-    lineHeight: 40,
+    fontSize: 28,
+    fontWeight: '700',
+    lineHeight: 34,
   },
 
   titleHighlight: {
     color: '#FFC94D',
-    fontWeight: '600',
-    fontSize: 32,
-    lineHeight: 40,
+    fontSize: 28,
+    fontWeight: '700',
+    lineHeight: 34,
   },
 
   subtitle: {
-    color: '#000',
-    fontSize: 32,
-    fontWeight: '600',
-    lineHeight: 40,
+    color: '#000000',
+    fontSize: 28,
+    fontWeight: '700',
+    lineHeight: 34,
     marginTop: 2,
   },
 
   tipText: {
     color: '#7B7C7D',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
-    marginTop: 15,
-    fontFamily: undefined,
+    marginTop: 10,
   },
 
   startIconContainer: {
-    marginLeft: 30,
+    width: 96,
+    height: 96,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
@@ -351,13 +430,13 @@ const styles = StyleSheet.create({
   },
 
   startIcon: {
-    width: 120,
-    height: 120,
+    width: 96,
+    height: 96,
   },
 
   graphSection: {
     paddingHorizontal: 20,
-    marginTop: 30,
+    marginTop: 18,
     alignItems: 'center',
   },
 
@@ -369,7 +448,7 @@ const styles = StyleSheet.create({
   },
 
   graphTitle: {
-    color: '#000',
+    color: '#000000',
     fontSize: 18,
     fontWeight: '600',
     alignSelf: 'flex-start',
@@ -383,12 +462,12 @@ const styles = StyleSheet.create({
 
   graphContainer: {
     width: 310,
-    height: 160,
+    height: 135,
     flexDirection: 'row',
     alignItems: 'flex-end',
     justifyContent: 'space-between',
-    marginTop: 20,
-    paddingBottom: 24,
+    marginTop: 12,
+    paddingBottom: 22,
   },
 
   barColumn: {
@@ -415,10 +494,10 @@ const styles = StyleSheet.create({
 
   bottomSheet: {
     flex: 1,
-    marginTop: 30,
+    marginTop: 12,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
@@ -443,7 +522,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#EAECEE',
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     padding: 16,
     paddingHorizontal: 20,
@@ -505,6 +584,7 @@ const styles = StyleSheet.create({
   bottomSheetOverlay: {
     flex: 1,
   },
+
   bottomSheetBackground: {
     position: 'absolute',
     top: 0,
@@ -513,6 +593,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.30)',
   },
+
   selectionSheetContainer: {
     backgroundColor: '#FFFFFF',
     borderTopLeftRadius: 20,
@@ -523,35 +604,41 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
   },
+
   dragHandleArea: {
     width: '100%',
     height: 44,
     alignItems: 'center',
     paddingTop: 20,
   },
+
   dragHandle: {
     width: 40,
     height: 4,
     backgroundColor: '#B3B6B8',
     borderRadius: 2,
   },
+
   selectionSheetContent: {
     paddingHorizontal: 20,
   },
+
   sheetTitle: {
     marginTop: 35,
-    color: '#000',
+    color: '#000000',
     fontFamily: 'Pretendard',
     fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 30,
   },
+
   petCardsRow: {
     flexDirection: 'row',
     justifyContent: 'center',
     marginBottom: 30,
   },
+
   petCard: {
     width: 167,
     height: 170,
@@ -563,13 +650,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 12,
   },
+
   petCardGap: {
     marginRight: 16,
   },
+
   petCardSelected: {
     borderColor: '#0081D5',
     backgroundColor: '#EEF7FD',
   },
+
   petCardImage: {
     width: 80,
     height: 80,
@@ -577,11 +667,13 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     resizeMode: 'cover',
   },
+
   petCardName: {
-    color: '#000',
+    color: '#000000',
     fontSize: 16,
     fontWeight: '600',
   },
+
   selectionButtonContainer: {
     alignItems: 'center',
   },
