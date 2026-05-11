@@ -221,3 +221,24 @@ export const updatePetPartial = async (
   const data = await parseJsonSafe(response);
   return data as PetListItem;
 };
+
+export const deletePet = async (id: number): Promise<void> => {
+  const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${id}`, {
+    method: 'DELETE',
+  });
+
+  if (response.status === 204) {
+    return;
+  }
+
+  if (!response.ok) {
+    const errorText = await readErrorBody(response);
+    const data = await parseJsonSafe(response);
+    const message =
+      data?.error ||
+      data?.message ||
+      errorText ||
+      `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`;
+    throw new Error(message);
+  }
+};

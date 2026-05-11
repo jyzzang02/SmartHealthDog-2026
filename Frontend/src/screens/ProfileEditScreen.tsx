@@ -94,7 +94,7 @@ const ProfileEditScreen = () => {
 
     setIsSavingProfile(true);
     try {
-      const updated = await updateMyProfile({ nickname: trimmedNickname });
+      const updated = await updateMyProfile({ nickname: trimmedNickname }, { method: 'PUT' });
       setProfile(updated);
       setNickname(updated.nickname ?? trimmedNickname);
       Alert.alert("저장 완료", "프로필이 저장되었습니다.");

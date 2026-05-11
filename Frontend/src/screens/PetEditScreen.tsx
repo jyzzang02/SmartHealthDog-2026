@@ -6,12 +6,13 @@ import {
   ScrollView,
   Image,
   TextInput,
-  TouchableOpacity
+  TouchableOpacity,
+  Alert
 } from "react-native";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import type { RootStackParamList } from "../../App";
-import { getPetDetail, PetListItem, updatePetFull, updatePetPartial } from "../api/pets";
+import { getPetDetail, PetListItem, updatePetFull, updatePetPartial, deletePet } from "../api/pets";
 
 const PetEditScreen = () => {
   const navigation = useNavigation();
@@ -28,6 +29,7 @@ const PetEditScreen = () => {
   const [birthDay, setBirthDay] = useState("");
   const [isNeutered, setIsNeutered] = useState<boolean | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const normalizeGender = (value?: string | null) => {
     if (!value) return null;
@@ -170,6 +172,33 @@ const PetEditScreen = () => {
     }
   };
 
+  const handleDelete = () => {
+    if (isDeleting) return;
+    Alert.alert("반려동물 삭제", "정말 삭제할까요?", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: async () => {
+          setIsDeleting(true);
+          setErrorMessage(null);
+          try {
+            await deletePet(petId);
+            navigation.goBack();
+          } catch (error) {
+            const message =
+              error instanceof Error
+                ? error.message
+                : "반려동물을 삭제하지 못했습니다.";
+            setErrorMessage(message);
+          } finally {
+            setIsDeleting(false);
+          }
+        },
+      },
+    ]);
+  };
+
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
       
@@ -300,6 +329,10 @@ const PetEditScreen = () => {
       {/* 저장 버튼 */}
       <TouchableOpacity style={styles.saveBtn} onPress={handleSave} disabled={isSaving}>
         <Text style={styles.saveText}>{isSaving ? "저장 중..." : "저장하기"}</Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete} disabled={isDeleting}>
+        <Text style={styles.deleteText}>{isDeleting ? "삭제 중..." : "삭제하기"}</Text>
       </TouchableOpacity>
 
       <View style={{ height: 60 }} />
@@ -447,6 +480,20 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: "center",
     marginTop: 30,
+  },
+
+  deleteBtn: {
+    marginTop: 12,
+    borderWidth: 1,
+    borderColor: "#EF5F5F",
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: "center",
+  },
+  deleteText: {
+    color: "#EF5F5F",
+    fontSize: 16,
+    fontWeight: "500",
   },
 
   saveText: {

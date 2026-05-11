@@ -19,6 +19,10 @@ export interface UpdateProfilePayload {
   profilePictureUri?: string | null;
 }
 
+export interface UpdateProfileOptions {
+  method?: 'PUT' | 'PATCH';
+}
+
 const parseJsonSafe = async (response: Response) => {
   try {
     return await response.json();
@@ -106,7 +110,8 @@ export const getMyProfile = async (): Promise<UserProfile> => {
 };
 
 export const updateMyProfile = async (
-  payload: UpdateProfilePayload
+  payload: UpdateProfilePayload,
+  options: UpdateProfileOptions = {}
 ): Promise<UserProfile> => {
   const formData = new FormData();
   formData.append(
@@ -126,7 +131,7 @@ export const updateMyProfile = async (
   }
 
   const response = await authorizedFetch(`${API_BASE_URL}/api/users/me`, {
-    method: 'PATCH',
+    method: options.method ?? 'PATCH',
     body: formData,
   });
 
