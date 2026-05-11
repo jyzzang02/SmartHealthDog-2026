@@ -1,6 +1,7 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Image, Text, Platform } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import HomeScreen from '../screens/HomeScreen';
 import WalkScreen from '../screens/WalkScreen';
@@ -10,14 +11,25 @@ import AdoptScreen from '../screens/AdoptScreen';
 
 const Tab = createBottomTabNavigator();
 
+const TAB_BAR_HEIGHT = 56;
+const EXTRA_BOTTOM_PADDING = Platform.OS === 'android' ? 4 : 0;
+
 export default function TabNavigator() {
+  const insets = useSafeAreaInsets();
+
+  const tabBarTotalHeight =
+    TAB_BAR_HEIGHT + insets.bottom + EXTRA_BOTTOM_PADDING;
+
   return (
     <Tab.Navigator
       screenOptions={({ route }: any) => ({
         headerShown: false,
         tabBarShowLabel: true,
 
- 
+        sceneContainerStyle: {
+          backgroundColor: '#FFFFFF',
+        },
+
         tabBarLabel: ({ focused }: any) => (
           <Text
             style={{
@@ -31,7 +43,6 @@ export default function TabNavigator() {
           </Text>
         ),
 
-   
         tabBarIcon: ({ focused }: any) => {
           let icon;
 
@@ -51,6 +62,9 @@ export default function TabNavigator() {
             case '마이':
               icon = require('../assets/image/icons/My.png');
               break;
+            default:
+              icon = require('../assets/image/icons/Home.png');
+              break;
           }
 
           return (
@@ -66,9 +80,8 @@ export default function TabNavigator() {
           );
         },
 
-    
         tabBarStyle: {
-          height: 89,
+          height: tabBarTotalHeight,
           display: 'flex',
           backgroundColor: '#FFFFFF',
           borderTopWidth: 0,
@@ -77,10 +90,8 @@ export default function TabNavigator() {
           shadowOpacity: 0.04,
           shadowRadius: 10,
           elevation: 6,
-          paddingBottom: Platform.OS === 'ios' ? 20 : 12,
           paddingTop: 8,
-          position: 'absolute',
-          width: '100%',
+          paddingBottom: insets.bottom + EXTRA_BOTTOM_PADDING,
         },
       })}
     >
