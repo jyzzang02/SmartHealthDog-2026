@@ -8,7 +8,10 @@ import {
   TextInput,
   TouchableOpacity,
   Alert,
+  Platform,
+  PermissionsAndroid,
 } from "react-native";
+import { launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
 import { useNavigation } from "@react-navigation/native";
 import { logout } from "../api/auth";
 import { getMyProfile, updateMyProfile, UserProfile } from "../api/users";
@@ -22,6 +25,7 @@ const ProfileEditScreen = () => {
   const [isLoadingProfile, setIsLoadingProfile] = useState(true);
   const [profileError, setProfileError] = useState<string | null>(null);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  const [profileImageUri, setProfileImageUri] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -84,6 +88,58 @@ const ProfileEditScreen = () => {
     ]);
   }, [isLoggingOut, performLogout]);
 
+  const requestImagePermission = useCallback(async () => {
+    if (Platform.OS !== 'android') return true;
+
+    const androidVersion = Platform.Version;
+    const permission =
+      androidVersion >= 33
+        ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
+        : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
+
+    try {
+      const granted = await PermissionsAndroid.request(permission, {
+        title: '사진 라이브러리 접근 권한',
+        message: '프로필 사진을 선택하기 위해 사진 라이브러리 접근 권한이 필요합니다.',
+        buttonNeutral: '나중에',
+        buttonNegative: '취소',
+        buttonPositive: '확인',
+      });
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch (error) {
+      console.warn('권한 요청 에러:', error);
+      return false;
+    }
+  }, []);
+
+  const handleSelectProfileImage = useCallback(async () => {
+    const hasPermission = await requestImagePermission();
+    if (!hasPermission) {
+      Alert.alert('권한 필요', '사진을 선택하려면 권한을 허용해 주세요.');
+      return;
+    }
+
+    launchImageLibrary(
+      {
+        mediaType: 'photo',
+        quality: 1,
+        maxWidth: 500,
+        maxHeight: 500,
+      },
+      (response: ImagePickerResponse) => {
+        if (response.didCancel) return;
+        if (response.errorCode) {
+          Alert.alert('오류', '이미지를 불러올 수 없습니다.');
+          return;
+        }
+        const uri = response.assets?.[0]?.uri;
+        if (uri) {
+          setProfileImageUri(uri);
+        }
+      }
+    );
+  }, [requestImagePermission]);
+
   const handleSaveProfile = useCallback(async () => {
     if (isSavingProfile) return;
     const trimmedNickname = nickname.trim();
@@ -94,9 +150,13 @@ const ProfileEditScreen = () => {
 
     setIsSavingProfile(true);
     try {
-      const updated = await updateMyProfile({ nickname: trimmedNickname }, { method: 'PUT' });
+      const updated = await updateMyProfile({
+        nickname: trimmedNickname,
+        profilePictureUri: profileImageUri,
+      });
       setProfile(updated);
       setNickname(updated.nickname ?? trimmedNickname);
+      setProfileImageUri(null);
       Alert.alert("저장 완료", "프로필이 저장되었습니다.");
     } catch (error) {
       const message =
@@ -107,7 +167,11 @@ const ProfileEditScreen = () => {
     } finally {
       setIsSavingProfile(false);
     }
-  }, [isSavingProfile, nickname]);
+  }, [isSavingProfile, nickname, profileImageUri]);
+
+  const handleChangeAddress = useCallback(() => {
+    Alert.alert('주소 변경', '주소 검색 기능은 준비 중입니다.');
+  }, []);
 
   return (
     <View style={styles.wrapper}>
@@ -136,7 +200,9 @@ const ProfileEditScreen = () => {
 
         {/* 이미지 */}
         <View style={styles.imageBox}>
-          {profile?.profilePicture ? (
+          {profileImageUri ? (
+            <Image source={{ uri: profileImageUri }} style={styles.profileImage} />
+          ) : profile?.profilePicture ? (
             <Image
               source={{ uri: profile.profilePicture }}
               style={styles.profileImage}
@@ -145,7 +211,7 @@ const ProfileEditScreen = () => {
             <View style={styles.imagePlaceholder} />
           )}
 
-          <TouchableOpacity style={styles.editTag}>
+          <TouchableOpacity style={styles.editTag} onPress={handleSelectProfileImage}>
             <Image
               source={require("../assets/icon_edit.png")}
               style={styles.editSmallIcon}
@@ -179,7 +245,7 @@ const ProfileEditScreen = () => {
             placeholderTextColor="#999"
           />
 
-          <TouchableOpacity style={styles.changeAddressBtn}>
+          <TouchableOpacity style={styles.changeAddressBtn} onPress={handleChangeAddress}>
             <Text style={styles.changeAddressText}>주소 변경</Text>
           </TouchableOpacity>
         </View>

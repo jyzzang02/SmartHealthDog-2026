@@ -5,7 +5,7 @@ import {
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
 
-const API_BASE_URL = 'http://10.0.2.2:8088';
+const API_BASE_URL = 'http://10.83.185.102:8088';
 
 export interface UserProfile {
   id: number;
@@ -17,10 +17,6 @@ export interface UserProfile {
 export interface UpdateProfilePayload {
   nickname: string;
   profilePictureUri?: string | null;
-}
-
-export interface UpdateProfileOptions {
-  method?: 'PUT' | 'PATCH';
 }
 
 const parseJsonSafe = async (response: Response) => {
@@ -110,8 +106,7 @@ export const getMyProfile = async (): Promise<UserProfile> => {
 };
 
 export const updateMyProfile = async (
-  payload: UpdateProfilePayload,
-  options: UpdateProfileOptions = {}
+  payload: UpdateProfilePayload
 ): Promise<UserProfile> => {
   const formData = new FormData();
   formData.append(
@@ -131,7 +126,7 @@ export const updateMyProfile = async (
   }
 
   const response = await authorizedFetch(`${API_BASE_URL}/api/users/me`, {
-    method: options.method ?? 'PATCH',
+    method: 'PATCH',
     body: formData,
   });
 
