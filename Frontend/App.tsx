@@ -4,13 +4,16 @@
  *
  * @format
  */
-//import 'react-native-gesture-handler';
 
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
+import {
+  NavigationContainer,
+  DefaultTheme,
+} from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+
 import LoginScreen from './src/screens/LoginScreen';
 import OrdinaryLogin from './src/screens/OrdinaryLogin';
 import OrdinarySignup from './src/screens/OrdinarySignup';
@@ -29,9 +32,6 @@ import WalkLogDetailScreen from './src/screens/WalkLogDetailScreen';
 import WalkWeeklyReportScreen from './src/screens/WalkWeeklyReportScreen';
 import WalkActiveScreen from './src/screens/WalkActiveScreen';
 
-
-
-
 export type RootStackParamList = {
   Login: undefined;
   Home: undefined;
@@ -41,21 +41,30 @@ export type RootStackParamList = {
   EyeDiagnosis: undefined;
   UrineDiagnosis: undefined;
   MyPage: undefined;
-  GameScreen: undefined; 
-  PetEdit: undefined; 
+  GameScreen: undefined;
   ProfileEdit: undefined;
+
+  PetEdit: {
+    petId: number;
+  };
+
   UserSignup: {
     email: string;
     password: string;
     verificationCode: string;
   };
+
   PetSignup: {
-    email: string;
-    password: string;
-    verificationCode: string;
-    nickname: string;
+    mode?: 'add';
+    email?: string;
+    password?: string;
+    verificationCode?: string;
+    nickname?: string;
+    profileImage?: string | null;
   };
+
   Main: undefined;
+
   AnimalDetail: {
     animalData: {
       id?: number;
@@ -70,6 +79,7 @@ export type RootStackParamList = {
       image: any;
     };
   };
+
   WalkLogDetail: {
     record: {
       id: number;
@@ -82,7 +92,9 @@ export type RootStackParamList = {
       endTime?: string;
     };
   };
+
   WalkWeeklyReport: undefined;
+
   WalkActive: {
     petName: string;
     petImage: any;
@@ -91,41 +103,60 @@ export type RootStackParamList = {
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+const AppTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: '#FFFFFF',
+    card: '#FFFFFF',
+  },
+};
+
+function AppNavigator() {
+  const colorScheme = useColorScheme();
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <Stack.Navigator
-          initialRouteName="Login"
-          screenOptions={{
-            headerShown: false,
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
-          <Stack.Screen name="OrdinarySignup" component={OrdinarySignup} />
-          <Stack.Screen name="UserSignup" component={UserSignup} />
-          <Stack.Screen name="PetSignup" component={PetSignup} />
-          <Stack.Screen name="Main" component={TabNavigator} />
-          <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
-          <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
-          <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
-          <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
-          <Stack.Screen name="MyPage" component={MyPageScreen} />
-          <Stack.Screen name="GameScreen" component={GameScreen} />
-          <Stack.Screen name="PetEdit" component={PetEditScreen} />
-          <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
-          <Stack.Screen name="WalkLogDetail" component={WalkLogDetailScreen} />
-          <Stack.Screen name="WalkWeeklyReport" component={WalkWeeklyReportScreen} />
-          <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
+    <NavigationContainer theme={AppTheme}>
+      <StatusBar
+        backgroundColor="#FFFFFF"
+        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
+      />
 
+      <Stack.Navigator
+        initialRouteName="Login"
+        screenOptions={{
+          headerShown: false,
+          contentStyle: {
+            backgroundColor: '#FFFFFF',
+          },
+        }}
+      >
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
+        <Stack.Screen name="OrdinarySignup" component={OrdinarySignup} />
+        <Stack.Screen name="UserSignup" component={UserSignup} />
+        <Stack.Screen name="PetSignup" component={PetSignup} />
+        <Stack.Screen name="Main" component={TabNavigator} />
+        <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
+        <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
+        <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
+        <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
+        <Stack.Screen name="MyPage" component={MyPageScreen} />
+        <Stack.Screen name="GameScreen" component={GameScreen} />
+        <Stack.Screen name="PetEdit" component={PetEditScreen} />
+        <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
+        <Stack.Screen name="WalkLogDetail" component={WalkLogDetailScreen} />
+        <Stack.Screen name="WalkWeeklyReport" component={WalkWeeklyReportScreen} />
+        <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
 
-
-        </Stack.Navigator>
-      </NavigationContainer>
+function App() {
+  return (
+    <SafeAreaProvider style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <AppNavigator />
     </SafeAreaProvider>
   );
 }

@@ -138,7 +138,15 @@ const MyPageScreen = () => {
       </TouchableOpacity>
 
       {/* 🔹 반려동물 프로필 */}
-      <Text style={styles.sectionTitle}>반려동물 프로필</Text>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>반려동물 프로필</Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate("PetSignup", { mode: "add" })}
+        >
+          <Text style={styles.addButtonText}>+ 추가</Text>
+        </TouchableOpacity>
+      </View>
 
       {isPetsLoading && (
         <Text style={styles.helperText}>반려동물 정보를 불러오는 중...</Text>
@@ -256,11 +264,28 @@ const styles = StyleSheet.create({
 
   /* -------------------------- 공통 스타일 -------------------------- */
   sectionTitle: {
-    marginTop: 40,
     fontSize: 18,
     fontWeight: "600",
-    paddingHorizontal: 20,
     color: "#000",
+  },
+  sectionHeader: {
+    marginTop: 40,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  addButton: {
+    borderWidth: 1,
+    borderColor: "#2A7BE4",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  addButtonText: {
+    color: "#2A7BE4",
+    fontSize: 12,
+    fontWeight: "600",
   },
 
   dotContainer: {
