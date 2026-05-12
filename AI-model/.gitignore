@@ -14,3 +14,6 @@ input/
 *.pkl
 mlruns/
 .ipynb_checkpoints/
+
+benchmark_results/
+mlflow.db
