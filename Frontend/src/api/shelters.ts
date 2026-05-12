@@ -5,7 +5,7 @@ import {
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
 
-const API_BASE_URL = 'http://10.0.2.2:8088';
+const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
 export interface ShelterSearchParams {
   location?: string;

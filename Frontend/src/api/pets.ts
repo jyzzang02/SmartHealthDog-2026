@@ -5,7 +5,7 @@ import {
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
 
-const API_BASE_URL = 'http://10.83.185.102:8088';
+const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
 export type PetSpecies = 'DOG' | 'CAT';
 export type PetGender = 'MALE' | 'FEMALE' | 'UNKNOWN';
@@ -104,6 +104,11 @@ const authorizedFetch = async (
     });
 
   let response = await doFetch(accessToken);
+  console.log('[pets] fetch status', response.status);
+
+  if (response.status === 403) {
+    throw new Error('권한이 없습니다.');
+  }
 
   if (response.status !== 401 && response.status !== 403) {
     return response;
@@ -120,9 +125,16 @@ const authorizedFetch = async (
     await storeAuthTokens(newTokens);
     accessToken = newTokens.accessToken;
     response = await doFetch(accessToken);
+    console.log('[pets] token refreshed');
   } catch (error) {
     console.warn('[pets] token refresh 실패', error);
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+  }
+
+  console.log('[pets] fetch status', response.status);
+
+  if (response.status === 403) {
+    throw new Error('권한이 없습니다.');
   }
 
   if (response.status === 401 || response.status === 403) {
