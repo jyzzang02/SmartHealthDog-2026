@@ -98,11 +98,25 @@ const parseJsonSafe = async (response: Response) => {
   }
 };
 
-const readErrorBody = async (response: Response) => {
+const readErrorMessage = async (
+  response: Response,
+  fallbackMessage: string
+): Promise<string> => {
   try {
-    return await response.text();
+    const errorText = await response.text();
+
+    if (!errorText) {
+      return fallbackMessage;
+    }
+
+    try {
+      const parsed = JSON.parse(errorText);
+      return parsed?.message || parsed?.error || errorText || fallbackMessage;
+    } catch {
+      return errorText || fallbackMessage;
+    }
   } catch {
-    return '';
+    return fallbackMessage;
   }
 };
 
@@ -111,8 +125,12 @@ const buildAuthHeaders = (accessToken: string) => ({
   Accept: 'application/json',
 });
 
-const authorizedFetch = async (input: string, init?: RequestInit): Promise<Response> => {
+const authorizedFetch = async (
+  input: string,
+  init?: RequestInit
+): Promise<Response> => {
   let accessToken = await getStoredAccessToken();
+
   if (!accessToken) {
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
@@ -126,88 +144,175 @@ const authorizedFetch = async (input: string, init?: RequestInit): Promise<Respo
       },
     });
 
-  // First attempt
+  // 요청이 실제로 어디로 나가는지 확인하는 로그
+  console.log('[shelters] request url', input);
+  console.log('[shelters] accessToken len', accessToken.length);
+
   let response = await doFetch(accessToken);
   console.log('[shelters] fetch status', response.status);
-  if (response.status !== 401 && response.status !== 403) {
+
+  // 403은 토큰 만료가 아니라 권한/서버 설정 문제일 가능성이 큼.
+  // 따라서 refresh token을 시도하지 않고 그대로 반환.
+  if (response.status === 403) {
     return response;
   }
 
-  // Try refresh once
+  // 401이 아닌 경우는 그대로 반환.
+  if (response.status !== 401) {
+    return response;
+  }
+
   const refreshToken = await getStoredRefreshToken();
+
   if (!refreshToken) {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
+
   try {
     const newTokens = await refreshAuthToken(refreshToken);
     await storeAuthTokens(newTokens);
     accessToken = newTokens.accessToken;
+
     console.log('[shelters] token refreshed');
+    console.log('[shelters] refreshed accessToken len', accessToken.length);
+
     response = await doFetch(accessToken);
+    console.log('[shelters] fetch status after refresh', response.status);
+
+    return response;
   } catch (err) {
     console.warn('[shelters] token refresh 실패', err);
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
+};
 
-  if (response.status === 401 || response.status === 403) {
-    console.log('[shelters] still unauthorized after refresh', response.status);
-    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+const handleShelterError = async (
+  response: Response,
+  fallbackMessage: string
+): Promise<never> => {
+  if (response.status === 401) {
+    throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
 
-  return response;
+  if (response.status === 403) {
+    const serverMessage = await readErrorMessage(
+      response,
+      '보호소 API 접근이 거부되었습니다.'
+    );
+
+    console.log('[shelters] 403 error body', serverMessage);
+
+    throw new Error(
+      `보호소 API 접근이 거부되었습니다. 서버 권한 설정 또는 배포 반영 여부를 확인해 주세요. (HTTP 403)\n서버 응답: ${serverMessage}`
+    );
+  }
+
+  const message = await readErrorMessage(response, fallbackMessage);
+  throw new Error(message);
 };
 
 export const searchShelters = async (
   params: ShelterSearchParams
 ): Promise<ShelterSearchResponse> => {
   const query = new URLSearchParams();
+
   if (params.location) query.append('location', params.location);
   if (params.lat !== undefined) query.append('lat', String(params.lat));
   if (params.lng !== undefined) query.append('lng', String(params.lng));
-  if (params.radius_km !== undefined) query.append('radius_km', String(params.radius_km));
+  if (params.radius_km !== undefined) {
+    query.append('radius_km', String(params.radius_km));
+  }
   if (params.sort_by) query.append('sort_by', params.sort_by);
   if (params.limit !== undefined) query.append('limit', String(params.limit));
   if (params.offset !== undefined) query.append('offset', String(params.offset));
 
-  const url = `${API_BASE_URL}/api/shelters/search${query.toString() ? `?${query.toString()}` : ''}`;
+  const url = `${API_BASE_URL}/api/shelters/search${
+    query.toString() ? `?${query.toString()}` : ''
+  }`;
 
   const response = await authorizedFetch(url, {
     method: 'GET',
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    if (errorText) console.log('[shelters] search error body', errorText);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.message ||
-      errorText ||
-      `보호소 목록을 불러오지 못했습니다. (HTTP ${response.status})`;
-    throw new Error(message);
+    await handleShelterError(
+      response,
+      `보호소 목록을 불러오지 못했습니다. (HTTP ${response.status})`
+    );
   }
 
   const data = await parseJsonSafe(response);
-  return (data as ShelterSearchResponse) ?? { items: [] };
+
+  return {
+    center: data?.center,
+    radius_km: data?.radius_km,
+    sort_by: data?.sort_by,
+    total: data?.total,
+    items: Array.isArray(data?.items) ? data.items : [],
+    page: data?.page,
+  };
 };
 
-export const getShelterDetail = async (shelterId: number): Promise<ShelterDetail> => {
-  const response = await authorizedFetch(`${API_BASE_URL}/api/shelters/${shelterId}`, {
+export const getShelterDetail = async (
+  shelterId: number
+): Promise<ShelterDetail> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/shelters/${shelterId}`,
+    {
+      method: 'GET',
+    }
+  );
+
+  if (!response.ok) {
+    await handleShelterError(
+      response,
+      `보호소 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
+  }
+
+  const data = await parseJsonSafe(response);
+
+  return (data as { shelter?: ShelterDetail })?.shelter ?? (data as ShelterDetail);
+};
+
+export const getShelterPets = async (
+  shelterId: number,
+  params: ShelterPetsParams = {}
+): Promise<ShelterPetsResponse> => {
+  const query = new URLSearchParams();
+
+  if (params.status) query.append('status', params.status);
+  if (params.limit !== undefined) query.append('limit', String(params.limit));
+  if (params.offset !== undefined) query.append('offset', String(params.offset));
+
+  const url = `${API_BASE_URL}/api/shelters/${shelterId}/pets${
+    query.toString() ? `?${query.toString()}` : ''
+  }`;
+
+  const response = await authorizedFetch(url, {
     method: 'GET',
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    if (errorText) console.log('[shelters] detail error body', errorText);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.message ||
-      errorText ||
-      `보호소 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
-    throw new Error(message);
+    await handleShelterError(
+      response,
+      `입양 동물 목록을 불러오지 못했습니다. (HTTP ${response.status})`
+    );
   }
 
   const data = await parseJsonSafe(response);
-  return (data as { shelter: ShelterDetail })?.shelter ?? ({} as ShelterDetail);
+
+  const items = Array.isArray(data?.items)
+    ? data.items
+    : Array.isArray(data?.pets)
+      ? data.pets
+      : [];
+
+  return {
+    items,
+    total: data?.total,
+    page: data?.page,
+  };
 };
 
 export const getShelterPetDetail = async (
@@ -222,48 +327,13 @@ export const getShelterPetDetail = async (
   );
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    if (errorText) console.log('[shelters] pet detail error body', errorText);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.message ||
-      errorText ||
-      `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
-    throw new Error(message);
+    await handleShelterError(
+      response,
+      `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
   }
 
   const data = await parseJsonSafe(response);
-  return (data as { pet: PetDetail })?.pet ?? ({} as PetDetail);
-};
 
-export const getShelterPets = async (
-  shelterId: number,
-  params: ShelterPetsParams = {}
-): Promise<ShelterPetsResponse> => {
-  const query = new URLSearchParams();
-  if (params.status) query.append('status', params.status);
-  if (params.limit !== undefined) query.append('limit', String(params.limit));
-  if (params.offset !== undefined) query.append('offset', String(params.offset));
-
-  const url = `${API_BASE_URL}/api/shelters/${shelterId}/pets${query.toString() ? `?${query.toString()}` : ''}`;
-  const response = await authorizedFetch(url, { method: 'GET' });
-
-  if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    if (errorText) console.log('[shelters] pets error body', errorText);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.message ||
-      errorText ||
-      `입양 동물 목록을 불러오지 못했습니다. (HTTP ${response.status})`;
-    throw new Error(message);
-  }
-
-  const data = await parseJsonSafe(response);
-  const items = (data?.items || data?.pets || []) as PetDetail[];
-  return {
-    items,
-    total: data?.total,
-    page: data?.page,
-  };
+  return (data as { pet?: PetDetail })?.pet ?? (data as PetDetail);
 };
