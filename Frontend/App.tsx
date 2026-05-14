@@ -24,6 +24,7 @@ import AnimalDetailScreen from './src/screens/AnimalDetailScreen';
 import SymptomResultScreen from './src/screens/SymptomResultScreen';
 import EyeDiagnosisScreen from './src/screens/EyeDiagnosisScreen';
 import UrineDiagnosisScreen from './src/screens/UrineDiagnosisScreen';
+import EyeCameraScreen from './src/screens/EyeCameraScreen';
 import MyPageScreen from './src/screens/MyPageScreen';
 import GameScreen from './src/screens/GameScreen';
 import PetEditScreen from './src/screens/PetEditScreen';
@@ -39,6 +40,7 @@ export type RootStackParamList = {
   OrdinarySignup: undefined;
   SymptomResult: undefined;
   EyeDiagnosis: undefined;
+  EyeCamera: undefined;
   UrineDiagnosis: undefined;
   MyPage: undefined;
   GameScreen: undefined;
@@ -140,6 +142,7 @@ function AppNavigator() {
         <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
         <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
         <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
+        <Stack.Screen name="EyeCamera" component={EyeCameraScreen} />
         <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
         <Stack.Screen name="MyPage" component={MyPageScreen} />
         <Stack.Screen name="GameScreen" component={GameScreen} />
