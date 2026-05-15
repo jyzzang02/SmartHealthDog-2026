@@ -15,12 +15,45 @@ export interface EyeDiagnosisImage {
   fileSize?: number;
 }
 
+export interface SubmissionSummary {
+  id?: string;
+  submissionId?: string;
+
+  type?: string;
+  status?: string;
+
+  createdAt?: string;
+  created_at?: string;
+  submittedAt?: string;
+  submitted_at?: string;
+
+  completedAt?: string | null;
+  completed_at?: string | null;
+
+  failureReason?: string | null;
+  failure_reason?: string | null;
+}
+
+export interface SubmissionStatusPayload {
+  status: string;
+}
+
+export type EyeDiagnosisResult = Record<string, unknown>;
+
 export { getMyPets };
 
 const buildAuthHeaders = (accessToken: string) => ({
   Authorization: `Bearer ${accessToken}`,
   Accept: 'application/json',
 });
+
+const parseJsonSafe = async (response: Response) => {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+};
 
 const parseErrorResponse = async (response: Response) => {
   const fallbackMessage = `요청을 처리하지 못했습니다. (HTTP ${response.status})`;
@@ -158,7 +191,128 @@ export const requestEyeDiagnosis = async (
     return;
   }
 
+  const errorText = await response.clone().text().catch(() => '');
+  console.log('[eye] upload 실패 상태', response.status, errorText);
+
   const message = await parseErrorResponse(response);
   throw new Error(message);
 };
 
+export const getPetSubmissions = async (
+  petId: number
+): Promise<SubmissionSummary[]> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/pets/${petId}`,
+    { method: 'GET' }
+  );
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+
+  const data = await parseJsonSafe(response);
+  return (Array.isArray(data) ? data : []) as SubmissionSummary[];
+};
+
+export const getMySubmissions = async (): Promise<SubmissionSummary[]> => {
+  const response = await authorizedFetch(`${API_BASE_URL}/api/submissions`, {
+    method: 'GET',
+  });
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+
+  const data = await parseJsonSafe(response);
+  return (Array.isArray(data) ? data : []) as SubmissionSummary[];
+};
+
+export const getEyeSubmissionResult = async (
+  submissionId: string
+): Promise<EyeDiagnosisResult> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/${submissionId}/eye?languageCode=ko`,
+    { method: 'GET' }
+  );
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+
+  const data = await parseJsonSafe(response);
+  return data as EyeDiagnosisResult;
+};
+
+export const getUrineSubmissionResult = async (
+  submissionId: string
+): Promise<EyeDiagnosisResult> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/${submissionId}/urine?languageCode=ko`,
+    { method: 'GET' }
+  );
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+
+  const data = await parseJsonSafe(response);
+  return data as EyeDiagnosisResult;
+};
+
+export const updateEyeSubmissionResult = async (
+  submissionId: number,
+  payload: Record<string, unknown>
+): Promise<void> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/${submissionId}/eye`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+};
+
+export const updateSubmissionStatus = async (
+  submissionId: number,
+  payload: SubmissionStatusPayload
+): Promise<void> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/${submissionId}/status`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+};
+
+export const deleteSubmission = async (submissionId: number): Promise<void> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/submissions/${submissionId}`,
+    { method: 'DELETE' }
+  );
+
+  if (!response.ok && response.status !== 204) {
+    const message = await parseErrorResponse(response);
+    throw new Error(message);
+  }
+};

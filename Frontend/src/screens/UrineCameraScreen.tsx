@@ -18,16 +18,11 @@ import {
   launchImageLibrary,
 } from 'react-native-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  EyeDiagnosisImage,
-  getMyPets,
-  requestEyeDiagnosis,
-} from '../api/diagnosis';
-import { PetListItem } from '../api/pets';
+import { getMyPets, PetListItem, requestUrineDiagnosis } from '../api/pets';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
 
-const EyeCameraScreen = () => {
+const UrineCameraScreen = () => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
   const [pets, setPets] = useState<PetListItem[]>([]);
@@ -86,12 +81,10 @@ const EyeCameraScreen = () => {
       Alert.alert('안내', '진단할 반려동물을 먼저 등록해 주세요.');
       return;
     }
-
     if (pets.length === 1) {
       setSelectedPetId(pets[0].id);
       return;
     }
-
     Alert.alert(
       '반려동물 선택',
       '진단할 반려동물을 선택해 주세요.',
@@ -111,12 +104,10 @@ const EyeCameraScreen = () => {
       Alert.alert('안내', '진단할 반려동물을 먼저 등록해 주세요.');
       return false;
     }
-
     if (!selectedPetId) {
       promptPetSelection();
       return false;
     }
-
     return true;
   }, [pets.length, promptPetSelection, selectedPetId]);
 
@@ -124,7 +115,6 @@ const EyeCameraScreen = () => {
     if (Platform.OS !== 'android') {
       return true;
     }
-
     const granted = await PermissionsAndroid.request(
       PermissionsAndroid.PERMISSIONS.CAMERA,
       {
@@ -135,7 +125,6 @@ const EyeCameraScreen = () => {
         buttonPositive: '확인',
       }
     );
-
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
 
@@ -143,12 +132,10 @@ const EyeCameraScreen = () => {
     if (Platform.OS !== 'android') {
       return true;
     }
-
     const permission =
       Platform.Version >= 33
         ? PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES
         : PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE;
-
     const granted = await PermissionsAndroid.request(permission, {
       title: '사진 권한 필요',
       message: '진단을 위해 사진 접근 권한이 필요합니다.',
@@ -156,11 +143,10 @@ const EyeCameraScreen = () => {
       buttonNegative: '취소',
       buttonPositive: '확인',
     });
-
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
 
-  const resolveMimeType = (image: EyeDiagnosisImage) => {
+  const resolveMimeType = (image: { uri: string; type?: string }) => {
     if (image.type) {
       return image.type;
     }
@@ -174,63 +160,52 @@ const EyeCameraScreen = () => {
     return 'image/*';
   };
 
-  const isSupportedImage = (image: EyeDiagnosisImage) => {
+  const isSupportedImage = (image: { uri: string; type?: string }) => {
     const type = resolveMimeType(image);
     return type === 'image/png' || type === 'image/jpeg';
   };
 
   const handleUpload = useCallback(
-    async (image: EyeDiagnosisImage) => {
-      console.log('[eye] upload payload', {
-        uri: image.uri,
-        type: image.type,
-        fileName: image.fileName,
-        fileSize: image.fileSize,
-      });
-
+    async (image: { uri: string; type?: string; fileName?: string; fileSize?: number }) => {
       if (!selectedPetId) {
         Alert.alert('안내', '진단할 반려동물을 선택해 주세요.');
         return;
       }
-
       const resolvedType = resolveMimeType(image);
       if (resolvedType !== 'image/jpeg' && resolvedType !== 'image/png') {
         Alert.alert('안내', 'jpg, jpeg, png 이미지만 업로드할 수 있습니다.');
         return;
       }
-
       if (image.fileSize && image.fileSize > MAX_IMAGE_SIZE) {
         Alert.alert('안내', '이미지 용량은 5MB 이하만 가능합니다.');
         return;
       }
-
       if (!isSupportedImage(image)) {
         Alert.alert('안내', 'jpg, jpeg, png 이미지만 업로드할 수 있습니다.');
         return;
       }
-
-      setIsUploading(true);
-      try {
-        await requestEyeDiagnosis(selectedPetId, image);
-        Alert.alert(
-          '접수 완료',
-          '진단 요청이 접수되었습니다. AI 분석 완료 후 결과를 확인할 수 있습니다.',
-          [
-            {
-              text: '확인',
-              onPress: () => navigation.navigate('EyeDiagnosisResult', { petId: selectedPetId }),
-            },
-          ]
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
-        Alert.alert('오류', message);
-      } finally {
-        setIsUploading(false);
-      }
+       setIsUploading(true);
+       try {
+         await requestUrineDiagnosis(selectedPetId, image);
+         Alert.alert(
+           '접수 완료',
+           '진단 요청이 접수되었습니다. AI 분석 완료 후 결과를 확인할 수 있습니다.',
+           [
+             {
+               text: '확인',
+               onPress: () => navigation.navigate('UrineDiagnosisResult', { petId: selectedPetId }),
+             },
+           ]
+         );
+       } catch (error) {
+         const message =
+           error instanceof Error
+             ? error.message
+             : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
+         Alert.alert('오류', message);
+       } finally {
+         setIsUploading(false);
+       }
     },
     [navigation, selectedPetId]
   );
@@ -239,13 +214,11 @@ const EyeCameraScreen = () => {
     if (!ensurePetSelected()) {
       return;
     }
-
     const hasPermission = await requestCameraPermission();
     if (!hasPermission) {
       Alert.alert('안내', '카메라 권한이 필요합니다.');
       return;
     }
-
     launchCamera(
       {
         mediaType: 'photo',
@@ -280,13 +253,11 @@ const EyeCameraScreen = () => {
     if (!ensurePetSelected()) {
       return;
     }
-
     const hasPermission = await requestGalleryPermission();
     if (!hasPermission) {
       Alert.alert('안내', '사진 접근 권한이 필요합니다.');
       return;
     }
-
     launchImageLibrary(
       {
         mediaType: 'photo',
@@ -335,9 +306,10 @@ const EyeCameraScreen = () => {
           </TouchableOpacity>
 
           <View style={styles.guideContainer}>
-            <View style={styles.dashedCircle} />
+            <View style={styles.dashedRect} />
             <Text style={styles.guideText}>
-              하단 촬영 버튼을 누르면 자동으로 촬영돼요.
+              소변키트를 안내선에 맞춰 촬영해 주세요. {'\n'}
+              하단 촬영 버튼을 누르면 자동으로 촬영됩니다.
             </Text>
           </View>
         </View>
@@ -430,10 +402,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  dashedCircle: {
+  dashedRect: {
     width: 220,
-    height: 220,
-    borderRadius: 110,
+    height: 160,
+    borderRadius: 16,
     borderWidth: 2,
     borderColor: '#2F99F3',
     borderStyle: 'dashed',
@@ -529,5 +501,5 @@ const styles = StyleSheet.create({
   },
 });
 
-export default EyeCameraScreen;
+export default UrineCameraScreen;
 

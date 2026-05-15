@@ -18,10 +18,11 @@ const UrineDiagnosisScreen = () => {
         styles.container,
         { paddingBottom: insets.bottom + EXTRA_BOTTOM_PADDING },
       ]}
+      scrollEnabled={false}
       showsVerticalScrollIndicator={false}
     >
-      {/* 🔙 Back Button */}
-      <TouchableOpacity 
+      {/* Back Button */}
+      <TouchableOpacity
         style={styles.backButton}
         onPress={() => navigation.goBack()}
         activeOpacity={0.8}
@@ -46,11 +47,11 @@ const UrineDiagnosisScreen = () => {
         <Image source={urineDog} style={styles.image} />
       </View>
 
-      {/* 진단 시작 버튼 */}
       <View style={styles.buttonContainer}>
+        {/* 진단 시작 버튼 */}
         <CustomButton
           text="진단시작"
-          onPress={() => console.log("소변 진단 시작")}
+          onPress={() => navigation.navigate('UrineCamera')}
         />
       </View>
 
@@ -60,8 +61,6 @@ const UrineDiagnosisScreen = () => {
 
 export default UrineDiagnosisScreen;
 
-
-// ====================== STYLE ======================
 const styles = StyleSheet.create({
   container: {
     flexGrow: 1,
@@ -98,9 +97,9 @@ const styles = StyleSheet.create({
     lineHeight: 26,
   },
   image: {
-    width: 350,
-    height: 350,
-    marginTop: 60,
+    width: 250,
+    height: 250,
+    marginTop: 90,
     resizeMode: "contain",
   },
 });
