@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
   View,
   Text,
@@ -7,12 +7,14 @@ import {
   Image,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
 } from "react-native";
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
 import { getMyPets, PetListItem } from "../api/pets";
-import { useNavigation } from "@react-navigation/native";
+import { getMyProfile, UserProfile } from "../api/users";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
 
@@ -24,12 +26,7 @@ const MyPageScreen = () => {
   type MyPageNavProp = StackNavigationProp<RootStackParamList, "MyPage">;
   const navigation = useNavigation<MyPageNavProp>();
 
-  const user = {
-    name: "한국항공대",
-    imageUrl: require("../assets/img_emblem.png"),
-  };
-  const hasUserImage = !!user.imageUrl;
-
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [petList, setPetList] = useState<PetListItem[]>([]);
   const [isPetsLoading, setIsPetsLoading] = useState(false);
@@ -57,37 +54,32 @@ const MyPageScreen = () => {
     return datePart;
   };
 
-  useEffect(() => {
-    let isMounted = true;
+  const loadData = useCallback(async () => {
+    setIsPetsLoading(true);
+    setPetsError(null);
 
-    const loadPets = async () => {
-      setIsPetsLoading(true);
-      setPetsError(null);
-      try {
-        const data = await getMyPets();
-        if (!isMounted) return;
-        setPetList(data);
-      } catch (error) {
-        if (!isMounted) return;
-        const message =
-          error instanceof Error
-            ? error.message
-            : "반려동물 정보를 불러오지 못했습니다.";
-        setPetsError(message);
-        setPetList([]);
-      } finally {
-        if (isMounted) {
-          setIsPetsLoading(false);
-        }
-      }
-    };
+    try {
+      const [profileData, petsData] = await Promise.all([
+        getMyProfile(),
+        getMyPets(),
+      ]);
 
-    loadPets();
-
-    return () => {
-      isMounted = false;
-    };
+      setUser(profileData);
+      setPetList(petsData);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
+      setPetsError(message);
+    } finally {
+      setIsPetsLoading(false);
+    }
   }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
 
   const petCards = useMemo(
     () =>
@@ -97,39 +89,38 @@ const MyPageScreen = () => {
         type: pet.breed || mapSpeciesLabel(pet.species) || "",
         gender: mapGenderLabel(pet.sex) || "",
         birth: formatBirthDate(pet.birthDate) || "",
-        imageUrl: require("../assets/img_adoptDog.png"),
-        healthInfo: [],
+        imageUrl: pet.profilePicture || null,
+        healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
         condition: "정보없음",
       })),
     [petList]
   );
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={{ paddingBottom: 100 }}
+    >
       <Header />
 
-      {/* 🔹 누르면 ProfileEditScreen으로 이동 */}
+      {/* 🔹 유저 프로필 영역 */}
       <TouchableOpacity
         style={styles.userBox}
         onPress={() => navigation.navigate("ProfileEdit")}
         activeOpacity={0.8}
       >
-        {hasUserImage ? (
-          <Image
-            source={
-              typeof user.imageUrl === "string"
-                ? { uri: user.imageUrl }
-                : user.imageUrl
-            }
-            style={styles.userImage}
-          />
-        ) : (
-          <View style={styles.userCircle} />
-        )}
+        <Image
+          source={
+            user?.profilePicture
+              ? { uri: user.profilePicture }
+              : require("../assets/img_emblem.png")
+          }
+          style={styles.userImage}
+        />
 
         <View style={styles.userRightBox}>
-          <Text style={styles.userName}>{user.name}</Text>
-
+          <Text style={styles.userName}>{user?.nickname || "사용자"} 님</Text>
           <Image
             source={require("../assets/icon_right.png")}
             style={styles.rightIcon}
@@ -149,13 +140,25 @@ const MyPageScreen = () => {
       </View>
 
       {isPetsLoading && (
-        <Text style={styles.helperText}>반려동물 정보를 불러오는 중...</Text>
+        <View style={{ marginTop: 20 }}>
+          <ActivityIndicator size="small" color="#2A7BE4" />
+        </View>
       )}
+
       {!!petsError && !isPetsLoading && (
         <Text style={styles.errorText}>{petsError}</Text>
       )}
 
-      {petCards.length === 1 && <PetProfileCard {...petCards[0]} />}
+      {!isPetsLoading && petCards.length === 0 && (
+        <Text style={styles.helperText}>등록된 반려동물이 없습니다.</Text>
+      )}
+
+      {petCards.length === 1 && (
+        <PetProfileCard
+          {...petCards[0]}
+          onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+        />
+      )}
 
       {petCards.length > 1 && (
         <>
@@ -184,7 +187,6 @@ const MyPageScreen = () => {
             ))}
           </ScrollView>
 
-          {/* Dots */}
           <View style={styles.dotContainer}>
             {petCards.map((_, i) => (
               <View
@@ -219,8 +221,6 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#ffffff",
   },
-
-  /* -------------------------- 유저 영역 -------------------------- */
   userBox: {
     marginTop: 16,
     flexDirection: "row",
@@ -228,20 +228,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
-
-  userCircle: {
+  userImage: {
     width: 80,
     height: 80,
     borderRadius: 40,
     backgroundColor: "#E0E0E0",
   },
-
-  userImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-
   userRightBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -249,20 +241,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
   },
-
   userName: {
     fontSize: 18,
     fontWeight: "600",
     color: "#040505",
   },
-
   rightIcon: {
     width: 16,
     height: 16,
     tintColor: "#7B7C7D",
   },
-
-  /* -------------------------- 공통 스타일 -------------------------- */
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
@@ -287,55 +275,49 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "600",
   },
-
   dotContainer: {
     flexDirection: "row",
     alignSelf: "center",
     marginTop: 32,
     gap: 8,
   },
-
   dot: {
     width: 8,
     height: 8,
     borderRadius: 8,
     backgroundColor: "#C4C4C4",
   },
-
   activeDot: {
     backgroundColor: "#2A7BE4",
   },
-
   divider: {
     width: "100%",
     height: 6,
     backgroundColor: "#F3F4F5",
     marginTop: 32,
   },
-
   btiSection: {
     marginTop: 10,
     paddingVertical: 20,
     paddingHorizontal: 20,
   },
-
   btiTitle: {
     fontSize: 16,
     fontWeight: "700",
+    color: "#000000",
     marginBottom: 4,
   },
-
   btiDesc: {
     fontSize: 13,
     color: "#555",
     lineHeight: 18,
   },
-
   helperText: {
-    fontSize: 12,
+    fontSize: 14,
     color: "#7B7C7D",
     paddingHorizontal: 20,
-    marginTop: 8,
+    marginTop: 16,
+    textAlign: "center",
   },
   errorText: {
     fontSize: 12,
