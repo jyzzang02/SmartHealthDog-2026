@@ -9,7 +9,7 @@ const urineDog = require("../assets/urineDog.png");
 const EXTRA_BOTTOM_PADDING = 40;
 
 const UrineDiagnosisScreen = () => {
-  const navigation = useNavigation();
+  const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
 
   return (

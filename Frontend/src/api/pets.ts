@@ -24,6 +24,7 @@ export interface PetListItem {
   weightKg?: number;
   ownerId?: number;
   profilePicture?: string;
+  healthInfo?: string[];
 }
 
 export interface UpdatePetRequestFull {

@@ -25,13 +25,15 @@ export default function AnimalDetailScreen() {
   const [isPetLoading, setIsPetLoading] = useState(false);
 
   useEffect(() => {
-    if (!animalData.shelterId || !animalData.id) return;
+    const shelterId = animalData.shelterId;
+    const petId = animalData.id;
+    if (shelterId === undefined || petId === undefined) return;
 
     const fetchPetDetail = async () => {
       setIsPetLoading(true);
       setPetError(null);
       try {
-        const detail = await getShelterPetDetail(animalData.shelterId, animalData.id);
+        const detail = await getShelterPetDetail(shelterId, petId);
         setPetDetail(detail);
       } catch (error) {
         const message =
