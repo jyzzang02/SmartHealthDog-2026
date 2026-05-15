@@ -24,7 +24,7 @@ export default function HomeScreen() {
       <View style={styles.divider} />
 
       {/* divider 밑 공간도 다시 20 좌우 */}
-    
+
 
       <BannerSlider />
 
@@ -43,14 +43,17 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 20,
-    marginTop: 32,
-    marginBottom: 16,
+    fontWeight: '700',
+    color: '#000',
+    marginTop: 16,
+    marginBottom: 12,
   },
 
   divider: {
     width: '100%',     
     height: 6,
     backgroundColor: '#F3F4F5',
-    marginTop: 32,    
+    marginTop: 20,
+    marginBottom: 20,
   },
 });
