@@ -234,7 +234,7 @@ export default function AdoptScreen() {
     [selectedDistrict, selectedRegion]
   );
 
-  const fetchShelters = useCallback(async () => {
+   const fetchShelters = useCallback(async () => {
     const locationText = buildLocationText();
     const params = locationText
       ? { location: locationText }
@@ -249,23 +249,47 @@ export default function AdoptScreen() {
     setShelterError(null);
     try {
       const response = await searchShelters(params);
-      const mapped = (response.items || []).map(mapToShelterInfo);
+      console.log('[AdoptScreen] fetchShelters response:', response);
+      let mapped = (response.items || []).map(mapToShelterInfo);
+
+      // 응답이 비어있으면 더미데이터 사용
+      if (mapped.length === 0 && USE_DUMMY_DATA_WHEN_EMPTY) {
+        console.log('[AdoptScreen] using dummy shelters');
+        mapped = DUMMY_SHELTERS;
+      }
+
+      console.log('[AdoptScreen] mapped shelters count:', mapped.length);
       setShelters(mapped);
     } catch (error) {
       const message = error instanceof Error ? error.message : '보호소 정보를 불러오지 못했습니다.';
-      setShelterError(message);
-      setShelters([]);
+      console.log('[AdoptScreen] fetchShelters error:', message);
+
+      // 에러 시에도 더미데이터 사용
+      if (USE_DUMMY_DATA_WHEN_EMPTY) {
+        console.log('[AdoptScreen] using dummy shelters due to error');
+        setShelters(DUMMY_SHELTERS);
+      } else {
+        setShelterError(message);
+        setShelters([]);
+      }
     } finally {
       setIsShelterLoading(false);
     }
   }, [buildLocationText, currentLocation.lat, currentLocation.lng, mapToShelterInfo]);
 
-  const fetchAdoptPets = useCallback(async () => {
+    const fetchAdoptPets = useCallback(async () => {
     if (activeTab !== '입양 홍보') return;
 
     const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
+    console.log('[AdoptScreen] fetchAdoptPets shelterSources:', shelterSources.length);
     if (shelterSources.length === 0) {
-      setAdoptPets([]);
+      // 셸터가 없으면 더미데이터도 안내
+      if (USE_DUMMY_DATA_WHEN_EMPTY) {
+        console.log('[AdoptScreen] no shelters, but using dummy animals');
+        setAdoptPets(DUMMY_ANIMALS);
+      } else {
+        setAdoptPets([]);
+      }
       return;
     }
 
@@ -278,19 +302,36 @@ export default function AdoptScreen() {
             limit: 20,
             offset: 0,
           });
+          console.log(`[AdoptScreen] shelter ${shelter.shelterId} pets count:`, response.items.length);
           const animals = response.items.map((pet) =>
             mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
           );
           return animals;
         })
       );
-      const merged = petResults.flat();
+      let merged = petResults.flat();
+
+      // 응답이 비어있으면 더미데이터 사용
+      if (merged.length === 0 && USE_DUMMY_DATA_WHEN_EMPTY) {
+        console.log('[AdoptScreen] using dummy animals');
+        merged = DUMMY_ANIMALS;
+      }
+
+      console.log('[AdoptScreen] total merged pets:', merged.length);
       setAdoptPets(merged);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
-      setAdoptError(message);
-      setAdoptPets([]);
+      console.log('[AdoptScreen] fetchAdoptPets error:', message);
+
+      // 에러 시에도 더미데이터 사용
+      if (USE_DUMMY_DATA_WHEN_EMPTY) {
+        console.log('[AdoptScreen] using dummy animals due to error');
+        setAdoptPets(DUMMY_ANIMALS);
+      } else {
+        setAdoptError(message);
+        setAdoptPets([]);
+      }
     } finally {
       setIsAdoptLoading(false);
     }

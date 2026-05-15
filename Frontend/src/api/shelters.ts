@@ -243,6 +243,10 @@ export const searchShelters = async (
 
   const data = await parseJsonSafe(response);
 
+  // 응답 데이터 디버깅
+  console.log('[shelters] response data:', JSON.stringify(data, null, 2));
+  console.log('[shelters] data.items type:', typeof data?.items, 'isArray:', Array.isArray(data?.items), 'length:', data?.items?.length);
+
   return {
     center: data?.center,
     radius_km: data?.radius_km,
@@ -307,6 +311,10 @@ export const getShelterPets = async (
     : Array.isArray(data?.pets)
       ? data.pets
       : [];
+
+  // 응답 데이터 디버깅
+  console.log('[shelters] getShelterPets response:', JSON.stringify(data, null, 2));
+  console.log('[shelters] getShelterPets items count:', items.length);
 
   return {
     items,
