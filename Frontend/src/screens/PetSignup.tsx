@@ -201,6 +201,15 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
     ).padStart(2, '0')}`;
   };
 
+  const buildPetRequest = (formattedBirthday: string) => ({
+    name: petName.trim(),
+    species: petSpecies as PetSpecies,
+    breed: breed.trim(),
+    gender: petGender as PetGender,
+    birthday: formattedBirthday,
+    neutered: false,
+  });
+
   const handleCreatePetOnly = async () => {
     if (isLoading) return;
 
@@ -220,14 +229,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
     try {
       await createPet({
-        request: {
-          name: petName.trim(),
-          species: petSpecies,
-          breed: breed.trim(),
-          gender: petGender,
-          birthday: formattedBirthday,
-          neutered: false,
-        },
+        request: buildPetRequest(formattedBirthday),
         profilePictureUri: petImage ?? null,
       });
 
@@ -272,14 +274,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
         if (formattedBirthday && petSpecies && petGender) {
           await createPet({
-            request: {
-              name: petName.trim(),
-              species: petSpecies,
-              breed: breed.trim(),
-              gender: petGender,
-              birthday: formattedBirthday,
-              neutered: false,
-            },
+            request: buildPetRequest(formattedBirthday),
             profilePictureUri: petImage ?? null,
           });
         }
@@ -694,3 +689,4 @@ const styles = StyleSheet.create({
 });
 
 export default PetSignup;
+

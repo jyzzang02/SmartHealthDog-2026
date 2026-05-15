@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import {
   getStoredAccessToken,
   getStoredRefreshToken,
@@ -22,6 +23,7 @@ export interface PetListItem {
   neutered?: boolean;
   weightKg?: number;
   ownerId?: number;
+  profilePicture?: string;
 }
 
 export interface UpdatePetRequestFull {
@@ -83,6 +85,21 @@ const buildAuthHeaders = (accessToken: string) => ({
   Authorization: `Bearer ${accessToken}`,
   Accept: 'application/json',
 });
+
+const getMimeTypeFromUri = (uri: string) => {
+  const lower = uri.toLowerCase();
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  return 'image/*';
+};
+
+const normalizeFileName = (uri: string) => {
+  const segments = uri.split('/');
+  const lastSegment = segments[segments.length - 1];
+  if (lastSegment && lastSegment.includes('.')) return lastSegment;
+  const extension = Platform.OS === 'ios' ? 'jpg' : 'jpeg';
+  return `pet.${extension}`;
+};
 
 const authorizedFetch = async (
   input: string,
@@ -160,8 +177,8 @@ const buildPetFormData = (
   if (payload.profilePictureUri) {
     formData.append('profilePicture', {
       uri: payload.profilePictureUri,
-      type: 'image/jpeg',
-      name: 'pet.jpg',
+      type: getMimeTypeFromUri(payload.profilePictureUri) || 'image/jpeg',
+      name: normalizeFileName(payload.profilePictureUri) || 'pet.jpg',
     } as any);
   }
 
@@ -290,6 +307,7 @@ export const updatePetPartial = async (
 
   const data = await parseJsonSafe(response);
 
+
   return data as PetListItem;
 };
 
@@ -312,5 +330,37 @@ export const deletePet = async (id: number): Promise<void> => {
       `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`;
 
     throw new Error(message);
+  }
+};
+
+/**
+ * 소변키트 진단 이미지 업로드
+ * @param petId 반려동물 ID
+ * @param image { uri, type, fileName, fileSize }
+ */
+export const requestUrineDiagnosis = async (
+  petId: number,
+  image: { uri: string; type?: string; fileName?: string; fileSize?: number }
+): Promise<void> => {
+  const formData = new FormData();
+  formData.append('image', {
+    uri: image.uri,
+    type: image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg',
+    name: image.fileName || normalizeFileName(image.uri) || 'urine.jpg',
+  } as any);
+
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/pets/${petId}/submissions/urine`,
+    {
+      method: 'POST',
+      body: formData,
+    }
+  );
+
+  if (response.status !== 201) {
+    const errorText = await readErrorBody(response);
+    throw new Error(
+      errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
+    );
   }
 };
