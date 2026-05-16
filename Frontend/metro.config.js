@@ -7,6 +7,9 @@ const { getDefaultConfig, mergeConfig } = require('@react-native/metro-config');
  * @type {import('@react-native/metro-config').MetroConfig}
  */
 const config = {
+  resolver: {
+    blockList: /.*[\\\/]\.codex_tmp([\\\/].*)?$/,
+  },
   watcher: {
     // Watchman 비활성화
     watchman: {
