@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   View,
   Text,
@@ -9,10 +9,9 @@ import {
   TouchableOpacity,
   Alert,
   Platform,
-  PermissionsAndroid,
   ActivityIndicator,
 } from "react-native";
-import { launchImageLibrary, ImagePickerResponse } from "react-native-image-picker";
+import { launchImageLibrary } from "react-native-image-picker";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
@@ -21,7 +20,6 @@ import {
   getPetDetail,
   PetListItem,
   updatePetFull,
-  updatePetPartial,
   deletePet,
   PetGender,
   PetSpecies,
@@ -124,7 +122,7 @@ const PetEditScreen = () => {
         weightKg: weight,
       };
 
-      const updated = await updatePetFull({
+      await updatePetFull({
         id: petId,
         request,
         profilePictureUri: petImageUri,
@@ -164,7 +162,7 @@ const PetEditScreen = () => {
 
   if (isLoading) {
     return (
-      <View style={[styles.container, { justifyContent: "center", alignItems: "center" }]}>
+      <View style={[styles.container, styles.loadingContainer]}>
         <ActivityIndicator size="large" color="#0081D5" />
       </View>
     );
@@ -281,7 +279,7 @@ const PetEditScreen = () => {
         <Text style={styles.deleteText}>{isDeleting ? "삭제 중..." : "삭제하기"}</Text>
       </TouchableOpacity>
 
-      <View style={{ height: 60 }} />
+      <View style={styles.bottomSpacer} />
     </ScrollView>
   );
 };
@@ -290,6 +288,7 @@ export default PetEditScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: "#fff", padding: 20 },
+  loadingContainer: { justifyContent: "center", alignItems: "center" },
   headerRow: { flexDirection: "row", alignItems: "center", marginTop: 16 },
   backBtn: { marginRight: 12, marginTop: 14 },
   backIcon: { width: 20, height: 20 },
@@ -311,4 +310,5 @@ const styles = StyleSheet.create({
   deleteText: { color: "#EF5F5F", fontSize: 16, fontWeight: "500" },
   saveText: { color: "#fff", fontSize: 16, fontWeight: "500" },
   errorText: { fontSize: 12, color: "#EF5F5F", marginTop: 8 },
+  bottomSpacer: { height: 60 },
 });

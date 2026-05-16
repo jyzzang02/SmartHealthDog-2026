@@ -51,6 +51,23 @@ const formatClock = (date: Date) => {
 
 const formatDurationMinutes = (seconds: number) => `${Math.round(seconds / 60)}분`;
 
+const toRad = (deg: number) => (deg * Math.PI) / 180;
+
+const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
+  const R = 6371; // km
+  const dLat = toRad(b.lat - a.lat);
+  const dLng = toRad(b.lng - a.lng);
+  const lat1 = toRad(a.lat);
+  const lat2 = toRad(b.lat);
+  const sinDLat = Math.sin(dLat / 2);
+  const sinDLng = Math.sin(dLng / 2);
+  const h =
+    sinDLat * sinDLat +
+    sinDLng * sinDLng * Math.cos(lat1) * Math.cos(lat2);
+  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  return R * c;
+};
+
 export default function WalkActiveScreen() {
   const navigation = useNavigation<NavigationProps>();
   const route = useRoute<RouteProps>();
@@ -71,6 +88,7 @@ export default function WalkActiveScreen() {
   const watchIdRef = useRef<number | null>(null);
   const lastCoordRef = useRef<{ lat: number; lng: number } | null>(null);
   const pauseTrackingRef = useRef(false);
+  const hasInitialCoordRef = useRef(false);
 
   const startDate = startDateRef.current;
 
@@ -119,6 +137,8 @@ export default function WalkActiveScreen() {
 
   // 위치 권한 요청 (포그라운드) + 위치 추적
   useEffect(() => {
+    let isActive = true;
+
     const requestPermission = async () => {
       if (Platform.OS === 'android') {
         const granted = await PermissionsAndroid.request(
@@ -139,13 +159,17 @@ export default function WalkActiveScreen() {
 
     const startWatch = async () => {
       const ok = await requestPermission();
-      if (!ok) return;
+      if (!ok || !isActive) return;
 
       watchIdRef.current = Geolocation.watchPosition(
         (pos: GeoPosition) => {
+          if (!isActive) return;
+
           const { latitude, longitude } = pos.coords;
           const current = { lat: latitude, lng: longitude };
-          if (!initialCoord) {
+
+          if (!hasInitialCoordRef.current) {
+            hasInitialCoordRef.current = true;
             setInitialCoord(current);
           }
           // 일시정지 시 거리 누적 중단, 현재 좌표만 기억
@@ -173,11 +197,13 @@ export default function WalkActiveScreen() {
     startWatch();
 
     return () => {
+      isActive = false;
       if (watchIdRef.current !== null) {
         Geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
       }
     };
-  }, [initialCoord, isPaused]);
+  }, []);
 
   const handlePauseToggle = () => {
     setIsPaused((prev) => {
@@ -240,23 +266,6 @@ export default function WalkActiveScreen() {
       </html>
     `;
   }, [initialCoord]);
-
-  const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-    const R = 6371; // km
-    const dLat = toRad(b.lat - a.lat);
-    const dLng = toRad(b.lng - a.lng);
-    const lat1 = toRad(a.lat);
-    const lat2 = toRad(b.lat);
-    const sinDLat = Math.sin(dLat / 2);
-    const sinDLng = Math.sin(dLng / 2);
-    const h =
-      sinDLat * sinDLat +
-      sinDLng * sinDLng * Math.cos(lat1) * Math.cos(lat2);
-    const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-    return R * c;
-  };
-
-  const toRad = (deg: number) => (deg * Math.PI) / 180;
 
   return (
     <View style={styles.container}>

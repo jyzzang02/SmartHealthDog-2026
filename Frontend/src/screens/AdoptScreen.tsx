@@ -11,7 +11,7 @@ import {
   PanResponder,
   Dimensions,
   Alert,
-  Clipboard,
+  Clipboard,    
   PermissionsAndroid,
   Platform,
   Easing,
@@ -22,7 +22,7 @@ import { RootStackParamList } from '../../App';
 import Header from '../components/Header';
 import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
-import WebView, { WebViewMessageEvent } from 'react-native-webview';
+import WebView from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
 import {
   searchShelters,
@@ -30,6 +30,7 @@ import {
   getShelterPets,
   PetDetail,
   ShelterListItem,
+  ShelterSearchParams,
 } from '../api/shelters';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -79,7 +80,7 @@ const REGIONS = [
 
 const DISTRICTS: { [key: string]: string[] } = {
   '서울특별시': ['양천구', '강남구', '서초구', '구로구', '마포구'],
-  '경기도': ['성남시', '용인시', '수원시'],
+  '경기도': ['성남시', '용인시', '수원시', '파주시', '고양시', '안성시'],
   '인천광역시': ['미추홀구', '연수구', '부평구'],
   '부산광역시': ['해운대구', '부산진구'],
   '대구광역시': ['수성구', '달서구'],
@@ -87,6 +88,38 @@ const DISTRICTS: { [key: string]: string[] } = {
 
 // 반려동물 타입 데이터
 const PET_TYPES = ['모두', '강아지', '고양이'];
+
+// 지역별 좌표 매핑 (지역명 location 검색이 작동하지 않을 경우 lat/lng 기반 검색 사용)
+const LOCATION_COORDS: { [key: string]: { [key: string]: { lat: number; lng: number } } } = {
+  '서울특별시': {
+    '양천구': { lat: 37.5173, lng: 126.8553 },
+    '강남구': { lat: 37.4979, lng: 127.0276 },
+    '서초구': { lat: 37.4830, lng: 127.0326 },
+    '구로구': { lat: 37.4954, lng: 126.8874 },
+    '마포구': { lat: 37.5630, lng: 126.9018 },
+  },
+  '경기도': {
+    '성남시': { lat: 37.4392, lng: 127.1068 },
+    '용인시': { lat: 37.2397, lng: 127.1705 },
+    '수원시': { lat: 37.2636, lng: 127.0086 },
+    '파주시': { lat: 37.7561, lng: 126.7676 },
+    '고양시': { lat: 37.6582, lng: 126.8224 },
+    '안성시': { lat: 37.0086, lng: 127.2705 },
+  },
+  '인천광역시': {
+    '미추홀구': { lat: 37.3881, lng: 126.6623 },
+    '연수구': { lat: 37.4038, lng: 126.7200 },
+    '부평구': { lat: 37.4891, lng: 126.7236 },
+  },
+  '부산광역시': {
+    '해운대구': { lat: 35.1595, lng: 129.1607 },
+    '부산진구': { lat: 35.1596, lng: 129.0544 },
+  },
+  '대구광역시': {
+    '수성구': { lat: 35.8544, lng: 128.6151 },
+    '달서구': { lat: 35.8242, lng: 128.5362 },
+  },
+};
 
 export default function AdoptScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -102,6 +135,7 @@ export default function AdoptScreen() {
   const [shelters, setShelters] = useState<ShelterInfo[]>([]);
   const [isShelterLoading, setIsShelterLoading] = useState(false);
   const [shelterError, setShelterError] = useState<string | null>(null);
+  const [showAllShelters, setShowAllShelters] = useState(false);
   const [adoptPets, setAdoptPets] = useState<AnimalInfo[]>([]);
   const [isAdoptLoading, setIsAdoptLoading] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
@@ -112,12 +146,17 @@ export default function AdoptScreen() {
   });
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapReady, setMapReady] = useState(false);
-  const [mapError, setMapError] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
   const pulseAnim = useRef(new Animated.Value(0.6)).current;
+  const isMountedRef = useRef(true);
   
-  const bottomSheetHeight = useRef(new Animated.Value(INITIAL_BOTTOM_SHEET_HEIGHT)).current;
   const bottomSheetY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // 화면이 포커스될 때마다 선택 내용 초기화
   useFocusEffect(
@@ -125,6 +164,8 @@ export default function AdoptScreen() {
       setSelectedRegion('');
       setSelectedDistrict('');
       setSelectedPetType('모두');
+      setShowAllShelters(false);
+      setShelters([]);
     }, [])
   );
 
@@ -145,6 +186,8 @@ export default function AdoptScreen() {
         if (granted === PermissionsAndroid.RESULTS.GRANTED) {
           Geolocation.getCurrentPosition(
             (position: { coords: { latitude: number; longitude: number } }) => {
+              if (!isMountedRef.current) return;
+
               setCurrentLocation({
                 lat: position.coords.latitude,
                 lng: position.coords.longitude,
@@ -168,11 +211,6 @@ export default function AdoptScreen() {
 
     requestLocationPermission();
   }, []);
-
-  const buildLocationText = useCallback(() => {
-    const parts = [selectedRegion, selectedDistrict].filter(Boolean);
-    return parts.join(' ').trim();
-  }, [selectedDistrict, selectedRegion]);
 
   const mapSpeciesToType = useCallback((species?: string): '강아지' | '고양이' => {
     if (!species) return '강아지';
@@ -228,68 +266,78 @@ export default function AdoptScreen() {
         region: region || selectedRegion || '',
         district: district || selectedDistrict || '',
         openStatus: isOpen ? '영업중' : isClosed ? '영업종료' : '정보없음',
-        openHours: item.open_now === undefined ? '운영시간 정보 없음' : '운영시간 정보 없음',
+        openHours: '운영시간 정보 없음',
       };
     },
     [selectedDistrict, selectedRegion]
   );
 
-   const fetchShelters = useCallback(async () => {
-    const locationText = buildLocationText();
-    const params = locationText
-      ? { location: locationText }
-      : {
-          lat: currentLocation.lat,
-          lng: currentLocation.lng,
-          radius_km: 10,
-          sort_by: 'distance' as const,
+  const fetchShelters = useCallback(async () => {
+    let params: ShelterSearchParams = {
+      lat: currentLocation.lat,
+      lng: currentLocation.lng,
+      radius_km: 100,
+      sort_by: 'distance' as const,
+    };
+
+    if (selectedDistrict && selectedRegion) {
+      const districtCoords = LOCATION_COORDS[selectedRegion]?.[selectedDistrict];
+      if (districtCoords) {
+        params = {
+          lat: districtCoords.lat,
+          lng: districtCoords.lng,
+          radius_km: 100,
+          sort_by: 'distance',
         };
+        console.log('[AdoptScreen] using district coords:', selectedDistrict, districtCoords);
+      }
+    } else if (selectedRegion) {
+      const firstDistrict = DISTRICTS[selectedRegion]?.[0];
+      const regionCoords = firstDistrict ? LOCATION_COORDS[selectedRegion]?.[firstDistrict] : null;
+      if (regionCoords) {
+        params = {
+          lat: regionCoords.lat,
+          lng: regionCoords.lng,
+          radius_km: 100,
+          sort_by: 'distance',
+        };
+        console.log('[AdoptScreen] using region coords:', selectedRegion, regionCoords);
+      }
+    }
 
     setIsShelterLoading(true);
     setShelterError(null);
     try {
       const response = await searchShelters(params);
-      console.log('[AdoptScreen] fetchShelters response:', response);
-      let mapped = (response.items || []).map(mapToShelterInfo);
+      if (!isMountedRef.current) return;
 
-      // 응답이 비어있으면 더미데이터 사용
-      if (mapped.length === 0 && USE_DUMMY_DATA_WHEN_EMPTY) {
-        console.log('[AdoptScreen] using dummy shelters');
-        mapped = DUMMY_SHELTERS;
-      }
+      console.log('[AdoptScreen] fetchShelters response:', response);
+      const mapped = (response.items || []).map(mapToShelterInfo);
 
       console.log('[AdoptScreen] mapped shelters count:', mapped.length);
       setShelters(mapped);
     } catch (error) {
+      if (!isMountedRef.current) return;
+
       const message = error instanceof Error ? error.message : '보호소 정보를 불러오지 못했습니다.';
       console.log('[AdoptScreen] fetchShelters error:', message);
 
-      // 에러 시에도 더미데이터 사용
-      if (USE_DUMMY_DATA_WHEN_EMPTY) {
-        console.log('[AdoptScreen] using dummy shelters due to error');
-        setShelters(DUMMY_SHELTERS);
-      } else {
-        setShelterError(message);
-        setShelters([]);
-      }
+      setShelterError(message);
+      setShelters([]);
     } finally {
-      setIsShelterLoading(false);
+      if (isMountedRef.current) {
+        setIsShelterLoading(false);
+      }
     }
-  }, [buildLocationText, currentLocation.lat, currentLocation.lng, mapToShelterInfo]);
+  }, [currentLocation.lat, currentLocation.lng, mapToShelterInfo, selectedDistrict, selectedRegion]);
 
-    const fetchAdoptPets = useCallback(async () => {
+  const fetchAdoptPets = useCallback(async () => {
     if (activeTab !== '입양 홍보') return;
 
     const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
     console.log('[AdoptScreen] fetchAdoptPets shelterSources:', shelterSources.length);
     if (shelterSources.length === 0) {
-      // 셸터가 없으면 더미데이터도 안내
-      if (USE_DUMMY_DATA_WHEN_EMPTY) {
-        console.log('[AdoptScreen] no shelters, but using dummy animals');
-        setAdoptPets(DUMMY_ANIMALS);
-      } else {
-        setAdoptPets([]);
-      }
+      setAdoptPets([]);
       return;
     }
 
@@ -309,37 +357,72 @@ export default function AdoptScreen() {
           return animals;
         })
       );
-      let merged = petResults.flat();
-
-      // 응답이 비어있으면 더미데이터 사용
-      if (merged.length === 0 && USE_DUMMY_DATA_WHEN_EMPTY) {
-        console.log('[AdoptScreen] using dummy animals');
-        merged = DUMMY_ANIMALS;
-      }
+      const merged = petResults.flat();
+      if (!isMountedRef.current) return;
 
       console.log('[AdoptScreen] total merged pets:', merged.length);
       setAdoptPets(merged);
     } catch (error) {
+      if (!isMountedRef.current) return;
+
       const message =
         error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
       console.log('[AdoptScreen] fetchAdoptPets error:', message);
 
-      // 에러 시에도 더미데이터 사용
-      if (USE_DUMMY_DATA_WHEN_EMPTY) {
-        console.log('[AdoptScreen] using dummy animals due to error');
-        setAdoptPets(DUMMY_ANIMALS);
-      } else {
-        setAdoptError(message);
-        setAdoptPets([]);
-      }
+      setAdoptError(message);
+      setAdoptPets([]);
     } finally {
-      setIsAdoptLoading(false);
+      if (isMountedRef.current) {
+        setIsAdoptLoading(false);
+      }
     }
   }, [activeTab, shelters, mapPetToAnimalInfo]);
 
   useEffect(() => {
+    if (showAllShelters) return;
+
+    if (!selectedRegion && !selectedDistrict) {
+      setShelters([]);
+      return;
+    }
     fetchShelters();
-  }, [fetchShelters]);
+  }, [fetchShelters, selectedRegion, selectedDistrict, showAllShelters]);
+
+  // 전체 보호소 버튼 동작: 서버에 전체 조회 API가 없을 수 있으니 큰 limit으로 시도
+  const fetchAllShelters = useCallback(async () => {
+    setIsShelterLoading(true);
+    setShelterError(null);
+    try {
+      // Many shelter APIs require either a location name or lat/lng.
+      // Calling with only limit may trigger server-side validation (INVALID_INPUT).
+      // Use current location with a large radius to attempt a global fetch.
+      const res = await searchShelters({
+        lat: currentLocation.lat,
+        lng: currentLocation.lng,
+        radius_km: 1000,
+        limit: 1000,
+        offset: 0,
+      });
+      if (!isMountedRef.current) return;
+
+      console.log('[AdoptScreen] fetchAllShelters response (lat/lng):', res);
+      const mapped = (res.items || []).map(mapToShelterInfo);
+
+      setShelters(mapped);
+      setShowAllShelters(true);
+    } catch (error) {
+      if (!isMountedRef.current) return;
+
+      const message = error instanceof Error ? error.message : '전체 보호소 정보를 불러오지 못했습니다.';
+      console.log('[AdoptScreen] fetchAllShelters error:', message);
+      setShelterError(message);
+      setShelters([]);
+    } finally {
+      if (isMountedRef.current) {
+        setIsShelterLoading(false);
+      }
+    }
+  }, [currentLocation.lat, currentLocation.lng, mapToShelterInfo]);
 
   useEffect(() => {
     fetchAdoptPets();
@@ -359,6 +442,8 @@ export default function AdoptScreen() {
     if (!shelter.shelterId) return;
     try {
       const detail = await getShelterDetail(shelter.shelterId);
+      if (!isMountedRef.current) return;
+
       setSelectedShelter((prev) => {
         if (!prev) return prev;
         return {
@@ -405,8 +490,6 @@ export default function AdoptScreen() {
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        const currentY = SCREEN_HEIGHT - INITIAL_BOTTOM_SHEET_HEIGHT + gestureState.dy;
-        
         // 아래로 드래그 - 닫기
         if (gestureState.dy > 100) {
           closeBottomSheet();
@@ -439,25 +522,8 @@ export default function AdoptScreen() {
     }
   };
 
-  const handleMapMessage = useCallback((event: WebViewMessageEvent) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      console.log('Map WebView message:', event.nativeEvent.data);
-      if (data.type === 'loaded') {
-        setMapLoaded(true);
-        setMapError(null);
-      } else if (data.type === 'error') {
-        setMapLoaded(false);
-        setMapError(data.message || 'map error');
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, []);
-
   useEffect(() => {
     setMapLoaded(false);
-    setMapError(null);
   }, [currentLocation.lat, currentLocation.lng]);
 
   const filteredShelters = useMemo(() => shelters, [shelters]);
@@ -465,6 +531,8 @@ export default function AdoptScreen() {
   const handleResetFilters = useCallback(() => {
     setSelectedRegion('');
     setSelectedDistrict('');
+    setShowAllShelters(false);
+    setShelters([]);
   }, []);
 
   const handleTabChange = useCallback((tab: TabType) => {
@@ -641,13 +709,19 @@ export default function AdoptScreen() {
             {/* 하위 메뉴 2: 지역구별 검색 */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>지역구별 검색</Text>
-              <View style={styles.searchButtonsContainer}>
+              <ScrollView
+                style={styles.searchButtonsScroll}
+                contentContainerStyle={styles.searchButtonsContent}
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                scrollEventThrottle={16}
+              >
                 <View style={styles.dropdownGroup}>
                   {/* 지역 버튼 */}
                   <DropdownButton
                     label={selectedRegion || '지역'}
                     onPress={() => setShowRegionModal(true)}
-                    style={{ marginRight: 12 }}
+                    style={styles.filterDropdownButton}
                   />
 
                   {/* 군/구 버튼 */}
@@ -659,9 +733,23 @@ export default function AdoptScreen() {
                       }
                     }}
                     disabled={!selectedRegion}
-                    style={{ marginRight: 12 }}
+                    style={styles.filterDropdownButton}
                   />
                 </View>
+
+                {/* 전체 보호소 버튼 */}
+                <TouchableOpacity
+                  style={[styles.allButton, showAllShelters ? styles.allButtonActive : null]}
+                  onPress={() => {
+                    setSelectedRegion('');
+                    setSelectedDistrict('');
+                    setShowRegionModal(false);
+                    setShowDistrictModal(false);
+                    fetchAllShelters();
+                  }}
+                >
+                  <Text style={[styles.allButtonText, showAllShelters ? styles.allButtonTextActive : null]}>전체 보호소</Text>
+                </TouchableOpacity>
 
                 {/* 재검색 버튼 */}
                 <TouchableOpacity
@@ -670,7 +758,7 @@ export default function AdoptScreen() {
                 >
                   <Text style={styles.refreshButtonText}>초기화</Text>
                 </TouchableOpacity>
-              </View>
+              </ScrollView>
 
               {/* 보호소 카드 리스트 */}
               <View style={styles.shelterListContainer}>
@@ -814,6 +902,7 @@ export default function AdoptScreen() {
                     setSelectedRegion(region);
                     setSelectedDistrict(''); // 지역 변경시 군/구 초기화
                     setShowRegionModal(false);
+                    setShowAllShelters(false);
                   }}
                 >
                   <Text style={styles.modalItemText}>{region}</Text>
@@ -846,6 +935,7 @@ export default function AdoptScreen() {
                     onPress={() => {
                       setSelectedDistrict(district);
                       setShowDistrictModal(false);
+                      setShowAllShelters(false);
                     }}
                   >
                     <Text style={styles.modalItemText}>{district}</Text>
@@ -1073,15 +1163,20 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: '#E9ECEF',
   },
-  searchButtonsContainer: {
+  searchButtonsScroll: {
+    width: '100%',
+  },
+  searchButtonsContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
+    paddingRight: 20,
   },
   dropdownGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  filterDropdownButton: {
+    marginRight: 12,
   },
   refreshButton: {
     flexDirection: 'row',
@@ -1096,6 +1191,27 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 14,
     fontWeight: '500',
+  },
+  allButton: {
+    flexDirection: 'row',
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderRadius: 30,
+    backgroundColor: '#F2F3F5',
+    marginRight: 8,
+  },
+  allButtonActive: {
+    backgroundColor: '#0081D5',
+  },
+  allButtonText: {
+    color: '#1F2024',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  allButtonTextActive: {
+    color: '#FFF',
   },
   adoptContent: {
     flex: 1,

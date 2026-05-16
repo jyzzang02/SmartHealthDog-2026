@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -34,17 +34,25 @@ const EyeCameraScreen = () => {
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
-  const [hasPromptedPet, setHasPromptedPet] = useState(false);
+  const hasPromptedPetRef = useRef(false);
+  const isMountedRef = useRef(true);
 
   const selectedPet = useMemo(
     () => pets.find((pet) => pet.id === selectedPetId) || null,
     [pets, selectedPetId]
   );
 
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const loadPets = useCallback(async () => {
     setIsLoading(true);
     try {
       const data = await getMyPets();
+      if (!isMountedRef.current) return;
       setPets(data);
       if (data.length === 1) {
         setSelectedPetId(data[0].id);
@@ -54,8 +62,8 @@ const EyeCameraScreen = () => {
         Alert.alert('안내', '진단할 반려동물을 먼저 등록해 주세요.');
         return;
       }
-      if (!hasPromptedPet) {
-        setHasPromptedPet(true);
+      if (!hasPromptedPetRef.current) {
+        hasPromptedPetRef.current = true;
         Alert.alert(
           '반려동물 선택',
           '진단할 반려동물을 선택해 주세요.',
@@ -70,12 +78,15 @@ const EyeCameraScreen = () => {
         );
       }
     } catch (error) {
+      if (!isMountedRef.current) return;
       const message = error instanceof Error ? error.message : '반려동물 정보를 불러오지 못했습니다.';
       Alert.alert('오류', message);
     } finally {
-      setIsLoading(false);
+      if (isMountedRef.current) {
+        setIsLoading(false);
+      }
     }
-  }, [hasPromptedPet]);
+  }, []);
 
   useEffect(() => {
     loadPets();
@@ -160,7 +171,7 @@ const EyeCameraScreen = () => {
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
 
-  const resolveMimeType = (image: EyeDiagnosisImage) => {
+  const resolveMimeType = useCallback((image: EyeDiagnosisImage) => {
     if (image.type) {
       return image.type;
     }
@@ -172,12 +183,12 @@ const EyeCameraScreen = () => {
       return 'image/jpeg';
     }
     return 'image/*';
-  };
+  }, []);
 
-  const isSupportedImage = (image: EyeDiagnosisImage) => {
+  const isSupportedImage = useCallback((image: EyeDiagnosisImage) => {
     const type = resolveMimeType(image);
     return type === 'image/png' || type === 'image/jpeg';
-  };
+  }, [resolveMimeType]);
 
   const handleUpload = useCallback(
     async (image: EyeDiagnosisImage) => {
@@ -212,6 +223,7 @@ const EyeCameraScreen = () => {
       setIsUploading(true);
       try {
         await requestEyeDiagnosis(selectedPetId, image);
+        if (!isMountedRef.current) return;
         Alert.alert(
           '접수 완료',
           '진단 요청이 접수되었습니다. AI 분석 완료 후 결과를 확인할 수 있습니다.',
@@ -223,16 +235,19 @@ const EyeCameraScreen = () => {
           ]
         );
       } catch (error) {
+        if (!isMountedRef.current) return;
         const message =
           error instanceof Error
             ? error.message
             : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
         Alert.alert('오류', message);
       } finally {
-        setIsUploading(false);
+        if (isMountedRef.current) {
+          setIsUploading(false);
+        }
       }
     },
-    [navigation, selectedPetId]
+    [isSupportedImage, navigation, resolveMimeType, selectedPetId]
   );
 
   const handleCameraPick = useCallback(async () => {

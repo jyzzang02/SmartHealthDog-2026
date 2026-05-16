@@ -5,8 +5,7 @@ import {
   StyleSheet, 
   ScrollView,
   TouchableOpacity,
-  Modal,
-  Image
+  Modal
 } from 'react-native';
 
 import { useNavigation } from '@react-navigation/native';
@@ -47,7 +46,7 @@ const HealthScreen: React.FC = () => {
 
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 80 }} >
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} >
 
       {/* HEADER */}
       <View style={styles.headerContainer}>
@@ -100,7 +99,7 @@ const HealthScreen: React.FC = () => {
 
         </View>
 
-        <View style={{ marginTop: 12 }}>
+        <View style={styles.hospitalList}>
           {[1, 2, 3, 4, 5].map((i) => (
             <HospitalCard
               key={i}
@@ -193,6 +192,8 @@ export default HealthScreen;
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F8F8' },
 
+  scrollContent: { paddingBottom: 80 },
+
   headerContainer: { paddingHorizontal: 20, paddingTop: 48, marginBottom: 12 },
 
   titleLine: { fontSize: 32, lineHeight: 40 },
@@ -224,4 +225,6 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 20, fontWeight: '700', color: '#000', marginBottom: 16 },
 
   filterRow: { flexDirection: 'row', gap: 12 },
+
+  hospitalList: { marginTop: 12 },
 });

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TextInput, Image, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';   
@@ -31,7 +31,7 @@ const SymptomSearchBox: React.FC = () => {
         onPress={() => navigation.navigate('SymptomResult')}
       >
         <Text style={styles.placeholder}>예) 강아지 식욕 저하</Text>
-        <Image source={searchIcon} style={{ width: 20, height: 20 }} />
+        <Image source={searchIcon} style={styles.searchIcon} />
       </TouchableOpacity>
     </View>
   );
@@ -86,4 +86,8 @@ const styles = StyleSheet.create({
     color: '#7B7C7D',
     fontFamily: 'Pretendard-Regular',
   },
+  searchIcon: {
+    width: 20,
+    height: 20,
+  }
 });

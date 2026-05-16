@@ -3,9 +3,6 @@ import {
   TouchableOpacity,
   Text,
   StyleSheet,
-  ViewStyle,
-  TextStyle,
-  Platform,
 } from 'react-native';
 
 interface CustomButtonProps {

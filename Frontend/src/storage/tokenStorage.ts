@@ -3,7 +3,6 @@ import { AuthTokens } from '../api/auth';
 // Lazy-load AsyncStorage to avoid crashing when the native module is missing.
 let AsyncStorage: any = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   AsyncStorage = require('@react-native-async-storage/async-storage').default;
 } catch (error) {
   console.warn(

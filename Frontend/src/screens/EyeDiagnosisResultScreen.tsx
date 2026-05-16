@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -58,14 +58,28 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
   const [result, setResult] = useState<EyeDiagnosisResult | null>(null);
   const [message, setMessage] = useState('');
+  const isMountedRef = useRef(true);
+  const requestIdRef = useRef(0);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+      requestIdRef.current += 1;
+    };
+  }, []);
 
   const status = submission?.status?.toUpperCase() ?? '';
 
   const loadResult = useCallback(async () => {
+    const requestId = requestIdRef.current + 1;
+    requestIdRef.current = requestId;
+    const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId;
+
     setIsLoading(true);
 
     try {
       const submissions = await getPetSubmissions(petId);
+      if (!canUpdate()) return;
 
       const eyeSubmissions = submissions.filter(
         (item) => item.type?.toUpperCase() === 'EYE'
@@ -123,6 +137,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (normalizedStatus === STATUS_COMPLETED) {
         const detail = await getEyeSubmissionResult(submissionId);
+        if (!canUpdate()) return;
         setResult(detail);
         setMessage('');
         return;
@@ -136,11 +151,14 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           ? error.message
           : '결과를 불러오지 못했습니다.';
 
+      if (!canUpdate()) return;
       setResult(null);
       setMessage(errorMessage);
       Alert.alert('오류', errorMessage);
     } finally {
-      setIsLoading(false);
+      if (canUpdate()) {
+        setIsLoading(false);
+      }
     }
   }, [petId]);
 

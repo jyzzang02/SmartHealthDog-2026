@@ -1,6 +1,5 @@
 import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity, ImageSourcePropType } from "react-native";
-import CustomButton from "./CustomButton";
 import BlueButton from "./BlueButton";
 
 
@@ -68,7 +67,7 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
                 text={item}
                 textColor="#FFFFFF"
                 fontSize={14}
-                style={{ marginRight: 8, marginBottom: 6 }}
+                style={styles.healthTag}
                 paddingVertical={4}
                 paddingHorizontal={12}
               />
@@ -220,5 +219,8 @@ const styles = StyleSheet.create({
     tintColor: "#0081D5",
     marginLeft: 8,
   },
-
+  healthTag: {
+    marginRight: 8,
+    marginBottom: 6,
+  }
 });

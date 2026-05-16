@@ -2,8 +2,6 @@ import React from "react";
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import CustomButton from "../components/CustomButton";
-import { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { RootStackParamList } from "../../App"; // 경로는 네 프로젝트 구조에 맞게 조절
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const eyeDog = require("../assets/eyeDog.png");
@@ -29,7 +27,7 @@ const EyeDiagnosisScreen = () => {
       >
         <Image
           source={require("../assets/icon_back.png")}
-          style={{ width: 20, height: 20 }}
+          style={styles.backIcon}
         />
       </TouchableOpacity>
 
@@ -102,4 +100,8 @@ const styles = StyleSheet.create({
     marginTop: 90,
     resizeMode: "contain",
   },
+  backIcon: {
+    width: 20,
+    height: 20,
+  }
 });
