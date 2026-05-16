@@ -11,7 +11,7 @@ import {
   PanResponder,
   Dimensions,
   Alert,
-  Clipboard,    
+  Clipboard,
   PermissionsAndroid,
   Platform,
   Easing,
