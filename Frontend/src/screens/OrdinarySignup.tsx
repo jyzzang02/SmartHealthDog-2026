@@ -9,6 +9,9 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import CustomButton from '../components/CustomButton';
@@ -140,98 +143,109 @@ const OrdinarySignup: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.navBar}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={{ flex: 1 }}
+      >
+        <View style={styles.navBar}>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => navigation.goBack()}
+          >
+            <Image
+              source={require('../assets/icon_navBack.png')}
+              style={styles.backIcon}
+              resizeMode="contain"
+            />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
         >
-          <Image
-            source={require('../assets/icon_navBack.png')}
-            style={styles.backIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-      </View>
+          <View style={styles.content}>
+            <View style={styles.titleContainer}>
+              <Text style={styles.title}>이메일과 비밀번호를{'\n'}입력하세요</Text>
+            </View>
 
-      <View style={styles.content}>
-        <View style={styles.titleContainer}>
-          <Text style={styles.title}>이메일과 비밀번호를{'\n'}입력하세요</Text>
-        </View>
-
-        <View style={styles.inputContainer}>
-          <View style={styles.emailInputWrapper}>
-            <TextInput
-              style={styles.emailInput}
-              placeholder="이메일 주소를 입력해 주세요"
-              placeholderTextColor="#7B7C7D"
-              value={email}
-              onChangeText={validateEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TouchableOpacity 
-              style={[
-                styles.verificationButton,
-                (email === '' || emailError !== '' || isLoading) ? styles.verificationButtonDisabled : null
-              ]}
-              onPress={handleVerification}
-              disabled={email === '' || emailError !== '' || isLoading}
-            >
-              {isLoading ? (
-                <ActivityIndicator size="small" color="#FFFFFF" />
-              ) : (
-                <Text style={[
-                  styles.verificationButtonText,
-                  (email === '' || emailError !== '' || isLoading) ? styles.verificationButtonTextDisabled : null
-                ]}>
-                  인증
-                </Text>
+            <View style={styles.inputContainer}>
+              <View style={styles.emailInputWrapper}>
+                <TextInput
+                  style={styles.emailInput}
+                  placeholder="이메일 주소를 입력해 주세요"
+                  placeholderTextColor="#7B7C7D"
+                  value={email}
+                  onChangeText={validateEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.verificationButton,
+                    (email === '' || emailError !== '' || isLoading) ? styles.verificationButtonDisabled : null
+                  ]}
+                  onPress={handleVerification}
+                  disabled={email === '' || emailError !== '' || isLoading}
+                >
+                  {isLoading ? (
+                    <ActivityIndicator size="small" color="#FFFFFF" />
+                  ) : (
+                    <Text style={[
+                      styles.verificationButtonText,
+                      (email === '' || emailError !== '' || isLoading) ? styles.verificationButtonTextDisabled : null
+                    ]}>
+                      인증
+                    </Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+              {emailError !== '' && (
+                <Text style={styles.errorText}>{emailError}</Text>
               )}
-            </TouchableOpacity>
-          </View>
-          {emailError !== '' && (
-            <Text style={styles.errorText}>{emailError}</Text>
-          )}
-        </View>
+            </View>
 
-        {showVerificationField && (
-          <View style={styles.inputContainer}>
-            <TextInput
-              style={styles.input}
-              placeholder="인증 코드를 입력해 주세요"
-              placeholderTextColor="#7B7C7D"
-              value={verificationCode}
-              onChangeText={setVerificationCode}
-              keyboardType="number-pad"
-              autoCapitalize="none"
-              autoCorrect={false}
+            {showVerificationField && (
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="인증 코드를 입력해 주세요"
+                  placeholderTextColor="#7B7C7D"
+                  value={verificationCode}
+                  onChangeText={setVerificationCode}
+                  keyboardType="number-pad"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
+            )}
+
+            <View style={styles.inputContainer}>
+              <TextInput
+                style={styles.input}
+                placeholder="비밀번호를 입력해 주세요"
+                placeholderTextColor="#7B7C7D"
+                value={password}
+                onChangeText={validatePassword}
+                secureTextEntry
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {passwordError !== '' && (
+                <Text style={styles.errorText}>{passwordError}</Text>
+              )}
+            </View>
+
+            <CustomButton
+              text="다음"
+              onPress={handleNext}
+              disabled={!isNextEnabled}
             />
           </View>
-        )}
-
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호를 입력해 주세요"
-            placeholderTextColor="#7B7C7D"
-            value={password}
-            onChangeText={validatePassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {passwordError !== '' && (
-            <Text style={styles.errorText}>{passwordError}</Text>
-          )}
-        </View>
-
-        <CustomButton
-          text="다음"
-          onPress={handleNext}
-          disabled={!isNextEnabled}
-        />
-      </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -242,7 +256,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   navBar: {
-    marginTop: 50,
+    marginTop: Platform.OS === 'android' ? 20 : 0,
     width: '100%',
     height: 56,
     flexDirection: 'row',
@@ -256,9 +270,13 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
   },
+  scrollContent: {
+    flexGrow: 1,
+  },
   content: {
     alignItems: 'center',
-    marginTop: 170,
+    paddingTop: 80, // 고정 marginTop 대신 paddingTop 사용
+    paddingBottom: 40,
   },
   titleContainer: {
     width: 310,
@@ -336,4 +354,3 @@ const styles = StyleSheet.create({
 });
 
 export default OrdinarySignup;
-

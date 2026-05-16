@@ -208,12 +208,18 @@ const ProfileEditScreen = () => {
     Alert.alert('주소 변경', '주소 검색 기능은 준비 중입니다.');
   }, []);
 
+  // 비회원(로그인 에러) 상태일 때 저장 버튼 숨김 여부 결정
+  const isGuestMode = !!profileError;
+
   return (
     <View style={styles.wrapper}>
       <ScrollView
         style={styles.container}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: insets.bottom + (isGuestMode ? 40 : 120) } // 여유로운 하단 여백
+        ]}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={false}
       >
         {/* 🔙 헤더 */}
         <View style={styles.headerRow}>
@@ -295,23 +301,29 @@ const ProfileEditScreen = () => {
         </View>
 
         {/* 로그아웃 */}
-        <TouchableOpacity onPress={handleLogout} disabled={isLoggingOut}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={handleLogout}
+          disabled={isLoggingOut}
+        >
           <Text style={styles.logoutText}>
             {isLoggingOut ? "로그아웃 중..." : "로그아웃"}
           </Text>
         </TouchableOpacity>
       </ScrollView>
 
-      {/* 저장 버튼 */}
-      <TouchableOpacity
-        style={[styles.saveBtn, { bottom: insets.bottom + 16 }]}
-        onPress={handleSaveProfile}
-        disabled={isSavingProfile}
-      >
-        <Text style={styles.saveBtnText}>
-          {isSavingProfile ? "저장 중..." : "저장하기"}
-        </Text>
-      </TouchableOpacity>
+      {/* 저장 버튼: 비회원(에러) 상태가 아닐 때만 표시 */}
+      {!isGuestMode && (
+        <TouchableOpacity
+          style={[styles.saveBtn, { bottom: insets.bottom + 16 }]}
+          onPress={handleSaveProfile}
+          disabled={isSavingProfile}
+        >
+          <Text style={styles.saveBtnText}>
+            {isSavingProfile ? "저장 중..." : "저장하기"}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -327,6 +339,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+  },
+
+  scrollContent: {
     padding: 20,
   },
 
@@ -458,11 +473,16 @@ const styles = StyleSheet.create({
     color: "#1F2024",
   },
 
+  logoutBtn: {
+    marginTop: 40,
+    paddingVertical: 10,
+    alignSelf: 'flex-start',
+  },
+
   logoutText: {
     fontSize: 15,
     color: "#5A5A5A",
     textDecorationLine: "underline",
-    marginTop: 28,
   },
 
   saveBtn: {
@@ -482,9 +502,10 @@ const styles = StyleSheet.create({
   },
 
   errorText: {
-    fontSize: 12,
+    fontSize: 13,
     color: "#EF5F5F",
-    marginTop: 8,
+    marginTop: 12,
+    fontWeight: "600",
   },
 
   loadingText: {
