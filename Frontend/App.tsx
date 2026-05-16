@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sample React Native App
  * https://github.com/facebook/react-native
  *
@@ -36,6 +36,7 @@ import ProfileEditScreen from './src/screens/ProfileEditScreen';
 import WalkLogDetailScreen from './src/screens/WalkLogDetailScreen';
 import WalkWeeklyReportScreen from './src/screens/WalkWeeklyReportScreen';
 import WalkActiveScreen from './src/screens/WalkActiveScreen';
+import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
 
 export type RootStackParamList = {
   Login: undefined;
@@ -89,7 +90,7 @@ export type RootStackParamList = {
       shelterId?: number;
       shelterName?: string;
       shelterPhone?: string;
-      type: '강아지' | '고양이';
+      type: string;
       tags: string[];
       breed: string;
       age: string;
@@ -101,19 +102,30 @@ export type RootStackParamList = {
   WalkLogDetail: {
     record: {
       id: number;
+      petId: number;
       petName: string;
       petImage: any;
       date: string;
       distance: string;
       duration: string;
+      distanceKm?: number;
+      durationSec?: number;
       startTime?: string;
       endTime?: string;
+      pathCoordinates?: Array<[number, number]>;
     };
   };
 
   WalkWeeklyReport: undefined;
 
+  WalkPetHistory: {
+    petId: number;
+    petName: string;
+    petImage: any;
+  };
+
   WalkActive: {
+    petId: number;
     petName: string;
     petImage: any;
   };
@@ -189,6 +201,7 @@ function AppNavigator() {
           name="WalkWeeklyReport"
           component={WalkWeeklyReportScreen}
         />
+        <Stack.Screen name="WalkPetHistory" component={WalkPetHistoryScreen} />
         <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
       </Stack.Navigator>
     </NavigationContainer>
@@ -204,3 +217,4 @@ function App() {
 }
 
 export default App;
+
