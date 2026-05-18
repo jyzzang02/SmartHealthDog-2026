@@ -25,8 +25,7 @@ class ApiError extends Error {
     this.codes = codes;
   }
 }
-
-const API_BASE_URL = 'https://dev.puppydoc.ovh';
+const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
 const parseErrorResponse = async (response: Response) => {
   const fallbackMessage = `요청을 처리하지 못했습니다. (HTTP ${response.status})`;
@@ -221,3 +220,4 @@ export const isApiError = (error: unknown): error is ApiError => {
   return error instanceof ApiError;
 };
 
+console.log('[login] URL =', `${API_BASE_URL}/api/auth/login`);
