@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+env/
+.venv/
+.pyvenv/
+venv/
+
+input/
+
+.env
+*.pkl
+mlruns/
+.ipynb_checkpoints/

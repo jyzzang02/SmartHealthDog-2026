@@ -1,85 +1,106 @@
-# Front-End
+## SmartHealthDog Frontend
+
 건강하개 똑똑하개 (SmartHealthDog) 프론트엔드 레포입니다.
 
-````markdown
-# 🚀 로컬 실행 방법
+## 1) 사전 요구사항
 
-## 📌 환경
-- Node.js >= 20
+- Node.js `>= 20`
+- Android Studio 설치
+- Android SDK 기본 경로 사용
+  - `C:\Users\<사용자명>\AppData\Local\Android\Sdk`
 
-## 📦 의존성 설치
+## 2) 최초 1회 설정
+
+### 2-1. 의존성 설치
+
 ```bash
 npm ci
-````
-
-## 🤖 Android 실행
-
-> ❗ 에뮬레이터 또는 기기 먼저 실행 필수
-
-```bash
-adb devices
 ```
 
-👉 `device` 상태 확인 후
+### 2-2. ADB 명령 인식 설정 (Windows)
+
+사용자 환경변수 `Path`에 아래를 추가합니다.
+
+```text
+C:\Users\<사용자명>\AppData\Local\Android\Sdk\platform-tools
+```
+
+필요하면 `ANDROID_SDK_ROOT`도 같은 SDK 루트로 설정합니다.
+
+```text
+C:\Users\<사용자명>\AppData\Local\Android\Sdk
+```
+
+### 2-3. `local.properties` 확인
+
+`Frontend/android/local.properties` 파일에 SDK 경로를 명시합니다.
+
+```properties
+sdk.dir=C:\\Users\\<사용자명>\\AppData\\Local\\Android\\Sdk
+```
+
+> 이 파일은 로컬 전용이며 `.gitignore`에 포함되어 있으므로 커밋하지 않습니다.
+
+## 3) 실행 순서 (표준)
+
+1. Android Studio에서 에뮬레이터(또는 실제 기기) 먼저 실행
+2. 명령은 `Frontend` 폴더에서 실행 (`SmartHealthDog-2026` 루트에서는 먼저 `cd Frontend`)
 
 ```bash
+adb version
+adb devices
 npm run android
 ```
 
-## 🍎 iOS 실행 (Mac)
+루트(`SmartHealthDog-2026`)에서 바로 실행하려면:
 
 ```bash
-cd ios
-pod install
-cd ..
-npm run ios
+npm --prefix Frontend run android
 ```
 
-## ⚙️ Metro 서버만 실행
+`adb devices`에서 상태가 `device`이면 정상입니다.
+
+## 4) Metro만 실행할 때
 
 ```bash
 npm run start
 ```
 
-## ⚙️ 환경변수 설정 (Windows)
+캐시 초기화가 필요하면:
 
-`adb` 명령어가 안 될 경우 아래 경로를 PATH에 추가하세요.
-
-```
-C:\Users\사용자명\AppData\Local\Android\Sdk\platform-tools
+```bash
+npm run start-clean
 ```
 
-### 설정 방법
+## 5) 문제 해결
 
-1. Windows 검색 → "환경 변수" 검색
-2. **시스템 환경 변수 편집** 클릭
-3. **환경 변수(N)...** 클릭
-4. 사용자 변수 → `Path` → 편집
-5. 새로 만들기 → 위 경로 추가
+### 케이스 A: `adb` 명령을 못 찾음
 
-### 확인
+1. `Path`에 `platform-tools`가 있는지 확인
+2. Android Studio/터미널 완전 종료 후 재실행
+3. 재확인
 
 ```bash
 adb version
 ```
 
-👉 정상 출력되면 완료
+### 케이스 B: `SDK location not found`
 
-## ❗ 문제 해결
+1. `Frontend/android/local.properties` 생성/확인
+2. 아래 값이 맞는지 확인
+
+```properties
+sdk.dir=C:\\Users\\<사용자명>\\AppData\\Local\\Android\\Sdk
+```
+
+3. 필요 시 `ANDROID_SDK_ROOT`도 동일 경로로 설정
+
+### 케이스 C: 기기 인식 이상/설치 실패
 
 ```bash
 adb kill-server
 adb start-server
-npm start -- --reset-cache
+adb devices
+npm run android
 ```
 
-## 💡 참고
-
-* `node_modules`는 `npm ci`로 생성
-* Android Studio에서 에뮬레이터 먼저 실행
-* `adb devices`에서 반드시 `device` 상태 확인
-
-
-## Contributors 소개 (2025)
-* **정서** - *서비스 개발, 와이어프레임 구성* - [sumhillj](https://github.com/sumhillj)
-* **이서영** - *서비스 개발, 디자인* - [seoyoung0822](https://github.com/seoyoung0822)
