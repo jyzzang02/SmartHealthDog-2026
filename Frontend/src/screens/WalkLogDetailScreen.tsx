@@ -136,6 +136,9 @@ export default function WalkLogDetailScreen() {
     };
   }, [record, walkDetail]);
 
+  const hasEnded = Boolean(walkDetail?.end_time ?? walkDetail?.endTime ?? record.endTime);
+  const canEndWalk = Boolean(record.petId) && Boolean(record.id) && !hasEnded;
+
   const pathPoints = useMemo(() => {
     const detailPath = walkDetail?.path_coordinates ?? walkDetail?.pathCoordinates;
     return normalizePathCoordinates(detailPath?.length ? detailPath : record.pathCoordinates);
@@ -200,6 +203,10 @@ export default function WalkLogDetailScreen() {
   }, [pathPoints]);
 
   const handleDelete = () => {
+    if (!record.id) {
+      Alert.alert('오류', '산책 기록 ID가 없어 삭제할 수 없습니다.');
+      return;
+    }
     Alert.alert('삭제 확인', '이 산책 기록을 삭제하시겠습니까?', [
       { text: '취소', style: 'cancel' },
       {
@@ -224,6 +231,10 @@ export default function WalkLogDetailScreen() {
 
   const handleEndWalk = async () => {
     if (isEnding) return;
+    if (!canEndWalk) {
+      Alert.alert('안내', '이미 종료된 산책이거나 종료할 수 없습니다.');
+      return;
+    }
     setIsEnding(true);
     try {
       const endedWalk = await endPetWalk(record.petId, record.id);
@@ -317,9 +328,11 @@ export default function WalkLogDetailScreen() {
             </Text>
             <Text style={styles.durationClock}>{resolved.durationClock}</Text>
           </View>
-          <TouchableOpacity style={styles.endWalkButton} onPress={handleEndWalk} disabled={isEnding}>
-            <Text style={styles.endWalkButtonText}>{isEnding ? '종료 처리 중' : '산책 종료 처리'}</Text>
-          </TouchableOpacity>
+          {canEndWalk && (
+            <TouchableOpacity style={styles.endWalkButton} onPress={handleEndWalk} disabled={isEnding}>
+              <Text style={styles.endWalkButtonText}>{isEnding ? '종료 처리 중' : '산책 종료 처리'}</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
     </View>

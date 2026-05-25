@@ -45,7 +45,7 @@ const normalizeWalk = (item: WalkRecordDto, routeParams: RouteProps['params']) =
   const durationSec = item.duration ?? 0;
 
   return {
-    id: item.walk_id ?? item.walkId ?? 0,
+    id: (item as any).id ?? item.walk_id ?? item.walkId,
     petId: routeParams.petId,
     petName: routeParams.petName,
     petImage: routeParams.petImage,

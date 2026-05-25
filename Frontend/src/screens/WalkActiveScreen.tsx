@@ -98,6 +98,7 @@ export default function WalkActiveScreen() {
   const endTimeText = useMemo(() => formatClock(endDate), [endDate]);
   const endPeriod = useMemo(() => formatPeriod(endTimeText), [endTimeText]);
   const dateLabel = useMemo(() => formatDateLabel(startDate), [startDate]);
+  const displayPetName = petName?.trim() || '이름 없음';
 
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current);
@@ -406,7 +407,13 @@ export default function WalkActiveScreen() {
         <View style={styles.modalOverlay}>
           <View style={styles.resultModal}>
             <Text style={styles.resultTitle}>오늘의 산책 기록</Text>
-            <View style={styles.resultSection}><Text style={styles.resultSubtitle}>함께한 반려동물</Text><View style={styles.resultAvatarWrapper}><Image source={petImage} style={styles.resultAvatar} /></View></View>
+            <View style={styles.resultSection}>
+              <Text style={styles.resultSubtitle}>함께한 반려동물</Text>
+              <View style={styles.resultAvatarWrapper}>
+                <Image source={petImage} style={styles.resultAvatar} />
+                <Text style={styles.resultPetName}>{displayPetName}</Text>
+              </View>
+            </View>
             <View style={[styles.resultSection, styles.resultSectionSpacing]}>
               <Text style={styles.resultSubtitle}>산책 기록</Text>
               <View style={styles.resultTexts}>
@@ -434,5 +441,5 @@ const styles = StyleSheet.create({
   confirmModal: { width: 290, paddingVertical: 30, paddingHorizontal: 30, borderRadius: 16, backgroundColor: '#FFF', alignItems: 'center' }, confirmText: { color: '#000', fontSize: 20, fontWeight: '700', textAlign: 'center' }, confirmButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 24 },
   confirmNoButton: { width: 110, height: 55, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#E1E1E1' }, confirmNoText: { fontSize: 18, fontWeight: '600', color: '#7B7C7D' },
   resultModal: { width: 290, paddingVertical: 30, paddingHorizontal: 30, borderRadius: 16, backgroundColor: '#FFF' }, resultTitle: { color: '#000', fontSize: 20, fontWeight: '700', textAlign: 'center' }, resultSection: { marginTop: 16 }, resultSectionSpacing: { marginTop: 8 }, resultSubtitle: { color: '#3C4144', fontSize: 16, fontWeight: '700' }, resultAvatarWrapper: { marginTop: 8, alignItems: 'flex-start' }, resultAvatar: { width: 60, height: 60, borderRadius: 30 }, resultTexts: { marginTop: 4 }, resultInfoText: { color: '#7B7C7D', fontSize: 14, fontWeight: '600', marginTop: 4 }, resultButtonContainer: { marginTop: 24, alignItems: 'center' },
+  resultPetName: { marginTop: 8, color: '#3C4144', fontSize: 14, fontWeight: '600' },
 });
-

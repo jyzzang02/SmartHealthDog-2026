@@ -16,6 +16,7 @@ import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getMyThisWeekWalks, getPetWalks, WalkRecordDto } from '../api/walks';
+import { resolveImageUri } from '../utils/imageUri';
 
 const WALK_SHEET_HEIGHT = 420;
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -31,23 +32,39 @@ const PET_COLORS = ['#6665DD', '#74BC8C', '#0081D5', '#FFC94D'];
 const PET_BADGE_BG_COLORS = ['#EFF1FF', '#E8F6EE', '#EEF7FD', '#FFF6D8'];
 
 const getFallbackPetImage = (species?: string) => {
-  const normalized = (species || '').toLowerCase();
-  if (normalized.includes('cat')) return require('../assets/img_adoptCat.png');
-  return require('../assets/img_adoptDog.png');
+  return null as any;
 };
 
-const normalizeWalk = (item: WalkRecordDto, petList: PetListItem[]) => {
-  const itemPetId = item.pet_id ?? item.petId ?? item.pet?.id ?? 0;
-  const pet = petList.find((p) => p.id === itemPetId);
-  const walkId = item.walk_id ?? item.walkId ?? 0;
+const normalizeWalk = (
+  item: WalkRecordDto,
+  petList: PetListItem[],
+  petOverride?: PetListItem
+) => {
+  const itemPetIdRaw = item.pet_id ?? item.petId ?? item.pet?.id ?? petOverride?.id ?? 0;
+  const itemPetId = Number(itemPetIdRaw) || 0;
+  const pet = petOverride ?? petList.find((p) => p.id === itemPetId);
+  const walkId = (item as any).id ?? item.walk_id ?? item.walkId;
   const startTimeIso = item.start_time ?? item.startTime ?? '';
   const endTimeIso = item.end_time ?? item.endTime ?? '';
   const durationSec = item.duration ?? 0;
   const distanceKm = item.distance ?? 0;
   const pathCoordinates = item.path_coordinates ?? item.pathCoordinates ?? [];
-  const petName = pet?.name ?? item.pet?.name ?? '반려동물';
+  const petName =
+    pet?.name ??
+    item.pet?.name ??
+    (item as any).petName ??
+    (item as any).pet_name ??
+    '';
   const petSpecies = pet?.species ?? item.pet?.species;
-  const petImageUri = pet?.profilePicture ?? item.pet?.profilePicture;
+  const rawPetImage =
+    pet?.profilePicture ??
+    item.pet?.profilePicture ??
+    (item.pet as any)?.imageUrl ??
+    (item.pet as any)?.photoUrl ??
+    (item as any).petImage ??
+    (item as any).pet_image ??
+    (item as any).petImageUrl;
+  const petImageUri = resolveImageUri(rawPetImage);
 
   const startDate = startTimeIso ? new Date(startTimeIso) : null;
   const endDate = endTimeIso ? new Date(endTimeIso) : null;
@@ -78,7 +95,7 @@ const normalizeWalk = (item: WalkRecordDto, petList: PetListItem[]) => {
     id: walkId,
     petId: itemPetId,
     petName,
-    petImage: petImageUri ? { uri: petImageUri } : getFallbackPetImage(petSpecies),
+    petImage: petImageUri ? { uri: petImageUri } : null,
     date: dateLabel,
     distance: `${distanceKm.toFixed(1)}km`,
     duration: `${h}:${m}:${s}`,
@@ -117,12 +134,14 @@ export default function WalkScreen() {
     setIsLoading(true);
     try {
       const petList = await getMyPets();
-      setPets(petList);
 
       let merged: ReturnType<typeof normalizeWalk>[] = [];
+      let walkSource: WalkRecordDto[] = [];
 
       try {
         const thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
+        console.log('[walk] this-week walks count', thisWeekWalks.length);
+        walkSource = thisWeekWalks;
         merged = thisWeekWalks.map((item) => normalizeWalk(item, petList));
       } catch (error) {
         console.log('[walk] this-week endpoint failed; falling back to per-pet walk list');
@@ -134,13 +153,49 @@ export default function WalkScreen() {
               limit: 30,
               offset: 0,
             });
-            return (response.items || []).map((item) => normalizeWalk(item, petList));
+            return { pet, items: response.items || [] };
           })
         );
 
-        merged = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
+        walkSource = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value.items : [])) as WalkRecordDto[];
+        merged = settled.flatMap((result) =>
+          result.status === 'fulfilled'
+            ? result.value.items.map((item) => normalizeWalk(item, petList, result.value.pet))
+            : []
+        );
       }
 
+      if (walkSource.length > 0) {
+        console.log('[walk] sample walk item', {
+          pet_id: (walkSource[0] as any).pet_id,
+          petId: (walkSource[0] as any).petId,
+          pet: (walkSource[0] as any).pet,
+        });
+      }
+
+      const enrichedPets = petList.map((pet) => {
+        if (pet.profilePicture && pet.name) return pet;
+        const hit = walkSource.find((walk) => {
+          const rawId = (walk as any).pet_id ?? (walk as any).petId ?? (walk as any).pet?.id;
+          return Number(rawId) === pet.id;
+        });
+        if (!hit) return pet;
+        const fallbackName = (hit as any).pet?.name ?? (hit as any).petName ?? (hit as any).pet_name;
+        const fallbackImage =
+          (hit as any).pet?.profilePicture ||
+          (hit as any).pet?.imageUrl ||
+          (hit as any).pet?.photoUrl ||
+          (hit as any).petImage ||
+          (hit as any).pet_image ||
+          (hit as any).petImageUrl;
+        return {
+          ...pet,
+          name: pet.name || fallbackName,
+          profilePicture: pet.profilePicture || fallbackImage,
+        };
+      });
+
+      setPets(enrichedPets);
       merged.sort((a, b) => (b.id || 0) - (a.id || 0));
       setWalkRecords(merged);
     } catch (error) {
@@ -160,11 +215,14 @@ export default function WalkScreen() {
 
   const petOptions = useMemo(
     () =>
-      pets.map((pet) => ({
-        id: pet.id,
-        name: pet.name,
-        image: pet.profilePicture ? { uri: pet.profilePicture } : getFallbackPetImage(pet.species),
-      })),
+      pets.map((pet) => {
+        const resolved = resolveImageUri(pet.profilePicture);
+        return {
+          id: pet.id,
+          name: pet.name || '이름 없음',
+          image: resolved ? { uri: resolved } : null,
+        };
+      }),
     [pets]
   );
 
@@ -348,11 +406,15 @@ export default function WalkScreen() {
                 onPress={() => navigation.navigate('WalkLogDetail', { record })}
               >
                 <View style={styles.recordCard}>
-                  <Image source={record.petImage} style={styles.petImage} />
+                  {record.petImage ? (
+                    <Image source={record.petImage} style={styles.petImage} />
+                  ) : (
+                    <View style={styles.petImagePlaceholder} />
+                  )}
                   <View style={styles.recordInfo}>
                     <View style={[styles.petNameBadge, { backgroundColor: getPetBadgeColor(record.petId) }]}>
                       <Text style={[styles.petNameText, { color: getPetColor(record.petId) }]}>
-                        {record.petName}
+                        {record.petName || '이름 없음'}
                       </Text>
                     </View>
 
@@ -402,7 +464,11 @@ export default function WalkScreen() {
                       onPress={() => setSelectedPetId(pet.id)}
                       style={[styles.petCard, index !== petOptions.length - 1 && styles.petCardGap, isSelected && styles.petCardSelected]}
                     >
-                      <Image source={pet.image} style={styles.petCardImage} />
+                      {pet.image ? (
+                        <Image source={pet.image} style={styles.petCardImage} />
+                      ) : (
+                        <View style={styles.petCardImagePlaceholder} />
+                      )}
                       <Text style={styles.petCardName}>{pet.name}</Text>
                     </TouchableOpacity>
                   );
@@ -483,6 +549,12 @@ const styles = StyleSheet.create({
     marginBottom: 12,
   },
   petImage: { width: 90, height: 90, borderRadius: 45 },
+  petImagePlaceholder: {
+    width: 90,
+    height: 90,
+    borderRadius: 45,
+    backgroundColor: '#E0E0E0',
+  },
   recordInfo: { flex: 1 },
   petNameBadge: {
     paddingVertical: 2,
@@ -516,6 +588,13 @@ const styles = StyleSheet.create({
   petCardGap: { marginRight: 16 },
   petCardSelected: { borderColor: '#0081D5', backgroundColor: '#EEF7FD' },
   petCardImage: { width: 80, height: 80, borderRadius: 40, marginBottom: 12, resizeMode: 'cover' },
+  petCardImagePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    marginBottom: 12,
+    backgroundColor: '#E0E0E0',
+  },
   petCardName: { color: '#000', fontSize: 16, fontWeight: '600' },
   selectionButtonContainer: { alignItems: 'center' },
   selectionButtonRow: { width: 350, flexDirection: 'row', justifyContent: 'space-between' },

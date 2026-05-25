@@ -5,15 +5,14 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getMyThisWeekWalks, getPetWalks, getWeeklyWalkComparison } from '../api/walks';
+import { resolveImageUri } from '../utils/imageUri';
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
 const getFallbackPetImage = (species?: string) => {
-  const normalized = (species || '').toLowerCase();
-  if (normalized.includes('cat')) return require('../assets/img_adoptCat.png');
-  return require('../assets/img_adoptDog.png');
+  return null as any;
 };
 
 const formatTotalDuration = (totalSeconds: number) => {
@@ -60,6 +59,7 @@ export default function WalkWeeklyReportScreen() {
       let thisWeekWalks = [];
       try {
         thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
+        console.log('[walk] weekly report walks count', thisWeekWalks.length);
       } catch (error) {
         console.log('[walk] this-week endpoint failed in report; falling back to per-pet walk list');
         const settled = await Promise.allSettled(
@@ -76,8 +76,41 @@ export default function WalkWeeklyReportScreen() {
         thisWeekWalks = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
       }
 
+      if (thisWeekWalks.length > 0) {
+        console.log('[walk] weekly report sample walk item', {
+          pet_id: (thisWeekWalks[0] as any).pet_id,
+          petId: (thisWeekWalks[0] as any).petId,
+          pet: (thisWeekWalks[0] as any).pet,
+        });
+      }
+
+      const enrichedPets = petList.map((pet) => {
+        if (pet.profilePicture && pet.name) return pet;
+        const hit = thisWeekWalks.find((walk) => {
+          const rawId = (walk as any).pet_id ?? (walk as any).petId ?? (walk as any).pet?.id;
+          return Number(rawId) === pet.id;
+        });
+        if (!hit) return pet;
+        const fallbackName = (hit as any).pet?.name ?? (hit as any).petName ?? (hit as any).pet_name;
+        const fallbackImage =
+          (hit as any).pet?.profilePicture ||
+          (hit as any).pet?.imageUrl ||
+          (hit as any).pet?.photoUrl ||
+          (hit as any).petImage ||
+          (hit as any).pet_image ||
+          (hit as any).petImageUrl;
+        return {
+          ...pet,
+          name: pet.name || fallbackName,
+          profilePicture: pet.profilePicture || fallbackImage,
+        };
+      });
+
+      setPets(enrichedPets);
+
       thisWeekWalks.forEach((walk) => {
-        const petId = walk.pet_id ?? walk.petId ?? walk.pet?.id;
+        const rawId = walk.pet_id ?? walk.petId ?? walk.pet?.id;
+        const petId = Number(rawId) || 0;
         if (!petId) return;
         if (!dailyMap[petId]) {
           dailyMap[petId] = Object.fromEntries(DAYS.map((d) => [d, 0]));
@@ -141,29 +174,40 @@ export default function WalkWeeklyReportScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.petSelector}
         >
-          {pets.map((pet, index) => (
-            <TouchableOpacity
-              key={pet.id}
-              onPress={() => setSelectedPetId(pet.id)}
-              activeOpacity={0.8}
-              style={[styles.petCircleWrapper, index !== pets.length - 1 && styles.petCircleGap]}
-            >
-              <Image
-                source={pet.profilePicture ? { uri: pet.profilePicture } : getFallbackPetImage(pet.species)}
-                style={[styles.petCircle, selectedPetId === pet.id && styles.petCircleActive]}
-              />
-            </TouchableOpacity>
-          ))}
+          {pets.map((pet, index) => {
+            const resolved = resolveImageUri(pet.profilePicture);
+            return (
+              <TouchableOpacity
+                key={pet.id}
+                onPress={() => setSelectedPetId(pet.id)}
+                activeOpacity={0.8}
+                style={[styles.petCircleWrapper, index !== pets.length - 1 && styles.petCircleGap]}
+              >
+                {resolved ? (
+                  <Image
+                    source={{ uri: resolved }}
+                    style={[styles.petCircle, selectedPetId === pet.id && styles.petCircleActive]}
+                  />
+                ) : (
+                  <View style={[styles.petCirclePlaceholder, selectedPetId === pet.id && styles.petCircleActive]} />
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
 
         <View style={[styles.card, styles.cardRecord]}>
-          <Text style={styles.cardTitle}>{selectedPet?.name || '-'} 산책 기록</Text>
+          <Text style={styles.cardTitle}>{selectedPet?.name || '이름 없음'} 산책 기록</Text>
           <View style={styles.cardPetImageWrapper}>
             {selectedPet && (
-              <Image
-                source={selectedPet.profilePicture ? { uri: selectedPet.profilePicture } : getFallbackPetImage(selectedPet.species)}
-                style={styles.cardPetImage}
-              />
+              (() => {
+                const resolved = resolveImageUri(selectedPet.profilePicture);
+                return resolved ? (
+                  <Image source={{ uri: resolved }} style={styles.cardPetImage} />
+                ) : (
+                  <View style={styles.cardPetImagePlaceholder} />
+                );
+              })()
             )}
           </View>
 
@@ -213,12 +257,26 @@ const styles = StyleSheet.create({
   petCircleGap: { marginRight: 12 },
   petCircle: { width: 60, height: 60, borderRadius: 30, borderWidth: 4, borderColor: '#FFF' },
   petCircleActive: { borderColor: '#0081D5' },
+  petCirclePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderWidth: 4,
+    borderColor: '#FFF',
+    backgroundColor: '#E0E0E0',
+  },
   card: { width: 350, alignSelf: 'center', paddingVertical: 24, paddingHorizontal: 20, borderRadius: 16, backgroundColor: '#FFFFFF', marginTop: 24 },
   cardRecord: { marginTop: 24 },
   cardGraph: { minHeight: 268, marginTop: 32 },
   cardTitle: { color: '#000', fontSize: 18, fontWeight: '600' },
   cardPetImageWrapper: { marginTop: 20, alignItems: 'center', justifyContent: 'center' },
   cardPetImage: { width: 80, height: 80, borderRadius: 40 },
+  cardPetImagePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#E0E0E0',
+  },
   statsRow: { flexDirection: 'row', alignItems: 'center', marginTop: 16, justifyContent: 'space-between' },
   statItem: { flex: 1, alignItems: 'center' },
   statLabel: { color: '#7B7C7D', fontSize: 14, fontWeight: '500', textAlign: 'center' },
@@ -229,4 +287,3 @@ const styles = StyleSheet.create({
   barSegmentSingle: { width: 20, borderRadius: 4 },
   dayText: { color: '#040505', fontSize: 14, fontWeight: '600', marginTop: 8 },
 });
-
