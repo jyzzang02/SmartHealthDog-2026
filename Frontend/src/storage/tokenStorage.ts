@@ -4,9 +4,11 @@ import { AuthTokens } from '../api/auth';
 let AsyncStorage: any = null;
 try {
   AsyncStorage = require('@react-native-async-storage/async-storage').default;
+  console.log('[auth] AsyncStorage successfully loaded');
 } catch (error) {
-  console.warn(
-    '[auth] AsyncStorage native module not found at import time; will use in-memory fallback until the app is rebuilt with the native module.',
+  console.error(
+    '[auth] AsyncStorage native module not found at import time; app WILL NOT persist tokens across restarts. ' +
+    'Please ensure @react-native-async-storage/async-storage is installed and linked properly.',
     error
   );
 }
@@ -26,8 +28,10 @@ const isAsyncStorageAvailable = () =>
   typeof AsyncStorage.multiGet === 'function';
 
 const warnIfFallback = () => {
-  console.warn(
-    '[auth] AsyncStorage native module not available; using in-memory fallback. Rebuild the app after installing @react-native-async-storage/async-storage.'
+  console.error(
+    '[auth] ❌ AsyncStorage native module not available; using in-memory fallback. ' +
+    'Tokens will NOT persist after app restart. ' +
+    'Action required: Install and link @react-native-async-storage/async-storage, then rebuild the app.'
   );
 };
 
@@ -53,16 +57,17 @@ export const storeAuthTokens = async (tokens: AuthTokens) => {
         [REFRESH_TOKEN_KEY, tokens.refreshToken],
         [EXPIRATION_KEY, tokens.expiration],
       ]);
-      console.log('[auth] store tokens success (async storage)');
+      console.log('[auth] ✅ store tokens success (AsyncStorage)');
       return;
     } catch (error) {
-      console.warn('[auth] AsyncStorage store failed, falling back to memory', error);
+      console.error('[auth] ❌ AsyncStorage store failed, falling back to memory', error);
     }
   } else {
     warnIfFallback();
   }
+  // Fallback to memory (not persistent)
   memoryStore = tokens;
-  console.log('[auth] store tokens success (memory fallback)');
+  console.warn('[auth] ⚠️  store tokens (memory fallback - will NOT persist on restart)');
 };
 
 export const getStoredRefreshToken = async () => {
@@ -70,10 +75,10 @@ export const getStoredRefreshToken = async () => {
   if (storage) {
     try {
       const token = await storage.getItem(REFRESH_TOKEN_KEY);
-      console.log('[auth] get refreshToken (async storage)', describeToken(token));
+      console.log('[auth] ✅ get refreshToken (AsyncStorage)', describeToken(token));
       return token;
     } catch (error) {
-      console.warn('[auth] AsyncStorage get refreshToken failed, using memory', error);
+      console.error('[auth] ❌ AsyncStorage get refreshToken failed, using memory', error);
     }
   } else {
     warnIfFallback();
@@ -88,10 +93,10 @@ export const getStoredAccessToken = async () => {
   if (storage) {
     try {
       const token = await storage.getItem(ACCESS_TOKEN_KEY);
-      console.log('[auth] get accessToken (async storage)', describeToken(token));
+      console.log('[auth] ✅ get accessToken (AsyncStorage)', describeToken(token));
       return token;
     } catch (error) {
-      console.warn('[auth] AsyncStorage get accessToken failed, using memory', error);
+      console.error('[auth] ❌ AsyncStorage get accessToken failed, using memory', error);
     }
   } else {
     warnIfFallback();
@@ -102,7 +107,7 @@ export const getStoredAccessToken = async () => {
 };
 
 export const clearAuthTokens = async () => {
-  console.log('[auth] clear tokens');
+  console.log('[auth] 🚪 clear tokens');
   const storage = getStorage();
   if (storage) {
     try {
@@ -111,15 +116,15 @@ export const clearAuthTokens = async () => {
         REFRESH_TOKEN_KEY,
         EXPIRATION_KEY,
       ]);
-      console.log('[auth] clear tokens success (async storage)');
+      console.log('[auth] ✅ clear tokens success (AsyncStorage)');
       return;
     } catch (error) {
-      console.warn('[auth] AsyncStorage clear failed, clearing memory only', error);
+      console.error('[auth] ❌ AsyncStorage clear failed, clearing memory only', error);
     }
   } else {
     warnIfFallback();
   }
   memoryStore = {};
-  console.log('[auth] clear tokens success (memory fallback)');
+  console.log('[auth] ✅ clear tokens (memory fallback)');
 };
 

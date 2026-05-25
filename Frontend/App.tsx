@@ -11,6 +11,7 @@ import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import AuthLoadingScreen from './src/screens/AuthLoadingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import OrdinaryLogin from './src/screens/OrdinaryLogin';
 import OrdinarySignup from './src/screens/OrdinarySignup';
@@ -39,6 +40,7 @@ import WalkActiveScreen from './src/screens/WalkActiveScreen';
 import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
 
 export type RootStackParamList = {
+  AuthLoading: undefined;
   Login: undefined;
   Home: undefined;
 
@@ -153,7 +155,7 @@ function AppNavigator() {
       />
 
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName="AuthLoading"
         screenOptions={{
           headerShown: false,
           contentStyle: {
@@ -161,6 +163,9 @@ function AppNavigator() {
           },
         }}
       >
+        {/* Auth Loading (Splash screen with token check) */}
+        <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />
+
         {/* Auth */}
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
