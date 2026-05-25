@@ -78,6 +78,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
   const [breed, setBreed] = useState('');
   const [petSpecies, setPetSpecies] = useState<PetSpecies | null>(null);
   const [petGender, setPetGender] = useState<PetGender | null>(null);
+  const [weightKg, setWeightKg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const requestAndroidPermissions = async (): Promise<boolean> => {
@@ -208,6 +209,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
     gender: petGender as PetGender,
     birthday: formattedBirthday,
     neutered: false,
+    weightKg: weightKg.trim() ? Number(weightKg) : undefined,
   });
 
   const handleCreatePetOnly = async () => {
@@ -500,6 +502,17 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
               onChangeText={setBreed}
               autoCapitalize="none"
               autoCorrect={false}
+            />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="체중(kg)을 입력해 주세요"
+              placeholderTextColor="#7B7C7D"
+              value={weightKg}
+              onChangeText={setWeightKg}
+              keyboardType="decimal-pad"
             />
           </View>
 

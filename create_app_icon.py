@@ -43,7 +43,7 @@ def create_app_icon(output_path, size=1024):
         # 큰 텍스트 (Happy Dog)
         font_size = int(size * 0.15)
         # 이모지와 텍스트 사용
-        text = "🐕"
+        text = ""
         draw.text(
             (size // 2 - 60, size // 2 - 100),
             text,
@@ -98,9 +98,9 @@ def create_app_icon(output_path, size=1024):
 
 def create_all_icons():
     """모든 필요한 해상도의 아이콘 생성"""
-
+    
     base_path = r"C:\Users\jyzzang02\Documents\GitHub\SmartHealthDog-2026\Frontend"
-
+    
     # Android 아이콘 해상도
     android_sizes = {
         'mipmap-mdpi': 48,
@@ -109,7 +109,7 @@ def create_all_icons():
         'mipmap-xxhdpi': 144,
         'mipmap-xxxhdpi': 192,
     }
-
+    
     print("\n=== Android 아이콘 생성 중... ===")
     for folder, size in android_sizes.items():
         output_path = os.path.join(
@@ -117,7 +117,7 @@ def create_all_icons():
             f"android/app/src/main/res/{folder}/ic_launcher.png"
         )
         create_app_icon(output_path, size)
-
+    
     # iOS 아이콘 해상도 (@2x, @3x 포함)
     ios_sizes = {
         'icon-20x20@2x.png': 40,
@@ -130,7 +130,7 @@ def create_all_icons():
         'icon-60x60@3x.png': 180,
         'icon-1024x1024@1x.png': 1024,
     }
-
+    
     print("\n=== iOS 아이콘 생성 중... ===")
     ios_path = os.path.join(
         base_path,
@@ -139,10 +139,9 @@ def create_all_icons():
     for filename, size in ios_sizes.items():
         output_path = os.path.join(ios_path, filename)
         create_app_icon(output_path, size)
-
+    
     print("\n✅ 모든 아이콘 생성 완료!")
 
 if __name__ == "__main__":
     create_all_icons()
-
 

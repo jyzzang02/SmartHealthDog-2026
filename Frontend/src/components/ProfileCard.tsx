@@ -1,11 +1,37 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Image, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Image, ActivityIndicator, ImageSourcePropType } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyProfile, UserProfile } from '../api/users';
+import { resolveImageUri } from '../utils/imageUri';
+import { getStoredAccessToken } from '../storage/tokenStorage';
 
-const ProfileCard = () => {
+type ProfileCardProps = {
+  profile?: UserProfile | null;
+  loading?: boolean;
+};
+
+const ProfileCard: React.FC<ProfileCardProps> = ({
+  profile: profileProp,
+  loading: loadingProp,
+}) => {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const shouldFetch = profileProp === undefined;
+
+  useEffect(() => {
+    let mounted = true;
+    getStoredAccessToken()
+      .then((token) => {
+        if (mounted) setAccessToken(token);
+      })
+      .catch(() => {
+        if (mounted) setAccessToken(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const loadProfile = useCallback(async () => {
     setLoading(true);
@@ -20,16 +46,30 @@ const ProfileCard = () => {
   }, []);
 
   useEffect(() => {
-    loadProfile();
-  }, [loadProfile]);
+    if (shouldFetch) {
+      loadProfile();
+    }
+  }, [loadProfile, shouldFetch]);
 
   useFocusEffect(
     useCallback(() => {
-      loadProfile();
-    }, [loadProfile])
+      if (shouldFetch) {
+        loadProfile();
+      }
+    }, [loadProfile, shouldFetch])
   );
 
-  if (loading) {
+  const effectiveProfile = shouldFetch ? profile : profileProp ?? null;
+  const effectiveLoading = shouldFetch ? loading : Boolean(loadingProp);
+  const resolvedProfileImage = resolveImageUri(effectiveProfile?.profilePicture);
+  const profileImageSource: ImageSourcePropType | undefined = resolvedProfileImage
+    ? {
+        uri: resolvedProfileImage,
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      }
+    : undefined;
+
+  if (effectiveLoading) {
     return (
       <View style={[styles.container, { justifyContent: 'center' }]}>
         <ActivityIndicator size="small" color="#0081D5" />
@@ -40,19 +80,22 @@ const ProfileCard = () => {
   return (
     <View style={styles.container}>
       {/* 프로필 이미지 */}
-      <Image
-        source={
-          profile?.profilePicture
-            ? { uri: profile.profilePicture }
-            : require('../assets/img_emblem.png')
-        }
-        style={styles.profileImage}
-      />
+      {profileImageSource ? (
+        <Image
+          source={profileImageSource}
+          style={styles.profileImage}
+          onError={(event) => {
+            console.log('[profile] image load failed', event.nativeEvent?.error);
+          }}
+        />
+      ) : (
+        <View style={styles.profileImagePlaceholder} />
+      )}
 
       {/* 텍스트 영역 */}
       <View style={styles.textContainer}>
         <Text style={styles.subtitle}>다시 만나서 반가워요</Text>
-        <Text style={styles.username}>{profile?.nickname || '사용자'} 님</Text>
+        <Text style={styles.username}>{effectiveProfile?.nickname || '사용자'} 님</Text>
       </View>
     </View>
   );
@@ -71,6 +114,12 @@ const styles = StyleSheet.create({
     height: 80,
     borderRadius: 40,
     backgroundColor: '#E8E8E8',
+  },
+  profileImagePlaceholder: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#E0E0E0',
   },
 
   textContainer: {

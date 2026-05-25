@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
+  ImageSourcePropType,
 } from "react-native";
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
 import { getMyPets, PetListItem } from "../api/pets";
 import { getMyProfile, UserProfile } from "../api/users";
+import { resolveImageUri } from "../utils/imageUri";
+import { getStoredAccessToken } from "../storage/tokenStorage";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
@@ -31,6 +34,21 @@ const MyPageScreen = () => {
   const [petList, setPetList] = useState<PetListItem[]>([]);
   const [isPetsLoading, setIsPetsLoading] = useState(false);
   const [petsError, setPetsError] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    getStoredAccessToken()
+      .then((token) => {
+        if (mounted) setAccessToken(token);
+      })
+      .catch(() => {
+        if (mounted) setAccessToken(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   const mapSpeciesLabel = (species?: string) => {
     if (!species) return "";
@@ -89,18 +107,26 @@ const MyPageScreen = () => {
         type: pet.breed || mapSpeciesLabel(pet.species) || "",
         gender: mapGenderLabel(pet.sex) || "",
         birth: formatBirthDate(pet.birthDate) || "",
-        imageUrl: pet.profilePicture || null,
+        imageUrl: resolveImageUri(pet.profilePicture) || null,
         healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
         condition: "정보없음",
       })),
     [petList]
   );
 
+  const resolvedUserImage = resolveImageUri(user?.profilePicture);
+  const userImageSource: ImageSourcePropType | undefined = resolvedUserImage
+    ? {
+        uri: resolvedUserImage,
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+      }
+    : undefined;
+
   return (
     <ScrollView
       style={styles.container}
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 100 }}
+      contentContainerStyle={{ paddingBottom: 60 }}
     >
       <Header />
 
@@ -111,12 +137,11 @@ const MyPageScreen = () => {
         activeOpacity={0.8}
       >
         <Image
-          source={
-            user?.profilePicture
-              ? { uri: user.profilePicture }
-              : require("../assets/img_emblem.png")
-          }
+          source={userImageSource}
           style={styles.userImage}
+          onError={(event) => {
+            console.log('[profile] mypage image load failed', event.nativeEvent?.error);
+          }}
         />
 
         <View style={styles.userRightBox}>
@@ -157,6 +182,12 @@ const MyPageScreen = () => {
         <PetProfileCard
           {...petCards[0]}
           onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+          onPressHistory={() =>
+            navigation.navigate("DiagnosisHistory", {
+              petId: petCards[0].id,
+              petName: petCards[0].name,
+            })
+          }
         />
       )}
 
@@ -182,6 +213,12 @@ const MyPageScreen = () => {
                 <PetProfileCard
                   {...pet}
                   onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
+                  onPressHistory={() =>
+                    navigation.navigate("DiagnosisHistory", {
+                      petId: pet.id,
+                      petName: pet.name,
+                    })
+                  }
                 />
               </View>
             ))}
@@ -203,12 +240,44 @@ const MyPageScreen = () => {
       <TouchableOpacity
         style={styles.btiSection}
         onPress={() => navigation.navigate("GameScreen")}
+        activeOpacity={0.8}
       >
-        <Text style={styles.btiTitle}>멍냥 성향테스트</Text>
-        <Text style={styles.btiDesc}>
-          나와 가장 성격이 비슷한 강아지, 고양이는?!{"\n"}
-          간단한 테스트로 알아보아요
-        </Text>
+        <View style={styles.btiCard}>
+          <View style={styles.btiIconRow}>
+            <Image
+              source={require('../assets/img_adoptDog.png')}
+              style={styles.btiPetIcon}
+              resizeMode="contain"
+            />
+            <View style={styles.btiDots}>
+              <View style={styles.btiDot} />
+              <View style={styles.btiDot} />
+              <View style={styles.btiDot} />
+            </View>
+            <Image
+              source={require('../assets/img_adoptCat.png')}
+              style={styles.btiPetIcon}
+              resizeMode="contain"
+            />
+          </View>
+
+          <View style={styles.btiContent}>
+            <Text style={styles.btiTitle}>멍냥 성향테스트</Text>
+            <Text style={styles.btiDesc}>
+              나와 가장 성격이 비슷한 강아지, 고양이는?!{"\n"}
+              간단한 테스트로 알아보아요
+            </Text>
+          </View>
+
+          <View style={styles.btiFooter}>
+            <Text style={styles.btiCta}>테스트하기</Text>
+            <Image
+              source={require('../assets/icon_right.png')}
+              style={styles.btiArrow}
+              tintColor="#0081D5"
+            />
+          </View>
+        </View>
       </TouchableOpacity>
     </ScrollView>
   );
@@ -296,22 +365,78 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F5",
     marginTop: 32,
   },
-  btiSection: {
-    marginTop: 10,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-  },
-  btiTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: "#000000",
-    marginBottom: 4,
-  },
-  btiDesc: {
-    fontSize: 13,
-    color: "#555",
-    lineHeight: 18,
-  },
+   btiSection: {
+     marginTop: 10,
+     paddingVertical: 0,
+     paddingHorizontal: 20,
+     marginBottom: 2,
+   },
+   btiCard: {
+     backgroundColor: '#F0F7FF',
+     borderRadius: 16,
+     borderWidth: 1.5,
+     borderColor: '#E0F0FF',
+     paddingVertical: 24,
+     paddingHorizontal: 20,
+     shadowColor: '#0081D5',
+     shadowOffset: { width: 0, height: 2 },
+     shadowOpacity: 0.08,
+     shadowRadius: 8,
+     elevation: 3,
+   },
+   btiIconRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+     paddingVertical: 12,
+     marginBottom: 16,
+   },
+    btiPetIcon: {
+      width: 80,
+      height: 80,
+    },
+   btiDots: {
+     flexDirection: 'row',
+     gap: 6,
+   },
+   btiDot: {
+     width: 6,
+     height: 6,
+     borderRadius: 3,
+     backgroundColor: '#0081D5',
+   },
+   btiContent: {
+     marginBottom: 16,
+   },
+   btiTitle: {
+     fontSize: 18,
+     fontWeight: '700',
+     color: '#000000',
+     marginBottom: 8,
+   },
+   btiDesc: {
+     fontSize: 14,
+     color: '#555',
+     lineHeight: 20,
+     fontWeight: '500',
+   },
+   btiFooter: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+     paddingTop: 12,
+     borderTopWidth: 1,
+     borderTopColor: '#D0E8FF',
+   },
+   btiCta: {
+     fontSize: 14,
+     fontWeight: '600',
+     color: '#0081D5',
+   },
+   btiArrow: {
+     width: 16,
+     height: 16,
+   },
   helperText: {
     fontSize: 14,
     color: "#7B7C7D",
