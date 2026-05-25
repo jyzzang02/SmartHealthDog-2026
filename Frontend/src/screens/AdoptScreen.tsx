@@ -22,7 +22,7 @@ import { RootStackParamList } from '../../App';
 import Header from '../components/Header';
 import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
-import WebView, { WebViewMessageEvent } from 'react-native-webview';
+import WebView from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
 import {
   searchShelters,
@@ -145,11 +145,10 @@ export default function AdoptScreen() {
   });
   const [mapLoaded, setMapLoaded] = useState(false);
   const [mapReady, setMapReady] = useState(false);
-  const [mapError, setMapError] = useState<string | null>(null);
+  const [, setMapError] = useState<string | null>(null);
   const webViewRef = useRef<WebView>(null);
   const pulseAnim = useRef(new Animated.Value(0.6)).current;
   
-  const bottomSheetHeight = useRef(new Animated.Value(INITIAL_BOTTOM_SHEET_HEIGHT)).current;
   const bottomSheetY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   // 화면이 포커스될 때마다 선택 내용 초기화
@@ -462,8 +461,6 @@ export default function AdoptScreen() {
         }
       },
       onPanResponderRelease: (_, gestureState) => {
-        const currentY = SCREEN_HEIGHT - INITIAL_BOTTOM_SHEET_HEIGHT + gestureState.dy;
-        
         // 아래로 드래그 - 닫기
         if (gestureState.dy > 100) {
           closeBottomSheet();
@@ -495,22 +492,6 @@ export default function AdoptScreen() {
       Alert.alert('보호소 전화번호가 복사되었습니다.');
     }
   };
-
-  const handleMapMessage = useCallback((event: WebViewMessageEvent) => {
-    try {
-      const data = JSON.parse(event.nativeEvent.data);
-      console.log('Map WebView message:', event.nativeEvent.data);
-      if (data.type === 'loaded') {
-        setMapLoaded(true);
-        setMapError(null);
-      } else if (data.type === 'error') {
-        setMapLoaded(false);
-        setMapError(data.message || 'map error');
-      }
-    } catch {
-      // ignore parse errors
-    }
-  }, []);
 
   useEffect(() => {
     setMapLoaded(false);
@@ -707,7 +688,7 @@ export default function AdoptScreen() {
                 showsHorizontalScrollIndicator={false}
                 scrollEventThrottle={16}
               >
-                <View style={styles.dropdownGroup} pointerEvents="box-only">
+                <View style={styles.dropdownGroup}>
                   {/* 지역 버튼 */}
                   <DropdownButton
                     label={selectedRegion || '지역'}

@@ -59,7 +59,9 @@ const logProfileImageFields = (data?: Partial<UserProfile> | null) => {
 };
 
 const normalizeProfile = (data?: Partial<UserProfile> | null): UserProfile => {
-  if (!data) return data as UserProfile;
+  if (!data) {
+    throw new Error('사용자 프로필 데이터를 확인할 수 없습니다.');
+  }
   return {
     ...(data as UserProfile),
     profilePicture: extractProfileImage(data),

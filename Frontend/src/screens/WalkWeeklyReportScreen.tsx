@@ -11,10 +11,6 @@ const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
-const getFallbackPetImage = (species?: string) => {
-  return null as any;
-};
-
 const formatTotalDuration = (totalSeconds: number) => {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);

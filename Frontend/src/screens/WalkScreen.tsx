@@ -31,10 +31,6 @@ const WALK_TIPS = [
 const PET_COLORS = ['#6665DD', '#74BC8C', '#0081D5', '#FFC94D'];
 const PET_BADGE_BG_COLORS = ['#EFF1FF', '#E8F6EE', '#EEF7FD', '#FFF6D8'];
 
-const getFallbackPetImage = (species?: string) => {
-  return null as any;
-};
-
 const normalizeWalk = (
   item: WalkRecordDto,
   petList: PetListItem[],
@@ -55,7 +51,6 @@ const normalizeWalk = (
     (item as any).petName ??
     (item as any).pet_name ??
     '';
-  const petSpecies = pet?.species ?? item.pet?.species;
   const rawPetImage =
     pet?.profilePicture ??
     item.pet?.profilePicture ??

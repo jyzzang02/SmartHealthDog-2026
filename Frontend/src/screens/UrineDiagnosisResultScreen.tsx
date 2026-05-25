@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -54,13 +54,8 @@ const getFailureReason = (submission: SubmissionSummary): string | null => {
 };
 
 const isUrineType = (type?: string) => {
-  const raw = type || '';
-  const normalized = raw.toUpperCase();
-  return (
-    normalized.includes('URINE') ||
-    raw.includes('소변') ||
-    raw.includes('요')
-  );
+  const normalized = (type || '').toUpperCase();
+  return normalized.includes('URINE');
 };
 
 const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -70,7 +65,9 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const directLookupTriedRef = useRef(false);
   const isFocused = useIsFocused();
 
-  const handleBack = () => {
+  const petName = (route.params as any)?.petName;
+
+  const handleBack = useCallback(() => {
     if (origin === 'history') {
       const state = navigation.getState();
       const routes = state.routes || [];
@@ -83,12 +80,11 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      const petName = (route.params as any)?.petName;
       navigation.navigate('DiagnosisHistory', { petId, petName });
       return;
     }
     navigation.goBack();
-  };
+  }, [navigation, origin, petId, petName]);
 
   useFocusEffect(
     useCallback(() => {
@@ -277,7 +273,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const renderAnalyzingScreen = () => {
     return (
       <View style={styles.analyzingContainer}>
-        <Text style={styles.analyzingTitle}>결과 분석중...</Text>
+        <Text style={styles.analyzingTitle}>결과 분석중..</Text>
 
         <View style={styles.progressWrapper}>
           <View style={styles.progressBase} />
@@ -285,7 +281,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           <Image source={dogImage} style={styles.dogImage} />
         </View>
 
-        <Text style={styles.waitText}>대기시간이 너무 긴가요?</Text>
+        <Text style={styles.waitText}>대기시간이 너무 길까요?</Text>
 
         <TouchableOpacity style={styles.homeButton} onPress={goHome}>
           <Text style={styles.homeButtonText}>홈으로</Text>
@@ -544,3 +540,4 @@ const styles = StyleSheet.create({
 });
 
 export default UrineDiagnosisResultScreen;
+

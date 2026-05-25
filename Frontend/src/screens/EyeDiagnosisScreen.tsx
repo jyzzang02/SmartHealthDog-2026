@@ -17,6 +17,7 @@ const EyeDiagnosisScreen = () => {
         styles.container,
         { paddingBottom: insets.bottom + EXTRA_BOTTOM_PADDING },
       ]}
+      scrollEnabled={false}
       showsVerticalScrollIndicator={false}
     >
       {/* Back Button */}

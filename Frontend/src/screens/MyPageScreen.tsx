@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useEffect } from "react";
+﻿import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -35,6 +35,13 @@ const MyPageScreen = () => {
   const [isPetsLoading, setIsPetsLoading] = useState(false);
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -81,6 +88,7 @@ const MyPageScreen = () => {
         getMyProfile(),
         getMyPets(),
       ]);
+      if (!isMountedRef.current) return;
       setUser(profileData);
       setPetList(petsData);
 
@@ -105,14 +113,17 @@ const MyPageScreen = () => {
             }
           })
         ).then((enriched) => {
+          if (!isMountedRef.current) return;
           setPetList(enriched);
         });
       }
     } catch (error) {
+      if (!isMountedRef.current) return;
       const message =
         error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
       setPetsError(message);
     } finally {
+      if (!isMountedRef.current) return;
       setIsPetsLoading(false);
     }
   }, []);
@@ -133,7 +144,7 @@ const MyPageScreen = () => {
         birth: formatBirthDate(pet.birthDate) || "",
         imageUrl: resolveImageUri(pet.profilePicture) || null,
         healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
-        condition: "정보없음",
+        condition: "정보 없음",
       })),
     [petList]
   );
@@ -155,7 +166,7 @@ const MyPageScreen = () => {
         showsVerticalScrollIndicator={false}
       >
 
-      {/* 🔹 유저 프로필 영역 */}
+      {/* 유저 프로필 영역 */}
       <TouchableOpacity
         style={styles.userBox}
         onPress={() => navigation.navigate("ProfileEdit")}
@@ -178,7 +189,7 @@ const MyPageScreen = () => {
         </View>
       </TouchableOpacity>
 
-      {/* 🔹 반려동물 프로필 */}
+      {/* 반려동물 프로필 */}
       <View style={styles.sectionHeader}>
         <Text style={styles.sectionTitle}>반려동물 프로필</Text>
         <TouchableOpacity
@@ -488,3 +499,5 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
 });
+
+

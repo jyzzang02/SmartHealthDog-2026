@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -54,13 +54,8 @@ const getFailureReason = (submission: SubmissionSummary): string | null => {
 };
 
 const isEyeType = (type?: string) => {
-  const raw = type || '';
-  const normalized = raw.toUpperCase();
-  return (
-    normalized.includes('EYE') ||
-    raw.includes('안구') ||
-    raw.includes('눈')
-  );
+  const normalized = (type || '').toUpperCase();
+  return normalized.includes('EYE');
 };
 
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -71,7 +66,9 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const directLookupTriedRef = useRef(false);
   const isFocused = useIsFocused();
 
-  const handleBack = () => {
+  const petName = (route.params as any)?.petName;
+
+  const handleBack = useCallback(() => {
     if (origin === 'history') {
       // Try to pop back to an existing DiagnosisHistory in the stack to avoid duplicates
       const state = navigation.getState();
@@ -85,13 +82,12 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      const petName = (route.params as any)?.petName;
       navigation.navigate('DiagnosisHistory', { petId, petName });
       return;
     }
 
     navigation.goBack();
-  };
+  }, [navigation, origin, petId, petName]);
 
   useFocusEffect(
     useCallback(() => {
@@ -282,7 +278,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const renderAnalyzingScreen = () => {
     return (
       <View style={styles.analyzingContainer}>
-        <Text style={styles.analyzingTitle}>결과 분석중...</Text>
+        <Text style={styles.analyzingTitle}>결과 분석중..</Text>
 
         <View style={styles.progressWrapper}>
           <View style={styles.progressBase} />
@@ -290,7 +286,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           <Image source={dogImage} style={styles.dogImage} />
         </View>
 
-        <Text style={styles.waitText}>대기시간이 너무 긴가요?</Text>
+        <Text style={styles.waitText}>대기시간이 너무 길까요?</Text>
 
         <TouchableOpacity style={styles.homeButton} onPress={goHome}>
           <Text style={styles.homeButtonText}>홈으로</Text>
@@ -549,3 +545,4 @@ const styles = StyleSheet.create({
 });
 
 export default EyeDiagnosisResultScreen;
+

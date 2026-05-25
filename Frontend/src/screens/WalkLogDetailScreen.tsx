@@ -203,7 +203,8 @@ export default function WalkLogDetailScreen() {
   }, [pathPoints]);
 
   const handleDelete = () => {
-    if (!record.id) {
+    const walkId = record.id;
+    if (!walkId) {
       Alert.alert('오류', '산책 기록 ID가 없어 삭제할 수 없습니다.');
       return;
     }
@@ -216,7 +217,7 @@ export default function WalkLogDetailScreen() {
           if (isDeleting) return;
           setIsDeleting(true);
           try {
-            await deleteWalk(record.id);
+            await deleteWalk(walkId);
             navigation.goBack();
           } catch (error) {
             const message = error instanceof Error ? error.message : '산책 기록을 삭제하지 못했습니다.';
@@ -230,14 +231,19 @@ export default function WalkLogDetailScreen() {
   };
 
   const handleEndWalk = async () => {
+    const walkId = record.id;
     if (isEnding) return;
+    if (!walkId) {
+      Alert.alert('오류', '산책 기록 ID가 없어 종료할 수 없습니다.');
+      return;
+    }
     if (!canEndWalk) {
       Alert.alert('안내', '이미 종료된 산책이거나 종료할 수 없습니다.');
       return;
     }
     setIsEnding(true);
     try {
-      const endedWalk = await endPetWalk(record.petId, record.id);
+      const endedWalk = await endPetWalk(record.petId, walkId);
       setWalkDetail(endedWalk);
       Alert.alert('완료', '산책 종료 처리가 완료되었습니다.');
     } catch (error) {
