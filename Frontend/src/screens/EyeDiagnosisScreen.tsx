@@ -51,6 +51,13 @@ const EyeDiagnosisScreen = () => {
           text="진단시작"
           onPress={() => navigation.navigate("EyeCamera")}
         />
+        <TouchableOpacity
+          style={extraStyles.linkButton}
+          onPress={() => navigation.navigate('DiagnosisHistory')}
+          activeOpacity={0.8}
+        >
+          <Text style={extraStyles.linkButtonText}>최근 진단 보기</Text>
+        </TouchableOpacity>
       </View>
 
     </ScrollView>
@@ -105,3 +112,15 @@ const styles = StyleSheet.create({
     height: 20,
   }
 });
+
+const extraStyles = StyleSheet.create({
+  linkButton: {
+    marginTop: 12,
+  },
+  linkButtonText: {
+    color: '#0081D5',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+});
+

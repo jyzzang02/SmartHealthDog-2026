@@ -1,15 +1,20 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  BackHandler,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
+  Image,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { getPetSubmissions, SubmissionSummary } from '../api/diagnosis';
+import { getMyPets, PetListItem } from '../api/pets';
+import { resolveImageUri } from '../utils/imageUri';
 
 const STATUS_LABELS: Record<string, string> = {
   PENDING: '분석 대기',
@@ -64,7 +69,13 @@ const formatDateTime = (isoText: string) => {
 
 const normalizeSubmission = (submission: SubmissionSummary): NormalizedSubmission | null => {
   const id = getSubmissionId(submission);
-  const type = submission.type?.toUpperCase() ?? '';
+  const rawTypeOriginal = submission.type ?? '';
+  const rawType = rawTypeOriginal.toUpperCase();
+  const type = rawType.includes('URINE') || rawTypeOriginal.includes('소변') || rawTypeOriginal.includes('요')
+    ? 'URINE'
+    : rawType.includes('EYE') || rawTypeOriginal.includes('안구') || rawTypeOriginal.includes('눈')
+    ? 'EYE'
+    : rawType;
   if (!id || !type) return null;
 
   const submittedAt =
@@ -84,17 +95,28 @@ const normalizeSubmission = (submission: SubmissionSummary): NormalizedSubmissio
 };
 
 const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { petId, petName } = route.params;
+  const { petId: paramPetId, petName: paramPetName } = route.params ?? {};
   const [isLoading, setIsLoading] = useState(true);
   const [items, setItems] = useState<NormalizedSubmission[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // When no petId provided, show pet chooser first
+  const [pets, setPets] = useState<PetListItem[] | null>(null);
+  const [selectedPetId, setSelectedPetId] = useState<number | null>(
+    paramPetId ?? null
+  );
+  const [selectedPetName, setSelectedPetName] = useState<string | undefined>(
+    paramPetName
+  );
+
   const loadHistory = useCallback(async () => {
+    const petToLoad = selectedPetId;
+    if (!petToLoad) return;
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const submissions = await getPetSubmissions(petId);
+      const submissions = await getPetSubmissions(petToLoad);
       const normalized = submissions
         .map(normalizeSubmission)
         .filter((item): item is NormalizedSubmission => !!item)
@@ -108,27 +130,81 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
     } finally {
       setIsLoading(false);
     }
-  }, [petId]);
+  }, [selectedPetId]);
 
   useEffect(() => {
-    loadHistory();
-  }, [loadHistory]);
+    // If a pet was already provided, load directly
+    if (selectedPetId) {
+      loadHistory();
+      return;
+    }
+
+    // Otherwise fetch pet list for selection
+    let mounted = true;
+    (async () => {
+      setIsLoading(true);
+      try {
+        const myPets = await getMyPets();
+        if (!mounted) return;
+        setPets(myPets);
+      } catch (err) {
+        if (!mounted) return;
+        setErrorMessage('반려동물 목록을 불러오지 못했습니다.');
+      } finally {
+        if (mounted) setIsLoading(false);
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [loadHistory, selectedPetId]);
 
   const headerTitle = useMemo(() => {
-    if (!petName) return '진단 이력';
-    return `${petName} 진단 이력`;
-  }, [petName]);
+    if (selectedPetName) return `${selectedPetName} 진단 이력`;
+    if (paramPetName) return `${paramPetName} 진단 이력`;
+    return '진단 이력';
+  }, [selectedPetName, paramPetName]);
 
   const handlePressItem = (item: NormalizedSubmission) => {
+    const petToSend = selectedPetId ?? paramPetId;
+    const petNameToSend = selectedPetName ?? paramPetName;
+    if (!petToSend) return;
+    const commonParams = { petId: petToSend, submissionId: item.id, origin: 'history' as const, petName: petNameToSend };
     if (item.type === 'EYE') {
-      navigation.navigate('EyeDiagnosisResult', { petId, submissionId: item.id });
+      navigation.navigate('EyeDiagnosisResult', commonParams as any);
       return;
     }
     if (item.type === 'URINE') {
-      navigation.navigate('UrineDiagnosisResult', { petId, submissionId: item.id });
+      navigation.navigate('UrineDiagnosisResult', commonParams as any);
       return;
     }
   };
+
+  const handleSelectPet = (pet: PetListItem) => {
+    setSelectedPetId(pet.id ?? null);
+    setSelectedPetName(pet.name);
+    setItems([]);
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      const shouldHandleLocalBack = !paramPetId && selectedPetId !== null;
+      if (!shouldHandleLocalBack) {
+        return undefined;
+      }
+
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        setSelectedPetId(null);
+        setSelectedPetName(undefined);
+        setItems([]);
+        setErrorMessage(null);
+        return true;
+      });
+
+      return () => sub.remove();
+    }, [paramPetId, selectedPetId])
+  );
 
   return (
     <View style={styles.container}>
@@ -143,13 +219,42 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
         </View>
       ) : (
         <ScrollView contentContainerStyle={styles.scrollContent}>
+          {!selectedPetId && pets && (
+            <View style={styles.petList}>
+              <Text style={styles.helperText}>진단할 반려동물을 선택하세요.</Text>
+              {pets.map((pet) => (
+                <TouchableOpacity
+                  key={pet.id}
+                  style={styles.petRow}
+                  activeOpacity={0.8}
+                  onPress={() => handleSelectPet(pet)}
+                >
+                  <View style={styles.petInfo}>
+                    {resolveImageUri(pet.profilePicture) ? (
+                      <Image
+                        source={{ uri: resolveImageUri(pet.profilePicture) }}
+                        style={styles.petThumb}
+                      />
+                    ) : (
+                      <View style={styles.petThumb} />
+                    )}
+                    <View>
+                      <Text style={styles.petName}>{pet.name || '이름 없음'}</Text>
+                      <Text style={styles.petMeta}>{pet.breed || pet.species || ''}</Text>
+                    </View>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
           {!!errorMessage && (
             <View style={styles.errorBox}>
               <Text style={styles.errorText}>{errorMessage}</Text>
             </View>
           )}
 
-          {items.length === 0 && !errorMessage && (
+          {selectedPetId !== null && items.length === 0 && !errorMessage && (
             <View style={styles.emptyBox}>
               <Text style={styles.emptyText}>아직 진단 이력이 없습니다.</Text>
             </View>
@@ -205,6 +310,38 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingBottom: 24,
+  },
+  petList: {
+    marginTop: 8,
+  },
+  petRow: {
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F0F0F0',
+  },
+  petInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  petThumb: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: '#E6E6E6',
+  },
+  petName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#111111',
+  },
+  petMeta: {
+    fontSize: 13,
+    color: '#7B7C7D',
+  },
+  helperText: {
+    marginBottom: 8,
+    color: '#7B7C7D',
   },
   historyCard: {
     marginTop: 12,

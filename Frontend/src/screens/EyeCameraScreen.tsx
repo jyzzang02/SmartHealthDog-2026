@@ -209,7 +209,8 @@ const EyeCameraScreen = () => {
 
       setIsUploading(true);
       try {
-        await requestEyeDiagnosis(selectedPetId, image);
+        const created = await requestEyeDiagnosis(selectedPetId as number, image);
+        const createdSubmissionId = created?.submissionId || created?.id;
         if (!isMountedRef.current) return;
         Alert.alert(
           '접수 완료',
@@ -217,7 +218,7 @@ const EyeCameraScreen = () => {
           [
             {
               text: '확인',
-              onPress: () => navigation.navigate('EyeDiagnosisResult', { petId: selectedPetId }),
+              onPress: () => navigation.navigate('EyeDiagnosisResult', { petId: selectedPetId, ...(createdSubmissionId ? { submissionId: createdSubmissionId } : {}) }),
             },
           ]
         );

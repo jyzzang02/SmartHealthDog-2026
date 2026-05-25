@@ -53,6 +53,13 @@ const UrineDiagnosisScreen = () => {
           text="진단시작"
           onPress={() => navigation.navigate('UrineCamera')}
         />
+        <TouchableOpacity
+          style={styles.linkButton}
+          onPress={() => navigation.navigate('DiagnosisHistory')}
+          activeOpacity={0.8}
+        >
+          <Text style={styles.linkButtonText}>최근 진단 보기</Text>
+        </TouchableOpacity>
       </View>
 
     </ScrollView>
@@ -101,5 +108,13 @@ const styles = StyleSheet.create({
     height: 250,
     marginTop: 90,
     resizeMode: "contain",
+  },
+  linkButton: {
+    marginTop: 12,
+  },
+  linkButtonText: {
+    color: '#0081D5',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

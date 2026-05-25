@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   Image,
   SafeAreaView,
   StyleSheet,
@@ -9,6 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import {
@@ -51,8 +53,69 @@ const getFailureReason = (submission: SubmissionSummary): string | null => {
   return submission.failureReason ?? submission.failure_reason ?? null;
 };
 
+const isEyeType = (type?: string) => {
+  const raw = type || '';
+  const normalized = raw.toUpperCase();
+  return (
+    normalized.includes('EYE') ||
+    raw.includes('안구') ||
+    raw.includes('눈')
+  );
+};
+
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const { petId, submissionId } = route.params;
+
+  const origin = (route.params as any)?.origin;
+  const bypassBeforeRemoveRef = useRef(false);
+  const directLookupTriedRef = useRef(false);
+  const isFocused = useIsFocused();
+
+  const handleBack = () => {
+    if (origin === 'history') {
+      // Try to pop back to an existing DiagnosisHistory in the stack to avoid duplicates
+      const state = navigation.getState();
+      const routes = state.routes || [];
+      const lastIndex = routes.map((r) => r.name).lastIndexOf('DiagnosisHistory');
+      if (lastIndex !== -1) {
+        const delta = routes.length - 1 - lastIndex;
+        if (delta > 0) {
+          navigation.pop(delta);
+          return;
+        }
+      }
+
+      const petName = (route.params as any)?.petName;
+      navigation.navigate('DiagnosisHistory', { petId, petName });
+      return;
+    }
+
+    navigation.goBack();
+  };
+
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        handleBack();
+        return true;
+      });
+      return () => sub.remove();
+    }, [handleBack])
+  );
+
+  useEffect(() => {
+    const unsub = navigation.addListener('beforeRemove', (event) => {
+      if (origin !== 'history' || bypassBeforeRemoveRef.current) {
+        return;
+      }
+
+      event.preventDefault();
+      bypassBeforeRemoveRef.current = true;
+      handleBack();
+    });
+
+    return unsub;
+  }, [navigation, origin, handleBack]);
 
   const [isLoading, setIsLoading] = useState(true);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
@@ -78,12 +141,24 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsLoading(true);
 
     try {
+      if (submissionId && !directLookupTriedRef.current) {
+        directLookupTriedRef.current = true;
+        try {
+          const direct = await getEyeSubmissionResult(submissionId);
+          if (!canUpdate()) return;
+          setSubmission({ id: submissionId, type: 'EYE', status: STATUS_COMPLETED });
+          setResult(direct);
+          setMessage('');
+          return;
+        } catch (directError) {
+          console.log('[eye] direct submission lookup failed once, falling back to list', directError);
+        }
+      }
+
       const submissions = await getPetSubmissions(petId);
       if (!canUpdate()) return;
 
-      const eyeSubmissions = submissions.filter(
-        (item) => item.type?.toUpperCase() === 'EYE'
-      );
+      const eyeSubmissions = submissions.filter((item) => isEyeType(item.type));
 
       if (eyeSubmissions.length === 0) {
         setSubmission(null);
@@ -176,6 +251,22 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     loadResult();
   }, [loadResult]);
 
+  useEffect(() => {
+    if (!isFocused || isLoading) {
+      return;
+    }
+
+    if (status !== STATUS_PENDING && status !== STATUS_PROCESSING) {
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      loadResult();
+    }, 5000);
+
+    return () => clearTimeout(timer);
+  }, [isFocused, isLoading, loadResult, status]);
+
   const resultText = useMemo(() => {
     if (!result) {
       return '';
@@ -244,6 +335,9 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   if (isLoading) {
     return (
       <SafeAreaView style={styles.safeArea}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
+        </TouchableOpacity>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#0081D5" />
           <Text style={styles.loadingText}>진단 상태를 확인 중입니다.</Text>
@@ -253,14 +347,35 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   if (status === STATUS_PENDING || status === STATUS_PROCESSING) {
-    return <SafeAreaView style={styles.safeArea}>{renderAnalyzingScreen()}</SafeAreaView>;
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
+        </TouchableOpacity>
+        {renderAnalyzingScreen()}
+      </SafeAreaView>
+    );
   }
 
   if (result) {
-    return <SafeAreaView style={styles.safeArea}>{renderResultScreen()}</SafeAreaView>;
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
+        </TouchableOpacity>
+        {renderResultScreen()}
+      </SafeAreaView>
+    );
   }
 
-  return <SafeAreaView style={styles.safeArea}>{renderMessageScreen()}</SafeAreaView>;
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+        <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
+      </TouchableOpacity>
+      {renderMessageScreen()}
+    </SafeAreaView>
+  );
 };
 
 const styles = StyleSheet.create({
@@ -354,6 +469,7 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '700',
     color: '#1F2024',
+    marginLeft: 28,
     marginBottom: 16,
   },
   resultBox: {
@@ -418,6 +534,17 @@ const styles = StyleSheet.create({
     color: '#0081D5',
     fontSize: 14,
     fontWeight: '700',
+  },
+  backButton: {
+    position: 'absolute',
+    top: 54,
+    left: 18,
+    zIndex: 30,
+    padding: 6,
+  },
+  backIcon: {
+    width: 20,
+    height: 20,
   },
 });
 

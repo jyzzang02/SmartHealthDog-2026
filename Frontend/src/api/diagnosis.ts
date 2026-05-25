@@ -18,12 +18,29 @@ export interface EyeDiagnosisImage {
 export interface SubmissionSummary {
   id?: string;
   submissionId?: string;
+  submission_id?: string;
+  submissionUuid?: string;
+  uuid?: string;
 
   type?: string;
+  submissionType?: string;
+  submission_type?: string;
+  diagnosisType?: string;
+  diagnosis_type?: string;
+  category?: string;
+  serviceType?: string;
   status?: string;
+  submissionStatus?: string;
+  submission_status?: string;
+  statusCode?: string;
+  status_code?: string;
 
   createdAt?: string;
   created_at?: string;
+  createdDate?: string;
+  created_date?: string;
+  requestedAt?: string;
+  requested_at?: string;
   submittedAt?: string;
   submitted_at?: string;
 
@@ -32,6 +49,11 @@ export interface SubmissionSummary {
 
   failureReason?: string | null;
   failure_reason?: string | null;
+}
+
+export interface SubmissionCreateResponse {
+  id?: string;
+  submissionId?: string;
 }
 
 export interface SubmissionStatusPayload {
@@ -53,6 +75,79 @@ const parseJsonSafe = async (response: Response) => {
   } catch {
     return null;
   }
+};
+
+const extractSubmissionIdFromLocation = (location?: string | null) => {
+  if (!location) return undefined;
+  const matched = location.match(/\/api\/submissions\/([^/?#]+)/i);
+  return matched?.[1];
+};
+
+const extractSubmissionList = (data: any): SubmissionSummary[] => {
+  if (Array.isArray(data)) return data as SubmissionSummary[];
+  if (!data || typeof data !== 'object') return [];
+
+  const candidates = [
+    data.items,
+    data.content,
+    data.submissions,
+    data.data,
+    data.result,
+  ];
+
+  for (const candidate of candidates) {
+    if (Array.isArray(candidate)) {
+      return candidate as SubmissionSummary[];
+    }
+  }
+
+  return [];
+};
+
+const normalizeSubmissionItem = (item: any): SubmissionSummary | null => {
+  if (!item || typeof item !== 'object') return null;
+
+  const id =
+    item.id ??
+    item.submissionId ??
+    item.submission_id ??
+    item.submissionUuid ??
+    item.uuid;
+
+  const type =
+    item.type ??
+    item.submissionType ??
+    item.submission_type ??
+    item.diagnosisType ??
+    item.diagnosis_type ??
+    item.category ??
+    item.serviceType;
+
+  const status =
+    item.status ??
+    item.submissionStatus ??
+    item.submission_status ??
+    item.statusCode ??
+    item.status_code;
+
+  const submittedAt =
+    item.submittedAt ??
+    item.submitted_at ??
+    item.createdAt ??
+    item.created_at ??
+    item.createdDate ??
+    item.created_date ??
+    item.requestedAt ??
+    item.requested_at;
+
+  return {
+    ...(item as SubmissionSummary),
+    id: id != null ? String(id) : undefined,
+    submissionId: item.submissionId ?? (id != null ? String(id) : undefined),
+    type: type != null ? String(type) : undefined,
+    status: status != null ? String(status) : undefined,
+    submittedAt: submittedAt != null ? String(submittedAt) : undefined,
+  };
 };
 
 const parseErrorResponse = async (response: Response) => {
@@ -170,7 +265,7 @@ const isValidPetId = (petId: number) => Number.isFinite(petId) && petId > 0;
 export const requestEyeDiagnosis = async (
   petId: number,
   image: EyeDiagnosisImage
-): Promise<void> => {
+): Promise<SubmissionCreateResponse | null> => {
   if (!isValidPetId(petId)) {
     throw new Error('유효한 반려동물을 선택해 주세요.');
   }
@@ -202,7 +297,14 @@ export const requestEyeDiagnosis = async (
 
   if (response.status === 201) {
     console.log('[eye] upload success', { url: uploadUrl, petId, status: response.status });
-    return;
+    const data = await parseJsonSafe(response);
+    if (data && typeof data === 'object') {
+      return data as SubmissionCreateResponse;
+    }
+    const idFromLocation = extractSubmissionIdFromLocation(
+      response.headers.get('Location')
+    );
+    return idFromLocation ? { submissionId: idFromLocation } : null;
   }
 
   const errorText = await response.clone().text().catch(() => '');
@@ -215,18 +317,50 @@ export const requestEyeDiagnosis = async (
 export const getPetSubmissions = async (
   petId: number
 ): Promise<SubmissionSummary[]> => {
-  const response = await authorizedFetch(
+  const endpoints = [
     `${API_BASE_URL}/api/submissions/pets/${petId}`,
-    { method: 'GET' }
-  );
+    `${API_BASE_URL}/api/pets/${petId}/submissions`,
+  ];
 
-  if (!response.ok) {
-    const message = await parseErrorResponse(response);
-    throw new Error(message);
+  let lastError: Error | null = null;
+
+  for (const url of endpoints) {
+    try {
+      const response = await authorizedFetch(url, { method: 'GET' });
+      if (!response.ok) {
+        const message = await parseErrorResponse(response);
+        throw new Error(message);
+      }
+
+      const data = await parseJsonSafe(response);
+      const rawList = extractSubmissionList(data);
+      const list = rawList
+        .map((item) => normalizeSubmissionItem(item))
+        .filter((item): item is SubmissionSummary => !!item);
+      console.log('[diagnosis] submissions fetched', {
+        url,
+        count: list.length,
+        shape: Array.isArray(data)
+          ? 'array'
+          : data && typeof data === 'object'
+          ? Object.keys(data).join(',')
+          : typeof data,
+        sampleKeys:
+          list.length > 0 ? Object.keys((rawList[0] as any) || {}).join(',') : 'none',
+        sampleType: list[0]?.type,
+        sampleStatus: list[0]?.status,
+      });
+      if (list.length > 0 || url === endpoints[endpoints.length - 1]) {
+        return list;
+      }
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error('unknown error');
+      console.warn('[diagnosis] submissions endpoint failed', { url, error: String(lastError) });
+    }
   }
 
-  const data = await parseJsonSafe(response);
-  return (Array.isArray(data) ? data : []) as SubmissionSummary[];
+  if (lastError) throw lastError;
+  return [];
 };
 
 export const getMySubmissions = async (): Promise<SubmissionSummary[]> => {

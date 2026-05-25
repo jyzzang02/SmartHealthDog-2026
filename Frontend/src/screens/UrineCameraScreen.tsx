@@ -185,7 +185,8 @@ const UrineCameraScreen = () => {
       }
        setIsUploading(true);
        try {
-         await requestUrineDiagnosis(selectedPetId, image);
+         const created = await requestUrineDiagnosis(selectedPetId as number, image);
+         const createdSubmissionId = created?.submissionId || created?.id;
          if (!isMountedRef.current) return;
          Alert.alert(
            '접수 완료',
@@ -193,7 +194,7 @@ const UrineCameraScreen = () => {
            [
              {
                text: '확인',
-               onPress: () => navigation.navigate('UrineDiagnosisResult', { petId: selectedPetId }),
+               onPress: () => navigation.navigate('UrineDiagnosisResult', { petId: selectedPetId, ...(createdSubmissionId ? { submissionId: createdSubmissionId } : {}) }),
              },
            ]
          );
