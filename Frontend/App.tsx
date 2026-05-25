@@ -21,6 +21,7 @@ import TabNavigator from './src/navigation/TabBar';
 
 import AnimalDetailScreen from './src/screens/AnimalDetailScreen';
 import SymptomResultScreen from './src/screens/SymptomResultScreen';
+import DiagnosisHistoryScreen from './src/screens/DiagnosisHistoryScreen';
 
 import EyeDiagnosisScreen from './src/screens/EyeDiagnosisScreen';
 import EyeCameraScreen from './src/screens/EyeCameraScreen';
@@ -70,17 +71,24 @@ export type RootStackParamList = {
   EyeCamera: undefined;
   EyeDiagnosisResult: {
     petId: number;
+    submissionId?: string;
   };
 
    UrineDiagnosis: undefined;
    UrineCamera: undefined;
    UrineDiagnosisResult: {
      petId: number;
+     submissionId?: string;
    };
 
   MyPage: undefined;
   GameScreen: undefined;
   ProfileEdit: undefined;
+
+  DiagnosisHistory: {
+    petId: number;
+    petName?: string;
+  };
 
   PetEdit: {
     petId: number;
@@ -103,7 +111,7 @@ export type RootStackParamList = {
 
   WalkLogDetail: {
     record: {
-      id: number;
+      id?: number;
       petId: number;
       petName: string;
       petImage: any;
@@ -187,12 +195,16 @@ function AppNavigator() {
           name="EyeDiagnosisResult"
           component={EyeDiagnosisResultScreen}
         />
-         <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
-         <Stack.Screen name="UrineCamera" component={UrineCameraScreen} />
-         <Stack.Screen
-           name="UrineDiagnosisResult"
-           component={UrineDiagnosisResultScreen}
-         />
+        <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
+        <Stack.Screen name="UrineCamera" component={UrineCameraScreen} />
+        <Stack.Screen
+          name="UrineDiagnosisResult"
+          component={UrineDiagnosisResultScreen}
+        />
+        <Stack.Screen
+          name="DiagnosisHistory"
+          component={DiagnosisHistoryScreen}
+        />
 
         {/* My Page */}
         <Stack.Screen name="MyPage" component={MyPageScreen} />

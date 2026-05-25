@@ -162,16 +162,32 @@ const resolveMimeType = (image: EyeDiagnosisImage) => {
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
     return 'image/jpeg';
   }
-  return 'image/*';
+  return 'image/jpeg';
 };
+
+const isValidPetId = (petId: number) => Number.isFinite(petId) && petId > 0;
 
 export const requestEyeDiagnosis = async (
   petId: number,
   image: EyeDiagnosisImage
 ): Promise<void> => {
+  if (!isValidPetId(petId)) {
+    throw new Error('유효한 반려동물을 선택해 주세요.');
+  }
+
+  const uploadUrl = `${API_BASE_URL}/api/pets/${petId}/submissions/eye`;
   const formData = new FormData();
   const mimeType = resolveMimeType(image);
   const fileName = image.fileName || normalizeFileName(image.uri, 'eye.jpg');
+
+  console.log('[eye] upload url:', uploadUrl);
+  console.log('[eye] petId:', petId);
+  console.log('[eye] formData part:', 'image');
+  console.log('[eye] file payload', {
+    fileName,
+    type: mimeType,
+    fileSize: image.fileSize,
+  });
 
   formData.append('image', {
     uri: image.uri,
@@ -179,15 +195,13 @@ export const requestEyeDiagnosis = async (
     name: fileName,
   } as any);
 
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/pets/${petId}/submissions/eye`,
-    {
-      method: 'POST',
-      body: formData,
-    }
-  );
+  const response = await authorizedFetch(uploadUrl, {
+    method: 'POST',
+    body: formData,
+  });
 
   if (response.status === 201) {
+    console.log('[eye] upload success', { url: uploadUrl, petId, status: response.status });
     return;
   }
 

@@ -10,15 +10,25 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyPets, PetListItem } from '../api/pets';
+import { resolveImageUri } from '../utils/imageUri';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = SCREEN_WIDTH - 40;
 const CARD_SPACING = 12;
 
-const PetHealthCard = () => {
+type PetHealthCardProps = {
+  pets?: PetListItem[];
+  loading?: boolean;
+};
+
+const PetHealthCard: React.FC<PetHealthCardProps> = ({
+  pets: petsProp,
+  loading: loadingProp,
+}) => {
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const shouldFetch = petsProp === undefined;
 
   const loadPets = useCallback(async () => {
     setLoading(true);
@@ -33,16 +43,23 @@ const PetHealthCard = () => {
   }, []);
 
   useEffect(() => {
-    loadPets();
-  }, [loadPets]);
+    if (shouldFetch) {
+      loadPets();
+    }
+  }, [loadPets, shouldFetch]);
 
   useFocusEffect(
     useCallback(() => {
-      loadPets();
-    }, [loadPets])
+      if (shouldFetch) {
+        loadPets();
+      }
+    }, [loadPets, shouldFetch])
   );
 
-  if (loading) {
+  const effectivePets = shouldFetch ? pets : petsProp || [];
+  const effectiveLoading = shouldFetch ? loading : Boolean(loadingProp);
+
+  if (effectiveLoading) {
     return (
       <View style={[styles.card, { justifyContent: 'center' }]}>
         <ActivityIndicator size="small" color="#0081D5" />
@@ -50,7 +67,7 @@ const PetHealthCard = () => {
     );
   }
 
-  if (pets.length === 0) {
+  if (effectivePets.length === 0) {
     return (
       <View style={styles.card}>
         <Text style={styles.emptyText}>등록된 반려동물이 없습니다.</Text>
@@ -58,12 +75,12 @@ const PetHealthCard = () => {
     );
   }
 
-  const petCards = pets.map((pet) => ({
+  const petCards = effectivePets.map((pet) => ({
     id: pet.id,
     name: pet.name,
     subtitle: `${pet.breed || pet.species}, ${pet.weightKg || 0}kg`,
     weight: pet.weightKg || 0,
-    profilePicture: pet.profilePicture || null,
+    profilePicture: resolveImageUri(pet.profilePicture) || null,
   }));
 
   return (
@@ -85,14 +102,14 @@ const PetHealthCard = () => {
       >
         {petCards.map((pet) => (
           <View key={pet.id} style={[styles.card, { width: CARD_WIDTH }]}>
-            <Image
-              source={
-                pet.profilePicture
-                  ? { uri: pet.profilePicture }
-                  : require('../assets/img_emblem.png')
-              }
-              style={styles.profileImage}
-            />
+            {pet.profilePicture ? (
+              <Image
+                source={{ uri: pet.profilePicture }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.profileImagePlaceholder} />
+            )}
 
             <View style={styles.contentBox}>
               <View style={styles.nameRow}>
@@ -150,6 +167,12 @@ const styles = StyleSheet.create({
     height: 60,
     borderRadius: 30,
     backgroundColor: '#ECECEC',
+  },
+  profileImagePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E0E0E0',
   },
   contentBox: {
     flexDirection: 'column',

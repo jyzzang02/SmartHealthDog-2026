@@ -52,7 +52,7 @@ const getFailureReason = (submission: SubmissionSummary): string | null => {
 };
 
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
-  const { petId } = route.params;
+  const { petId, submissionId } = route.params;
 
   const [isLoading, setIsLoading] = useState(true);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
@@ -92,16 +92,26 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      const latest = [...eyeSubmissions].sort(
-        (a, b) => getSubmissionTime(b) - getSubmissionTime(a)
-      )[0];
+      const target =
+        submissionId
+          ? eyeSubmissions.find((item) => getSubmissionId(item) === submissionId)
+          : [...eyeSubmissions].sort(
+              (a, b) => getSubmissionTime(b) - getSubmissionTime(a)
+            )[0];
 
-      setSubmission(latest);
+      if (!target) {
+        setSubmission(null);
+        setResult(null);
+        setMessage('해당 진단 기록을 찾을 수 없습니다.');
+        return;
+      }
 
-      const submissionId = getSubmissionId(latest);
-      const normalizedStatus = latest.status?.toUpperCase() ?? '';
+      setSubmission(target);
 
-      if (!submissionId) {
+      const normalizedStatus = target.status?.toUpperCase() ?? '';
+      const idToFetch = getSubmissionId(target);
+
+      if (!idToFetch) {
         setResult(null);
         setMessage('진단 기록 ID를 확인할 수 없습니다.');
         return;
@@ -119,7 +129,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       if (normalizedStatus === STATUS_FAILED) {
         setResult(null);
         setMessage(
-          getFailureReason(latest) ||
+          getFailureReason(target) ||
             '진단 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.'
         );
         return;
@@ -128,7 +138,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       if (normalizedStatus === STATUS_DELETED) {
         setResult(null);
         setMessage(
-          getFailureReason(latest) === 'TIMEOUT'
+          getFailureReason(target) === 'TIMEOUT'
             ? 'AI 분석 시간이 초과되었습니다. 다시 촬영해 주세요.'
             : '삭제되었거나 조회할 수 없는 진단 기록입니다.'
         );
@@ -136,7 +146,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (normalizedStatus === STATUS_COMPLETED) {
-        const detail = await getEyeSubmissionResult(submissionId);
+        const detail = await getEyeSubmissionResult(idToFetch);
         if (!canUpdate()) return;
         setResult(detail);
         setMessage('');
@@ -160,7 +170,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         setIsLoading(false);
       }
     }
-  }, [petId]);
+  }, [petId, submissionId]);
 
   useEffect(() => {
     loadResult();

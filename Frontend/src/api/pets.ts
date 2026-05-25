@@ -24,6 +24,10 @@ export interface PetListItem {
   weightKg?: number;
   ownerId?: number;
   profilePicture?: string;
+  profileImage?: string;
+  profile_image?: string;
+  imageUrl?: string;
+  photoUrl?: string;
   healthInfo?: string[];
 }
 
@@ -91,7 +95,7 @@ const getMimeTypeFromUri = (uri: string) => {
   const lower = uri.toLowerCase();
   if (lower.endsWith('.png')) return 'image/png';
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-  return 'image/*';
+  return 'image/jpeg';
 };
 
 const normalizeFileName = (uri: string) => {
@@ -186,6 +190,33 @@ const buildPetFormData = (
   return formData;
 };
 
+const extractPetImage = (data?: Partial<PetListItem> | null) =>
+  data?.profilePicture ||
+  data?.profileImage ||
+  (data as any)?.profile_image ||
+  (data as any)?.imageUrl ||
+  (data as any)?.photoUrl ||
+  undefined;
+
+const logPetImageFields = (data?: Partial<PetListItem> | null) => {
+  if (!data) return;
+  console.log('[pets] pet image fields', {
+    profilePicture: data.profilePicture,
+    profileImage: (data as any).profileImage,
+    profile_image: (data as any).profile_image,
+    imageUrl: (data as any).imageUrl,
+    photoUrl: (data as any).photoUrl,
+  });
+};
+
+const normalizePet = (data?: Partial<PetListItem> | null): PetListItem => {
+  if (!data) return data as PetListItem;
+  return {
+    ...(data as PetListItem),
+    profilePicture: extractPetImage(data),
+  } as PetListItem;
+};
+
 export const getMyPets = async (): Promise<PetListItem[]> => {
   const response = await authorizedFetch(`${API_BASE_URL}/api/pets`, {
     method: 'GET',
@@ -204,8 +235,11 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
   }
 
   const data = await parseJsonSafe(response);
-
-  return (Array.isArray(data) ? data : []) as PetListItem[];
+  const items = (Array.isArray(data) ? data : []) as PetListItem[];
+  if (items.length > 0) {
+    logPetImageFields(items[0]);
+  }
+  return items.map((item) => normalizePet(item));
 };
 
 export const getPetDetail = async (id: number): Promise<PetListItem> => {
@@ -343,25 +377,43 @@ export const requestUrineDiagnosis = async (
   petId: number,
   image: { uri: string; type?: string; fileName?: string; fileSize?: number }
 ): Promise<void> => {
+  if (!Number.isFinite(petId) || petId <= 0) {
+    throw new Error('유효한 반려동물을 선택해 주세요.');
+  }
+
+  const uploadUrl = `${API_BASE_URL}/api/pets/${petId}/submissions/urine`;
   const formData = new FormData();
+  const mimeType = image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg';
+  const fileName = image.fileName || normalizeFileName(image.uri) || 'urine.jpg';
+
+  console.log('[urine] upload url:', uploadUrl);
+  console.log('[urine] petId:', petId);
+  console.log('[urine] formData part:', 'image');
+  console.log('[urine] file payload', {
+    fileName,
+    type: mimeType,
+    fileSize: image.fileSize,
+  });
+
   formData.append('image', {
     uri: image.uri,
-    type: image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg',
-    name: image.fileName || normalizeFileName(image.uri) || 'urine.jpg',
+    type: mimeType,
+    name: fileName,
   } as any);
 
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/pets/${petId}/submissions/urine`,
-    {
-      method: 'POST',
-      body: formData,
-    }
-  );
+  const response = await authorizedFetch(uploadUrl, {
+    method: 'POST',
+    body: formData,
+  });
 
-  if (response.status !== 201) {
-    const errorText = await readErrorBody(response);
-    throw new Error(
-      errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
-    );
+  if (response.status === 201) {
+    console.log('[urine] upload success', { url: uploadUrl, petId, status: response.status });
+    return;
   }
+
+  const errorText = await readErrorBody(response);
+  console.log('[urine] upload 실패 상태', response.status, errorText);
+  throw new Error(
+    errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
+  );
 };

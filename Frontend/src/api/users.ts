@@ -12,6 +12,10 @@ export interface UserProfile {
   nickname: string;
   email: string;
   profilePicture?: string;
+  profileImage?: string;
+  profile_image?: string;
+  imageUrl?: string;
+  photoUrl?: string;
 }
 
 export interface UpdateProfilePayload {
@@ -33,6 +37,33 @@ const readErrorBody = async (response: Response) => {
   } catch {
     return '';
   }
+};
+
+const extractProfileImage = (data?: Partial<UserProfile> | null) =>
+  data?.profilePicture ||
+  data?.profileImage ||
+  (data as any)?.profile_image ||
+  (data as any)?.imageUrl ||
+  (data as any)?.photoUrl ||
+  undefined;
+
+const logProfileImageFields = (data?: Partial<UserProfile> | null) => {
+  if (!data) return;
+  console.log('[users] profile image fields', {
+    profilePicture: data.profilePicture,
+    profileImage: (data as any).profileImage,
+    profile_image: (data as any).profile_image,
+    imageUrl: (data as any).imageUrl,
+    photoUrl: (data as any).photoUrl,
+  });
+};
+
+const normalizeProfile = (data?: Partial<UserProfile> | null): UserProfile => {
+  if (!data) return data as UserProfile;
+  return {
+    ...(data as UserProfile),
+    profilePicture: extractProfileImage(data),
+  } as UserProfile;
 };
 
 const buildAuthHeaders = (accessToken: string) => ({
@@ -102,7 +133,8 @@ export const getMyProfile = async (): Promise<UserProfile> => {
   }
 
   const data = await parseJsonSafe(response);
-  return data as UserProfile;
+  logProfileImageFields(data as Partial<UserProfile> | null);
+  return normalizeProfile(data as Partial<UserProfile> | null);
 };
 
 export const updateMyProfile = async (

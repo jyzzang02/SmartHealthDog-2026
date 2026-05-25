@@ -10,6 +10,8 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Modal,
+  ScrollView,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
@@ -21,6 +23,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getMyPets, PetListItem, requestUrineDiagnosis } from '../api/pets';
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024;
+const isValidPetId = (petId: number | null | undefined) =>
+  typeof petId === 'number' && Number.isFinite(petId) && petId > 0;
 
 const UrineCameraScreen = () => {
   const navigation = useNavigation<any>();
@@ -29,6 +33,7 @@ const UrineCameraScreen = () => {
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [isPetPickerVisible, setPetPickerVisible] = useState(false);
   const hasPromptedPetRef = useRef(false);
   const isMountedRef = useRef(true);
 
@@ -59,18 +64,7 @@ const UrineCameraScreen = () => {
       }
       if (!hasPromptedPetRef.current) {
         hasPromptedPetRef.current = true;
-        Alert.alert(
-          '반려동물 선택',
-          '진단할 반려동물을 선택해 주세요.',
-          [
-            ...data.map((pet) => ({
-              text: pet.name,
-              onPress: () => setSelectedPetId(pet.id),
-            })),
-            { text: '취소', style: 'cancel' },
-          ],
-          { cancelable: true }
-        );
+        setPetPickerVisible(true);
       }
     } catch (error) {
       if (!isMountedRef.current) return;
@@ -96,18 +90,7 @@ const UrineCameraScreen = () => {
       setSelectedPetId(pets[0].id);
       return;
     }
-    Alert.alert(
-      '반려동물 선택',
-      '진단할 반려동물을 선택해 주세요.',
-      [
-        ...pets.map((pet) => ({
-          text: pet.name,
-          onPress: () => setSelectedPetId(pet.id),
-        })),
-        { text: '취소', style: 'cancel' },
-      ],
-      { cancelable: true }
-    );
+    setPetPickerVisible(true);
   }, [pets]);
 
   const ensurePetSelected = useCallback(() => {
@@ -178,10 +161,15 @@ const UrineCameraScreen = () => {
 
   const handleUpload = useCallback(
     async (image: { uri: string; type?: string; fileName?: string; fileSize?: number }) => {
-      if (!selectedPetId) {
-        Alert.alert('안내', '진단할 반려동물을 선택해 주세요.');
+      if (!isValidPetId(selectedPetId)) {
+        Alert.alert('안내', '진단할 반려동물을 다시 선택해 주세요.');
         return;
       }
+
+      console.log('[urine] upload url:', `/api/pets/${selectedPetId}/submissions/urine`);
+      console.log('[urine] petId:', selectedPetId);
+      console.log('[urine] formData part:', 'image');
+
       const resolvedType = resolveMimeType(image);
       if (resolvedType !== 'image/jpeg' && resolvedType !== 'image/png') {
         Alert.alert('안내', 'jpg, jpeg, png 이미지만 업로드할 수 있습니다.');
@@ -382,6 +370,42 @@ const UrineCameraScreen = () => {
           </View>
         )}
       </View>
+      <Modal
+        visible={isPetPickerVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setPetPickerVisible(false)}
+      >
+        <View style={styles.petPickerOverlay}>
+          <View style={styles.petPickerModal}>
+            <Text style={styles.petPickerTitle}>반려동물 선택</Text>
+            <Text style={styles.petPickerSubtitle}>진단할 반려동물을 선택해 주세요.</Text>
+            <ScrollView
+              style={styles.petPickerList}
+              contentContainerStyle={styles.petPickerListContent}
+            >
+              {pets.map((pet) => (
+                <TouchableOpacity
+                  key={pet.id}
+                  style={styles.petPickerItem}
+                  onPress={() => {
+                    setSelectedPetId(pet.id);
+                    setPetPickerVisible(false);
+                  }}
+                >
+                  <Text style={styles.petPickerItemText}>{pet.name || '이름 없음'}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+            <TouchableOpacity
+              style={styles.petPickerCancel}
+              onPress={() => setPetPickerVisible(false)}
+            >
+              <Text style={styles.petPickerCancelText}>취소</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -513,6 +537,57 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.35)',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  petPickerOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  petPickerModal: {
+    width: '100%',
+    maxWidth: 320,
+    backgroundColor: '#2E2F31',
+    borderRadius: 14,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 14,
+  },
+  petPickerTitle: {
+    color: '#FFFFFF',
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  petPickerSubtitle: {
+    color: '#C8C9CC',
+    fontSize: 13,
+    marginTop: 6,
+  },
+  petPickerList: {
+    marginTop: 12,
+    maxHeight: 220,
+  },
+  petPickerListContent: {
+    paddingBottom: 8,
+  },
+  petPickerItem: {
+    paddingVertical: 10,
+  },
+  petPickerItemText: {
+    color: '#7FD3C8',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'right',
+  },
+  petPickerCancel: {
+    marginTop: 6,
+    paddingVertical: 10,
+  },
+  petPickerCancelText: {
+    color: '#C8C9CC',
+    fontSize: 13,
+    textAlign: 'right',
   },
 });
 
