@@ -28,6 +28,10 @@ export interface PetListItem {
   profile_image?: string;
   imageUrl?: string;
   photoUrl?: string;
+  profilePictureUrl?: string;
+  profile_picture?: string;
+  image?: string;
+  thumbnailUrl?: string;
   healthInfo?: string[];
 }
 
@@ -194,8 +198,12 @@ const extractPetImage = (data?: Partial<PetListItem> | null) =>
   data?.profilePicture ||
   data?.profileImage ||
   (data as any)?.profile_image ||
+  (data as any)?.profilePictureUrl ||
+  (data as any)?.profile_picture ||
   (data as any)?.imageUrl ||
   (data as any)?.photoUrl ||
+  (data as any)?.thumbnailUrl ||
+  (data as any)?.image ||
   undefined;
 
 const logPetImageFields = (data?: Partial<PetListItem> | null) => {
@@ -204,13 +212,25 @@ const logPetImageFields = (data?: Partial<PetListItem> | null) => {
     profilePicture: data.profilePicture,
     profileImage: (data as any).profileImage,
     profile_image: (data as any).profile_image,
+    profilePictureUrl: (data as any).profilePictureUrl,
+    profile_picture: (data as any).profile_picture,
     imageUrl: (data as any).imageUrl,
     photoUrl: (data as any).photoUrl,
+    thumbnailUrl: (data as any).thumbnailUrl,
+    image: (data as any).image,
   });
 };
 
+const extractSubmissionIdFromLocation = (location?: string | null) => {
+  if (!location) return undefined;
+  const matched = location.match(/\/api\/submissions\/([^/?#]+)/i);
+  return matched?.[1];
+};
+
 const normalizePet = (data?: Partial<PetListItem> | null): PetListItem => {
-  if (!data) return data as PetListItem;
+  if (!data) {
+    throw new Error('반려동물 데이터를 확인할 수 없습니다.');
+  }
   return {
     ...(data as PetListItem),
     profilePicture: extractPetImage(data),
@@ -261,7 +281,7 @@ export const getPetDetail = async (id: number): Promise<PetListItem> => {
 
   const data = await parseJsonSafe(response);
 
-  return data as PetListItem;
+  return normalizePet(data as PetListItem);
 };
 
 export const createPet = async (
@@ -286,7 +306,7 @@ export const createPet = async (
 
   const data = await parseJsonSafe(response);
 
-  return data as PetListItem;
+  return normalizePet(data as PetListItem);
 };
 
 export const updatePetFull = async (
@@ -314,7 +334,7 @@ export const updatePetFull = async (
 
   const data = await parseJsonSafe(response);
 
-  return data as PetListItem;
+  return normalizePet(data as PetListItem);
 };
 
 export const updatePetPartial = async (
@@ -376,7 +396,7 @@ export const deletePet = async (id: number): Promise<void> => {
 export const requestUrineDiagnosis = async (
   petId: number,
   image: { uri: string; type?: string; fileName?: string; fileSize?: number }
-): Promise<void> => {
+): Promise<{ id?: string; submissionId?: string } | null> => {
   if (!Number.isFinite(petId) || petId <= 0) {
     throw new Error('유효한 반려동물을 선택해 주세요.');
   }
@@ -408,7 +428,14 @@ export const requestUrineDiagnosis = async (
 
   if (response.status === 201) {
     console.log('[urine] upload success', { url: uploadUrl, petId, status: response.status });
-    return;
+    const data = await parseJsonSafe(response);
+    if (data && typeof data === 'object') {
+      return data as { id?: string; submissionId?: string };
+    }
+    const idFromLocation = extractSubmissionIdFromLocation(
+      response.headers.get('Location')
+    );
+    return idFromLocation ? { submissionId: idFromLocation } : null;
   }
 
   const errorText = await readErrorBody(response);

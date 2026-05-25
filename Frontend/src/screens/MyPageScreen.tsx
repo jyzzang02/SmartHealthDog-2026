@@ -13,7 +13,7 @@ import {
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
-import { getMyPets, PetListItem } from "../api/pets";
+import { getMyPets, getPetDetail, PetListItem } from "../api/pets";
 import { getMyProfile, UserProfile } from "../api/users";
 import { resolveImageUri } from "../utils/imageUri";
 import { getStoredAccessToken } from "../storage/tokenStorage";
@@ -81,9 +81,33 @@ const MyPageScreen = () => {
         getMyProfile(),
         getMyPets(),
       ]);
-
       setUser(profileData);
       setPetList(petsData);
+
+      const petsNeedingImage = petsData.filter(
+        (pet) => !resolveImageUri(pet.profilePicture) && Boolean(pet.id)
+      );
+
+      if (petsNeedingImage.length > 0) {
+        Promise.all(
+          petsData.map(async (pet) => {
+            const hasImage = Boolean(resolveImageUri(pet.profilePicture));
+            if (hasImage || !pet.id) return pet;
+            try {
+              const detail = await getPetDetail(pet.id);
+              return {
+                ...pet,
+                ...detail,
+                profilePicture: detail.profilePicture || pet.profilePicture,
+              };
+            } catch {
+              return pet;
+            }
+          })
+        ).then((enriched) => {
+          setPetList(enriched);
+        });
+      }
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
@@ -123,12 +147,13 @@ const MyPageScreen = () => {
     : undefined;
 
   return (
-    <ScrollView
-      style={styles.container}
-      showsVerticalScrollIndicator={false}
-      contentContainerStyle={{ paddingBottom: 60 }}
-    >
+    <View style={styles.container}>
       <Header />
+      <ScrollView
+        style={styles.pageScroll}
+        contentContainerStyle={styles.pageScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
 
       {/* 🔹 유저 프로필 영역 */}
       <TouchableOpacity
@@ -193,36 +218,38 @@ const MyPageScreen = () => {
 
       {petCards.length > 1 && (
         <>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={CARD_WIDTH + SPACING}
-            decelerationRate="fast"
-            contentContainerStyle={{
-              paddingHorizontal: (SCREEN_WIDTH - CARD_WIDTH) / 2,
-            }}
-            onScroll={(e) => {
-              const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / (CARD_WIDTH + SPACING));
-              setCurrentIndex(index);
-            }}
-            scrollEventThrottle={16}
-          >
-            {petCards.map((pet, idx) => (
-              <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
-                <PetProfileCard
-                  {...pet}
-                  onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
-                  onPressHistory={() =>
-                    navigation.navigate("DiagnosisHistory", {
-                      petId: pet.id,
-                      petName: pet.name,
-                    })
-                  }
-                />
-              </View>
-            ))}
-          </ScrollView>
+          <View style={styles.petCarouselWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={CARD_WIDTH + SPACING}
+              decelerationRate="fast"
+              contentContainerStyle={{
+                paddingHorizontal: (SCREEN_WIDTH - CARD_WIDTH) / 2,
+              }}
+              onScroll={(e) => {
+                const x = e.nativeEvent.contentOffset.x;
+                const index = Math.round(x / (CARD_WIDTH + SPACING));
+                setCurrentIndex(index);
+              }}
+              scrollEventThrottle={16}
+            >
+              {petCards.map((pet, idx) => (
+                <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
+                  <PetProfileCard
+                    {...pet}
+                    onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
+                    onPressHistory={() =>
+                      navigation.navigate("DiagnosisHistory", {
+                        petId: pet.id,
+                        petName: pet.name,
+                      })
+                    }
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
 
           <View style={styles.dotContainer}>
             {petCards.map((_, i) => (
@@ -279,7 +306,8 @@ const MyPageScreen = () => {
           </View>
         </View>
       </TouchableOpacity>
-    </ScrollView>
+      </ScrollView>
+    </View>
   );
 };
 
@@ -289,6 +317,12 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#ffffff",
+  },
+  pageScroll: {
+    flex: 1,
+  },
+  pageScrollContent: {
+    paddingBottom: 28,
   },
   userBox: {
     marginTop: 16,
@@ -349,6 +383,9 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginTop: 32,
     gap: 8,
+  },
+  petCarouselWrap: {
+    minHeight: 360,
   },
   dot: {
     width: 8,

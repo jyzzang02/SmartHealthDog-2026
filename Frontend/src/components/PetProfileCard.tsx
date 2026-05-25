@@ -1,7 +1,13 @@
-import React from "react";
-import { View, Text, StyleSheet, Image, TouchableOpacity, ImageSourcePropType } from "react-native";
+﻿import React from "react";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  TouchableOpacity,
+  ImageSourcePropType,
+} from "react-native";
 import BlueButton from "./BlueButton";
-
 
 interface PetProfileCardProps {
   name: string;
@@ -26,12 +32,15 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
   onPressHistory,
   onPressEdit,
 }) => {
-  const hasImage = !!imageUrl;
+  const hasImage = Boolean(imageUrl);
+  const imageSource: ImageSourcePropType | undefined =
+    typeof imageUrl === "string"
+      ? { uri: imageUrl }
+      : imageUrl ?? undefined;
 
   return (
     <View style={styles.cardWrapper}>
       <View style={styles.card}>
-        {/* 수정 아이콘 */}
         <TouchableOpacity style={styles.editBtn} onPress={onPressEdit}>
           <Image
             source={require("../assets/icon_edit.png")}
@@ -39,27 +48,21 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
           />
         </TouchableOpacity>
 
-        {/* 이미지 or 회색 원 */}
         {hasImage ? (
           <Image
-            source={
-              typeof imageUrl === "string" ? { uri: imageUrl } : imageUrl
-            }
+            source={imageSource}
             style={styles.petImage}
           />
         ) : (
           <View style={styles.petCircle} />
         )}
 
-        {/* 이름 */}
         <Text style={styles.petName}>{name}</Text>
         <Text style={styles.petInfo}>{`${type} / ${gender} / ${birth}`}</Text>
 
-        {/* 보건정보 */}
         <View style={styles.healthRow}>
-        <Text style={styles.label}>보건정보 :</Text>
-
-        <View style={styles.tagRow}>
+          <Text style={styles.label}>보건정보 :</Text>
+          <View style={styles.tagRow}>
             {healthInfo.map((item, idx) => (
               <BlueButton
                 type="tag"
@@ -72,19 +75,16 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
                 paddingHorizontal={12}
               />
             ))}
-        </View>
+          </View>
         </View>
 
-
-        {/* 건강상태 */}
         <View style={styles.row}>
           <Text style={styles.label}>건강상태 :</Text>
           <Text style={styles.conditionText}>{condition}</Text>
         </View>
 
-        {/* 최근 진단내역 버튼 */}
         <TouchableOpacity style={styles.historyBtn} onPress={onPressHistory}>
-          <Text style={styles.historyBtnText}>최근 진단내역 보러가기</Text>
+          <Text style={styles.historyBtnText}>최근 진단이력 보러가기</Text>
           <Image
             source={require("../assets/icon_right.png")}
             style={styles.smallRightIcon}
@@ -98,11 +98,10 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
 export default PetProfileCard;
 
 const styles = StyleSheet.create({
-
-    cardWrapper: {
-        width: "78%",             // 전체 화면보다 좁게
-        alignSelf: "center",
-      },
+  cardWrapper: {
+    width: "100%",
+    alignSelf: "stretch",
+  },
 
   card: {
     marginTop: 16,
@@ -120,18 +119,16 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 16,
-    backgroundColor: "#F1F1F1",  
+    backgroundColor: "#F1F1F1",
     alignItems: "center",
     justifyContent: "center",
   },
-  
 
   editIcon: {
     width: 12,
     height: 12,
     tintColor: "#666",
   },
-  
 
   petImage: {
     width: 80,
@@ -181,19 +178,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginTop: 20,
   },
-  
+
   tagRow: {
     flexDirection: "row",
     flexWrap: "wrap",
     marginTop: 4,
   },
-  
 
   conditionText: {
     color: "#4A90E2",
     fontWeight: "600",
     fontSize: 16,
-    
   },
 
   historyBtn: {
@@ -219,8 +214,9 @@ const styles = StyleSheet.create({
     tintColor: "#0081D5",
     marginLeft: 8,
   },
+
   healthTag: {
     marginRight: 8,
     marginBottom: 6,
-  }
+  },
 });

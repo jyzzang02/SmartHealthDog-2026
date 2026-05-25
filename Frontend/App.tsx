@@ -72,21 +72,25 @@ export type RootStackParamList = {
   EyeDiagnosisResult: {
     petId: number;
     submissionId?: string;
+    origin?: 'history';
+    petName?: string;
   };
 
    UrineDiagnosis: undefined;
    UrineCamera: undefined;
-   UrineDiagnosisResult: {
-     petId: number;
-     submissionId?: string;
-   };
+    UrineDiagnosisResult: {
+      petId: number;
+      submissionId?: string;
+      origin?: 'history';
+      petName?: string;
+    };
 
   MyPage: undefined;
   GameScreen: undefined;
   ProfileEdit: undefined;
 
   DiagnosisHistory: {
-    petId: number;
+    petId?: number;
     petName?: string;
   };
 
