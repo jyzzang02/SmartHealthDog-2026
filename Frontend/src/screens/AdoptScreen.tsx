@@ -24,6 +24,13 @@ import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
 import WebView, { WebViewMessageEvent } from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
+import {
+  searchShelters,
+  getShelterDetail,
+  getShelterPets,
+  PetDetail,
+  ShelterListItem,
+} from '../api/shelters';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 
@@ -35,6 +42,7 @@ const MAX_BOTTOM_SHEET_HEIGHT = SCREEN_HEIGHT - 100;
 const KAKAO_APP_KEY = 'e65e93f752b1590bf9b8be83566dd5b6';
 
 interface ShelterInfo {
+  shelterId?: number;
   name: string;
   rating: number;
   address: string;
@@ -47,7 +55,10 @@ interface ShelterInfo {
 }
 
 interface AnimalInfo {
-  id: string;
+  id: number;
+  shelterId: number;
+  shelterName?: string;
+  shelterPhone?: string;
   name: string;
   type: '강아지' | '고양이';
   tags: string[];
@@ -77,277 +88,6 @@ const DISTRICTS: { [key: string]: string[] } = {
 // 반려동물 타입 데이터
 const PET_TYPES = ['모두', '강아지', '고양이'];
 
-const ANIMALS: AnimalInfo[] = [
-  {
-    id: 'd1',
-    name: '보리',
-    type: '강아지',
-    tags: ['공고중', '수컷', '활발'],
-    breed: '[개] 믹스견',
-    age: '8개월(추정)',
-    location: '양천구',
-    image: require('../assets/img_adoptDog.png'),
-  },
-  {
-    id: 'd2',
-    name: '몽실',
-    type: '강아지',
-    tags: ['공고중', '암컷', '순둥'],
-    breed: '[개] 푸들 믹스',
-    age: '2살(추정)',
-    location: '강남구',
-    image: require('../assets/img_adoptDog.png'),
-  },
-  {
-    id: 'd3',
-    name: '초코',
-    type: '강아지',
-    tags: ['공고중', '수컷'],
-    breed: '[개] 닥스훈트',
-    age: '1살(추정)',
-    location: '수성구',
-    image: require('../assets/img_adoptDog.png'),
-  },
-  {
-    id: 'd4',
-    name: '콩이',
-    type: '강아지',
-    tags: ['공고중', '암컷', '소형'],
-    breed: '[개] 포메라니안',
-    age: '5살(추정)',
-    location: '해운대구',
-    image: require('../assets/img_adoptDog.png'),
-  },
-  {
-    id: 'd5',
-    name: '바다',
-    type: '강아지',
-    tags: ['공고중', '수컷', '중형'],
-    breed: '[개] 진돗개 믹스',
-    age: '3살(추정)',
-    location: '부평구',
-    image: require('../assets/img_adoptDog.png'),
-  },
-  {
-    id: 'c1',
-    name: '하늘',
-    type: '고양이',
-    tags: ['공고중', '수컷', '온순'],
-    breed: '[묘] 코리안숏헤어',
-    age: '6개월(추정)',
-    location: '마포구',
-    image: require('../assets/img_adoptCat.png'),
-  },
-  {
-    id: 'c2',
-    name: '라떼',
-    type: '고양이',
-    tags: ['공고중', '암컷', '활발'],
-    breed: '[묘] 샴 믹스',
-    age: '1살(추정)',
-    location: '용인시',
-    image: require('../assets/img_adoptCat.png'),
-  },
-  {
-    id: 'c3',
-    name: '두리',
-    type: '고양이',
-    tags: ['공고중', '수컷'],
-    breed: '[묘] 러시안블루',
-    age: '2살(추정)',
-    location: '연수구',
-    image: require('../assets/img_adoptCat.png'),
-  },
-  {
-    id: 'c4',
-    name: '밀크',
-    type: '고양이',
-    tags: ['공고중', '암컷', '순둥'],
-    breed: '[묘] 페르시안',
-    age: '4살(추정)',
-    location: '성남시',
-    image: require('../assets/img_adoptCat.png'),
-  },
-  {
-    id: 'c5',
-    name: '밤비',
-    type: '고양이',
-    tags: ['공고중', '수컷', '호기심많음'],
-    breed: '[묘] 아비시니안',
-    age: '9개월(추정)',
-    location: '달서구',
-    image: require('../assets/img_adoptCat.png'),
-  },
-];
-
-const SHELTERS: ShelterInfo[] = [
-  {
-    name: '행복보호소',
-    rating: 4.6,
-    address: '서울특별시 양천구 목동로 120',
-    phone: '02-2010-0001',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '서울특별시',
-    district: '양천구',
-    openStatus: '영업중',
-    openHours: '(월-금) 10:00 - 19:00',
-  },
-  {
-    name: '해피독 센터',
-    rating: 4.8,
-    address: '서울특별시 강남구 테헤란로 420',
-    phone: '02-550-8888',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '서울특별시',
-    district: '강남구',
-    openStatus: '영업중',
-    openHours: '(매일) 09:00 - 21:00',
-  },
-  {
-    name: '서초 동물케어',
-    rating: 4.5,
-    address: '서울특별시 서초구 반포대로 310',
-    phone: '02-345-7755',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '서울특별시',
-    district: '서초구',
-    openStatus: '영업중',
-    openHours: '(화-일) 10:00 - 20:00',
-  },
-  {
-    name: '구로 희망쉼터',
-    rating: 4.2,
-    address: '서울특별시 구로구 디지털로 200',
-    phone: '02-860-2222',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '서울특별시',
-    district: '구로구',
-    openStatus: '영업중',
-    openHours: '(월-토) 09:30 - 18:30',
-  },
-  {
-    name: '마포 러브펫',
-    rating: 4.7,
-    address: '서울특별시 마포구 월드컵북로 44',
-    phone: '02-313-0909',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '서울특별시',
-    district: '마포구',
-    openStatus: '영업중',
-    openHours: '(매일) 10:00 - 22:00',
-  },
-  {
-    name: '성남 해피테일',
-    rating: 4.4,
-    address: '경기도 성남시 분당구 불정로 50',
-    phone: '031-720-3333',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '경기도',
-    district: '성남시',
-    openStatus: '영업중',
-    openHours: '(월-금) 09:30 - 19:00',
-  },
-  {
-    name: '용인 퍼피랜드',
-    rating: 4.3,
-    address: '경기도 용인시 수지구 푸른로 88',
-    phone: '031-520-1122',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '경기도',
-    district: '용인시',
-    openStatus: '영업중',
-    openHours: '(화-일) 10:00 - 20:00',
-  },
-  {
-    name: '수원 케어하우스',
-    rating: 4.6,
-    address: '경기도 수원시 영통구 대학로 100',
-    phone: '031-204-7000',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '경기도',
-    district: '수원시',
-    openStatus: '영업중',
-    openHours: '(매일) 09:00 - 21:00',
-  },
-  {
-    name: '인천 미추홀 케어',
-    rating: 4.1,
-    address: '인천광역시 미추홀구 독배로 15',
-    phone: '032-880-6600',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '인천광역시',
-    district: '미추홀구',
-    openStatus: '영업중',
-    openHours: '(월-토) 10:00 - 19:00',
-  },
-  {
-    name: '연수 반려촌',
-    rating: 4.5,
-    address: '인천광역시 연수구 센트럴로 120',
-    phone: '032-830-0404',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '인천광역시',
-    district: '연수구',
-    openStatus: '영업중',
-    openHours: '(매일) 09:30 - 20:30',
-  },
-  {
-    name: '부평 하트펫',
-    rating: 4.0,
-    address: '인천광역시 부평구 길주로 200',
-    phone: '032-520-7777',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '인천광역시',
-    district: '부평구',
-    openStatus: '영업중',
-    openHours: '(화-일) 10:00 - 21:00',
-  },
-  {
-    name: '해운대 러브펫',
-    rating: 4.6,
-    address: '부산광역시 해운대구 센텀서로 45',
-    phone: '051-740-2020',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '부산광역시',
-    district: '해운대구',
-    openStatus: '영업중',
-    openHours: '(매일) 09:00 - 20:00',
-  },
-  {
-    name: '부산진 해피포즈',
-    rating: 4.3,
-    address: '부산광역시 부산진구 가야대로 610',
-    phone: '051-320-5555',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '부산광역시',
-    district: '부산진구',
-    openStatus: '영업중',
-    openHours: '(월-토) 09:30 - 18:30',
-  },
-  {
-    name: '수성 해피테일',
-    rating: 4.4,
-    address: '대구광역시 수성구 동대구로 320',
-    phone: '053-770-3030',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '대구광역시',
-    district: '수성구',
-    openStatus: '영업중',
-    openHours: '(매일) 10:00 - 21:00',
-  },
-  {
-    name: '달서 퍼피케어',
-    rating: 4.2,
-    address: '대구광역시 달서구 월배로 180',
-    phone: '053-620-0909',
-    image: require('../assets/adopt_placeholder.png'),
-    region: '대구광역시',
-    district: '달서구',
-    openStatus: '영업중',
-    openHours: '(화-일) 10:30 - 20:30',
-  },
-];
-
 export default function AdoptScreen() {
   const navigation = useNavigation<NavigationProp>();
   const contentScrollRef = useRef<ScrollView>(null);
@@ -359,6 +99,12 @@ export default function AdoptScreen() {
   const [selectedPetType, setSelectedPetType] = useState<string>('모두');
   const [showPetTypeModal, setShowPetTypeModal] = useState(false);
   const [selectedShelter, setSelectedShelter] = useState<ShelterInfo | null>(null);
+  const [shelters, setShelters] = useState<ShelterInfo[]>([]);
+  const [isShelterLoading, setIsShelterLoading] = useState(false);
+  const [shelterError, setShelterError] = useState<string | null>(null);
+  const [adoptPets, setAdoptPets] = useState<AnimalInfo[]>([]);
+  const [isAdoptLoading, setIsAdoptLoading] = useState(false);
+  const [adoptError, setAdoptError] = useState<string | null>(null);
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number }>({
     lat: 37.5665,
@@ -423,8 +169,143 @@ export default function AdoptScreen() {
     requestLocationPermission();
   }, []);
 
+  const buildLocationText = useCallback(() => {
+    const parts = [selectedRegion, selectedDistrict].filter(Boolean);
+    return parts.join(' ').trim();
+  }, [selectedDistrict, selectedRegion]);
+
+  const mapSpeciesToType = useCallback((species?: string): '강아지' | '고양이' => {
+    if (!species) return '강아지';
+    const normalized = species.toLowerCase();
+    if (normalized.includes('cat') || normalized.includes('고양이')) return '고양이';
+    return '강아지';
+  }, []);
+
+  const mapPetTags = useCallback((pet: PetDetail): string[] => {
+    const tags: string[] = [];
+    if (pet.adoption_status) tags.push(pet.adoption_status);
+    if (pet.gender) tags.push(pet.gender);
+    if (pet.is_neutered !== undefined) tags.push(pet.is_neutered ? '중성화 O' : '중성화 X');
+    return tags.length > 0 ? tags : ['공고중'];
+  }, []);
+
+  const mapPetToAnimalInfo = useCallback(
+    (pet: PetDetail, shelterName?: string, shelterPhone?: string): AnimalInfo => {
+      const imageSource = pet.images?.[0]
+        ? { uri: pet.images[0] }
+        : require('../assets/adopt_placeholder.png');
+
+      return {
+        id: pet.pet_id,
+        shelterId: pet.shelter_id,
+        shelterName,
+        shelterPhone,
+        name: pet.name || '이름 없음',
+        type: mapSpeciesToType(pet.species),
+        tags: mapPetTags(pet),
+        breed: pet.breed || pet.species || '',
+        age: pet.age || '',
+        location: pet.shelter_contact?.address || '',
+        image: imageSource,
+      };
+    },
+    [mapPetTags, mapSpeciesToType]
+  );
+
+  const mapToShelterInfo = useCallback(
+    (item: ShelterListItem): ShelterInfo => {
+      const [region, district] = (item.address || '').split(' ');
+      const isOpen = item.open_now === true;
+      const isClosed = item.open_now === false;
+
+      return {
+        shelterId: item.shelter_id,
+        name: item.name,
+        rating: item.rating ?? 0,
+        address: item.address,
+        phone: item.phone_number ?? '',
+        image: require('../assets/adopt_placeholder.png'),
+        region: region || selectedRegion || '',
+        district: district || selectedDistrict || '',
+        openStatus: isOpen ? '영업중' : isClosed ? '영업종료' : '정보없음',
+        openHours: item.open_now === undefined ? '운영시간 정보 없음' : '운영시간 정보 없음',
+      };
+    },
+    [selectedDistrict, selectedRegion]
+  );
+
+  const fetchShelters = useCallback(async () => {
+    const locationText = buildLocationText();
+    const params = locationText
+      ? { location: locationText }
+      : {
+          lat: currentLocation.lat,
+          lng: currentLocation.lng,
+          radius_km: 10,
+          sort_by: 'distance' as const,
+        };
+
+    setIsShelterLoading(true);
+    setShelterError(null);
+    try {
+      const response = await searchShelters(params);
+      const mapped = (response.items || []).map(mapToShelterInfo);
+      setShelters(mapped);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '보호소 정보를 불러오지 못했습니다.';
+      setShelterError(message);
+      setShelters([]);
+    } finally {
+      setIsShelterLoading(false);
+    }
+  }, [buildLocationText, currentLocation.lat, currentLocation.lng, mapToShelterInfo]);
+
+  const fetchAdoptPets = useCallback(async () => {
+    if (activeTab !== '입양 홍보') return;
+
+    const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
+    if (shelterSources.length === 0) {
+      setAdoptPets([]);
+      return;
+    }
+
+    setIsAdoptLoading(true);
+    setAdoptError(null);
+    try {
+      const petResults = await Promise.all(
+        shelterSources.map(async (shelter) => {
+          const response = await getShelterPets(shelter.shelterId as number, {
+            limit: 20,
+            offset: 0,
+          });
+          const animals = response.items.map((pet) =>
+            mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
+          );
+          return animals;
+        })
+      );
+      const merged = petResults.flat();
+      setAdoptPets(merged);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
+      setAdoptError(message);
+      setAdoptPets([]);
+    } finally {
+      setIsAdoptLoading(false);
+    }
+  }, [activeTab, shelters, mapPetToAnimalInfo]);
+
+  useEffect(() => {
+    fetchShelters();
+  }, [fetchShelters]);
+
+  useEffect(() => {
+    fetchAdoptPets();
+  }, [fetchAdoptPets]);
+
   // 바텀시트 열기
-  const openBottomSheet = (shelter: ShelterInfo) => {
+  const openBottomSheet = async (shelter: ShelterInfo) => {
     setSelectedShelter(shelter);
     setShowBottomSheet(true);
     bottomSheetY.setValue(SCREEN_HEIGHT);
@@ -433,6 +314,23 @@ export default function AdoptScreen() {
       useNativeDriver: false,
       tension: 50,
     }).start();
+
+    if (!shelter.shelterId) return;
+    try {
+      const detail = await getShelterDetail(shelter.shelterId);
+      setSelectedShelter((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          name: detail.name || prev.name,
+          address: detail.address || prev.address,
+          phone: detail.phone_number || prev.phone,
+          openHours: detail.operating_hours || prev.openHours,
+        };
+      });
+    } catch (error) {
+      console.log('[shelters] detail load failed', error);
+    }
   };
 
   // 바텀시트 닫기
@@ -521,13 +419,7 @@ export default function AdoptScreen() {
     setMapError(null);
   }, [currentLocation.lat, currentLocation.lng]);
 
-  const filteredShelters = useMemo(() => {
-    return SHELTERS.filter((shelter) => {
-      if (selectedRegion && shelter.region !== selectedRegion) return false;
-      if (selectedDistrict && shelter.district !== selectedDistrict) return false;
-      return true;
-    });
-  }, [selectedDistrict, selectedRegion]);
+  const filteredShelters = useMemo(() => shelters, [shelters]);
 
   const handleResetFilters = useCallback(() => {
     setSelectedRegion('');
@@ -542,10 +434,10 @@ export default function AdoptScreen() {
   const filteredAnimals = useMemo(() => {
     const list =
       selectedPetType === '모두'
-        ? ANIMALS
-        : ANIMALS.filter((animal) => animal.type === selectedPetType);
-    return [...list].sort(() => Math.random() - 0.5);
-  }, [selectedPetType]);
+        ? adoptPets
+        : adoptPets.filter((animal) => animal.type === selectedPetType);
+    return list;
+  }, [adoptPets, selectedPetType]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -741,12 +633,16 @@ export default function AdoptScreen() {
 
               {/* 보호소 카드 리스트 */}
               <View style={styles.shelterListContainer}>
-                {filteredShelters.length === 0 ? (
+                {isShelterLoading ? (
+                  <Text style={styles.emptyText}>보호소 정보를 불러오는 중...</Text>
+                ) : shelterError ? (
+                  <Text style={styles.emptyText}>{shelterError}</Text>
+                ) : filteredShelters.length === 0 ? (
                   <Text style={styles.emptyText}>선택한 조건에 맞는 보호소가 없어요.</Text>
                 ) : (
                   filteredShelters.map((shelter) => (
                     <TouchableOpacity 
-                      key={shelter.name} 
+                      key={shelter.shelterId ?? shelter.name}
                       style={styles.shelterCard}
                       onPress={() => openBottomSheet(shelter)}
                       activeOpacity={0.7}
@@ -800,48 +696,56 @@ export default function AdoptScreen() {
 
             {/* 동물 카드 리스트 */}
             <View style={styles.animalListContainer}>
-                {filteredAnimals.map((animal) => (
-                  <TouchableOpacity
-                    key={animal.id}
-                    style={styles.animalCard}
-                    onPress={() => navigation.navigate('AnimalDetail', { animalData: animal })}
-                    activeOpacity={0.7}
-                  >
-                    {/* 동물 사진 */}
-                    <Image
-                      source={animal.image}
-                      style={styles.animalImage}
-                    />
+                {isAdoptLoading ? (
+                  <Text style={styles.emptyText}>입양 동물 정보를 불러오는 중...</Text>
+                ) : adoptError ? (
+                  <Text style={styles.emptyText}>{adoptError}</Text>
+                ) : filteredAnimals.length === 0 ? (
+                  <Text style={styles.emptyText}>입양 홍보 동물이 없어요.</Text>
+                ) : (
+                  filteredAnimals.map((animal) => (
+                    <TouchableOpacity
+                      key={animal.id}
+                      style={styles.animalCard}
+                      onPress={() => navigation.navigate('AnimalDetail', { animalData: animal })}
+                      activeOpacity={0.7}
+                    >
+                      {/* 동물 사진 */}
+                      <Image
+                        source={animal.image}
+                        style={styles.animalImage}
+                      />
 
-                    {/* 동물 정보 */}
-                    <View style={styles.animalInfo}>
-                      {/* 동물 태그 */}
-                      <View style={styles.tagsContainer}>
-                        {animal.tags.map((tag, tagIndex) => (
-                          <View key={tagIndex} style={styles.tag}>
-                            <Text style={styles.tagText}>{tag}</Text>
+                      {/* 동물 정보 */}
+                      <View style={styles.animalInfo}>
+                        {/* 동물 태그 */}
+                        <View style={styles.tagsContainer}>
+                          {animal.tags.map((tag, tagIndex) => (
+                            <View key={tagIndex} style={styles.tag}>
+                              <Text style={styles.tagText}>{tag}</Text>
+                            </View>
+                          ))}
+                        </View>
+
+                        {/* 품종, 나이, 구조장소 */}
+                        <View style={styles.detailsContainer}>
+                          <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>품종</Text>
+                            <Text style={styles.detailValue}>{animal.breed}</Text>
                           </View>
-                        ))}
-                      </View>
-
-                      {/* 품종, 나이, 구조장소 */}
-                      <View style={styles.detailsContainer}>
-                        <View style={styles.detailRow}>
-                          <Text style={styles.detailLabel}>품종</Text>
-                          <Text style={styles.detailValue}>{animal.breed}</Text>
-                        </View>
-                        <View style={styles.detailRow}>
-                          <Text style={styles.detailLabel}>나이</Text>
-                          <Text style={styles.detailValue}>{animal.age}</Text>
-                        </View>
-                        <View style={styles.detailRow}>
-                          <Text style={styles.detailLabel}>구조장소</Text>
-                          <Text style={styles.detailValue}>{animal.location}</Text>
+                          <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>나이</Text>
+                            <Text style={styles.detailValue}>{animal.age}</Text>
+                          </View>
+                          <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>구조장소</Text>
+                            <Text style={styles.detailValue}>{animal.location}</Text>
+                          </View>
                         </View>
                       </View>
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  ))
+                )}
             </View>
           </View>
         )}

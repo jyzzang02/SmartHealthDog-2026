@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
+import { getShelterPetDetail, PetDetail } from '../api/shelters';
 
 type AnimalDetailRouteProp = RouteProp<RootStackParamList, 'AnimalDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -19,6 +20,57 @@ export default function AnimalDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<AnimalDetailRouteProp>();
   const { animalData } = route.params;
+  const [petDetail, setPetDetail] = useState<PetDetail | null>(null);
+  const [petError, setPetError] = useState<string | null>(null);
+  const [isPetLoading, setIsPetLoading] = useState(false);
+
+  useEffect(() => {
+    if (!animalData.shelterId || !animalData.id) return;
+
+    const fetchPetDetail = async () => {
+      setIsPetLoading(true);
+      setPetError(null);
+      try {
+        const detail = await getShelterPetDetail(animalData.shelterId, animalData.id);
+        setPetDetail(detail);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : '동물 상세 정보를 불러오지 못했습니다.';
+        setPetError(message);
+      } finally {
+        setIsPetLoading(false);
+      }
+    };
+
+    fetchPetDetail();
+  }, [animalData.id, animalData.shelterId]);
+
+  const imageSource = useMemo(() => {
+    if (petDetail?.images?.[0]) {
+      return { uri: petDetail.images[0] };
+    }
+    return animalData.image;
+  }, [animalData.image, petDetail?.images]);
+
+  const shelterName =
+    petDetail?.shelter_contact?.name || animalData.shelterName || '보호소 정보';
+  const shelterPhone =
+    petDetail?.shelter_contact?.phone_number || animalData.shelterPhone || '';
+
+  const summaryText = useMemo(() => {
+    const parts: string[] = [];
+    if (petDetail?.gender) parts.push(petDetail.gender);
+    if (petDetail?.is_neutered !== undefined) {
+      parts.push(petDetail.is_neutered ? '중성화 O' : '중성화 X');
+    }
+    if (petDetail?.age) parts.push(petDetail.age);
+    return parts.length > 0 ? parts.join(' / ') : '정보 없음';
+  }, [petDetail?.age, petDetail?.gender, petDetail?.is_neutered]);
+
+  const breedText = petDetail?.breed || animalData.breed || '품종 정보 없음';
+  const adoptionStatus = petDetail?.adoption_status || '정보 없음';
+  const description = petDetail?.description || '정보 없음';
+  const shelterAddress = petDetail?.shelter_contact?.address || animalData.location || '정보 없음';
 
   return (
     <View style={styles.container}>
@@ -47,60 +99,55 @@ export default function AnimalDetailScreen() {
         showsVerticalScrollIndicator={false}
       >
         {/* 보호소 제목 */}
-        <Text style={styles.shelterTitle}>밀양시 동물보호센터</Text>
+        <Text style={styles.shelterTitle}>{shelterName}</Text>
 
         {/* 동물 이미지 */}
         <View style={styles.imageContainer}>
           <Image
-            source={animalData.image}
+            source={imageSource}
             style={styles.animalImage}
           />
         </View>
 
         {/* 품종 */}
-        <Text style={styles.breedText}>{animalData.breed}</Text>
+        <Text style={styles.breedText}>{breedText}</Text>
 
         {/* 상세 정보 요약 */}
-        <Text style={styles.summaryText}>수컷(중성화 X) / 흰색 / 2025(년생) / 2.3(kg)</Text>
+        <Text style={styles.summaryText}>{summaryText}</Text>
 
         {/* 구분선 */}
         <View style={styles.divider} />
 
+        {isPetLoading && (
+          <Text style={styles.loadingText}>동물 정보를 불러오는 중...</Text>
+        )}
+        {petError && <Text style={styles.errorText}>{petError}</Text>}
+
         {/* 상세 정보 */}
         <View style={styles.detailsSection}>
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>입양날짜</Text>
-            <Text style={styles.detailValue}>17일 후 입양가능</Text>
+            <Text style={styles.detailLabel}>입양상태</Text>
+            <Text style={styles.detailValue}>{adoptionStatus}</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>공고번호</Text>
-            <Text style={styles.detailValue}>경남-밀양-2025-10-10</Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>공고기간</Text>
-            <Text style={styles.detailValue}>2025-09-24 ~ 2025-10-10</Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>발견장소</Text>
-            <Text style={styles.detailValue}>{animalData.location}</Text>
-          </View>
-
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>특이사항</Text>
-            <Text style={styles.detailValue}>6마리 남매, 몸에 비해 작은얼굴이 매력적</Text>
+            <Text style={styles.detailLabel}>소개</Text>
+            <Text style={styles.detailValue}>{description}</Text>
           </View>
 
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>보호센터</Text>
-            <Text style={styles.detailValue}>밀양시 동물보호센터</Text>
+            <Text style={styles.detailValue}>{shelterName}</Text>
           </View>
 
           <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>관할기관</Text>
-            <Text style={styles.detailValue}>경상남도 밀양시</Text>
+            <Text style={styles.detailLabel}>주소</Text>
+            <Text style={styles.detailValue}>{shelterAddress}</Text>
+          </View>
+
+          <View style={styles.detailRow}>
+            <Text style={styles.detailLabel}>연락처</Text>
+            <Text style={styles.detailValue}>{shelterPhone || '정보 없음'}</Text>
           </View>
         </View>
 
@@ -110,6 +157,7 @@ export default function AnimalDetailScreen() {
             text="전화하기"
             onPress={() => {}}
             width={350}
+            disabled={!shelterPhone}
           />
         </View>
       </ScrollView>
@@ -187,6 +235,20 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginVertical: 20,
   },
+  loadingText: {
+    textAlign: 'center',
+    color: '#7B7C7D',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 10,
+  },
+  errorText: {
+    textAlign: 'center',
+    color: '#D14343',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 10,
+  },
   detailsSection: {
     paddingHorizontal: 20,
   },
@@ -212,4 +274,3 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 });
-
