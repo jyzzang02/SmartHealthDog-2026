@@ -44,4 +44,12 @@ out/
 src/main/resources/schema.sql
 
 ### static files ###
+app-env-backup-*.txt
+docker-compose-dev.yml.save
+
+
+app-env-backup-*.txt
+*.env
+.env
+.env.*
 src/main/resources/static/

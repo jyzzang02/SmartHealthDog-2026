@@ -28,7 +28,7 @@ import lombok.RequiredArgsConstructor;
  * Development-only implementation to save images to the local static folder.
  */
 @Component
-@Profile({"dev", "test"})
+@Profile("local")
 @RequiredArgsConstructor
 public class LocalImageUploader implements ImageUploader {
 

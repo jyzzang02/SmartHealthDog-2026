@@ -1,5 +1,7 @@
 package com.smarthealthdog.backend.config;
 
+import java.net.URI;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,11 +21,15 @@ public class AWSConfig {
 
     @Value("${cloud.aws.credentials.secret-key}")
     private String secretKey;
-    
+
+    @Value("${cloud.aws.endpoint}")
+    private String endpoint;
+
     @Bean
     public S3Client s3Client() {
         return S3Client.builder()
                 .region(Region.of(region))
+                .endpointOverride(URI.create(endpoint))
                 .credentialsProvider(StaticCredentialsProvider.create(
                     AwsBasicCredentials.create(accessKey, secretKey)
                 ))

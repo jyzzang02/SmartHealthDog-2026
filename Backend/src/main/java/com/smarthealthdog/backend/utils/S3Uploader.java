@@ -29,7 +29,7 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 
 @RequiredArgsConstructor
 @Component
-@Profile("prod")
+@Profile({"prod", "dev"})
 public class S3Uploader implements ImageUploader {
     private final S3Client s3Client;
     private final UserRepository userRepository;

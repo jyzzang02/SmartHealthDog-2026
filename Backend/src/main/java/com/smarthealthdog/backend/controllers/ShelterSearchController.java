@@ -23,7 +23,7 @@ public class ShelterSearchController {
 
     // [GET] /api/shelters/search
     @GetMapping("/search")
-    @PreAuthorize("hasAuthority('can_view_shelters')")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ShelterSearchResponse> search(
             @RequestParam(required = false) String location,
             @RequestParam(required = false) Double lat,

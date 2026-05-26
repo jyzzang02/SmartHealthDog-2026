@@ -127,6 +127,7 @@ app:
 
 cloud:
   aws:
+    endpoint: ${AWS_ENDPOINT}
     region:
       static: ${AWS_REGION}
     credentials:
