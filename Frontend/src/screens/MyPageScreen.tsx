@@ -20,6 +20,8 @@ import { getStoredAccessToken } from "../storage/tokenStorage";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
+import { healthStore } from "../store/healthStore";
+import type { HealthSummary, OverallCondition } from "../types/health";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
@@ -35,6 +37,7 @@ const MyPageScreen = () => {
   const [isPetsLoading, setIsPetsLoading] = useState(false);
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -131,6 +134,7 @@ const MyPageScreen = () => {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      setHealthData(healthStore.getAll());
     }, [loadData])
   );
 
@@ -148,6 +152,75 @@ const MyPageScreen = () => {
       })),
     [petList]
   );
+
+  /* ─── 건강 요약 렌더 함수 ─── */
+  const CONDITION_COLORS: Record<OverallCondition, { bg: string; text: string }> = {
+    양호: { bg: "#E8F4FD", text: "#2A7BE4" },
+    주의: { bg: "#FFF3E0", text: "#F5A623" },
+    위험: { bg: "#FFEBEE", text: "#EF5F5F" },
+  };
+
+  const renderHealthSection = (petId: number, petName: string) => {
+    const summary = healthData[petId];
+
+    if (!summary) {
+      return (
+        <TouchableOpacity
+          style={styles.healthInputBtn}
+          onPress={() =>
+            navigation.navigate("HealthCheckInput", { petId, petName })
+          }
+          activeOpacity={0.8}
+        >
+          <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
+          <Image
+            source={require("../assets/icon_right.png")}
+            style={styles.healthInputBtnArrow}
+          />
+        </TouchableOpacity>
+      );
+    }
+
+    const colors =
+      CONDITION_COLORS[summary.overallCondition] ?? CONDITION_COLORS["양호"];
+    const displayTags =
+      summary.healthTags.length === 0
+        ? ["특이사항 없음"]
+        : summary.healthTags;
+
+    return (
+      <View style={styles.healthSummary}>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>최근 검진일</Text>
+          <Text style={styles.summaryValue}>{summary.checkupDate}</Text>
+        </View>
+        <View style={styles.summarySection}>
+          <Text style={styles.summaryLabel}>보건정보</Text>
+          <View style={styles.summaryTagRow}>
+            {displayTags.map((tag, i) => (
+              <View key={i} style={styles.summaryTag}>
+                <Text style={styles.summaryTagText}>{tag}</Text>
+              </View>
+            ))}
+          </View>
+        </View>
+        <View style={styles.summaryRow}>
+          <Text style={styles.summaryLabel}>종합 건강상태</Text>
+          <View style={[styles.conditionBadge, { backgroundColor: colors.bg }]}>
+            <Text style={[styles.conditionBadgeText, { color: colors.text }]}>
+              {summary.overallCondition}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.recommendRow}>
+          <View style={styles.recommendPlusBox}>
+            <Text style={styles.recommendPlus}>+</Text>
+          </View>
+          <Text style={styles.recommendText}>{summary.recommendation}</Text>
+        </View>
+      </View>
+    );
+  };
 
   const resolvedUserImage = resolveImageUri(user?.profilePicture);
   const userImageSource: ImageSourcePropType | undefined = resolvedUserImage
@@ -215,16 +288,19 @@ const MyPageScreen = () => {
       )}
 
       {petCards.length === 1 && (
-        <PetProfileCard
-          {...petCards[0]}
-          onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
-          onPressHistory={() =>
-            navigation.navigate("DiagnosisHistory", {
-              petId: petCards[0].id,
-              petName: petCards[0].name,
-            })
-          }
-        />
+        <>
+          <PetProfileCard
+            {...petCards[0]}
+            onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+            onPressHistory={() =>
+              navigation.navigate("DiagnosisHistory", {
+                petId: petCards[0].id,
+                petName: petCards[0].name,
+              })
+            }
+          />
+          {renderHealthSection(petCards[0].id, petCards[0].name)}
+        </>
       )}
 
       {petCards.length > 1 && (
@@ -270,6 +346,13 @@ const MyPageScreen = () => {
               />
             ))}
           </View>
+
+          {/* 현재 펫의 건강 요약 */}
+          {petCards[currentIndex] &&
+            renderHealthSection(
+              petCards[currentIndex].id,
+              petCards[currentIndex].name
+            )}
         </>
       )}
 
@@ -497,6 +580,108 @@ const styles = StyleSheet.create({
     color: "#EF5F5F",
     paddingHorizontal: 20,
     marginTop: 8,
+  },
+
+  /* ────── 건강 요약 / 입력 버튼 ────── */
+  healthInputBtn: {
+    marginTop: 12,
+    marginHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#EEF7FD",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#2A7BE4",
+  },
+  healthInputBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#2A7BE4",
+  },
+  healthInputBtnArrow: {
+    width: 14,
+    height: 14,
+    tintColor: "#2A7BE4",
+  },
+  healthSummary: {
+    marginTop: 12,
+    marginHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#fff",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#E8E8E8",
+    gap: 14,
+  },
+  summaryRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+  },
+  summarySection: {
+    gap: 8,
+  },
+  summaryLabel: {
+    fontSize: 14,
+    color: "#555",
+    fontWeight: "500",
+  },
+  summaryValue: {
+    fontSize: 14,
+    color: "#040505",
+    fontWeight: "500",
+  },
+  summaryTagRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  summaryTag: {
+    backgroundColor: "#F3F4F5",
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  summaryTagText: {
+    fontSize: 13,
+    color: "#555",
+  },
+  conditionBadge: {
+    borderRadius: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+  },
+  conditionBadgeText: {
+    fontSize: 13,
+    fontWeight: "600",
+  },
+  recommendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  recommendPlusBox: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: "#2A7BE4",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recommendPlus: {
+    color: "#fff",
+    fontSize: 12,
+    fontWeight: "700",
+    lineHeight: 14,
+  },
+  recommendText: {
+    fontSize: 13,
+    color: "#2A7BE4",
+    fontWeight: "500",
   },
 });
 
