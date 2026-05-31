@@ -274,6 +274,15 @@ export const requestEyeDiagnosis = async (
   const mimeType = resolveMimeType(image);
   const fileName = image.fileName || normalizeFileName(image.uri, 'eye.jpg');
 
+  console.log('[diagnosis] upload:eye:start', {
+    petId,
+    uploadUrl,
+    uri: image.uri,
+    fileName,
+    mimeType,
+    fileSize: image.fileSize,
+  });
+
   formData.append('image', {
     uri: image.uri,
     type: mimeType,
@@ -297,6 +306,11 @@ export const requestEyeDiagnosis = async (
   }
 
   const message = await parseErrorResponse(response);
+  console.log('[diagnosis] upload:eye:error', {
+    status: response.status,
+    statusText: response.statusText,
+    message,
+  });
   throw new Error(message);
 };
 

@@ -305,6 +305,8 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
               </Text>
             </TouchableOpacity>
           ))}
+
+          <View style={{ height: 80 }} />
         </ScrollView>
       )}
     </View>

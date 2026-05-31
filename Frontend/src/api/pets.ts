@@ -442,6 +442,15 @@ export const requestUrineDiagnosis = async (
   const mimeType = image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg';
   const fileName = image.fileName || normalizeFileName(image.uri) || 'urine.jpg';
 
+  console.log('[diagnosis] upload:urine:start', {
+    petId,
+    uploadUrl,
+    uri: image.uri,
+    fileName,
+    mimeType,
+    fileSize: image.fileSize,
+  });
+
   formData.append('image', {
     uri: image.uri,
     type: mimeType,
@@ -465,6 +474,11 @@ export const requestUrineDiagnosis = async (
   }
 
   const errorText = await readErrorBody(response);
+  console.log('[diagnosis] upload:urine:error', {
+    status: response.status,
+    statusText: response.statusText,
+    message: errorText,
+  });
   throw new Error(
     errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
   );

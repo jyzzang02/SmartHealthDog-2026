@@ -5,6 +5,7 @@ import {
   BackHandler,
   Image,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -108,12 +109,14 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const origin = (route.params as any)?.origin;
   const bypassBeforeRemoveRef = useRef(false);
+  const directLookupTriedRef = useRef(false);
   const isFocused = useIsFocused();
 
   const petName = (route.params as any)?.petName;
 
   const handleBack = useCallback(() => {
-    if (origin === 'history' || origin === 'upload') {
+    if (origin === 'history') {
+      // Try to pop back to an existing DiagnosisHistory in the stack to avoid duplicates
       const state = navigation.getState();
       const routes = state.routes || [];
       const lastIndex = routes.map((r) => r.name).lastIndexOf('DiagnosisHistory');
@@ -144,7 +147,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (event) => {
-      if ((origin !== 'history' && origin !== 'upload') || bypassBeforeRemoveRef.current) {
+      if (origin !== 'history' || bypassBeforeRemoveRef.current) {
         return;
       }
 
@@ -180,7 +183,8 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsLoading(true);
 
     try {
-      if (submissionId) {
+      if (submissionId && !directLookupTriedRef.current) {
+        directLookupTriedRef.current = true;
         try {
           const direct = await getEyeSubmissionResult(submissionId);
           if (!canUpdate()) return;
@@ -188,7 +192,12 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setResult(direct);
           setMessage('');
           return;
-        } catch {
+        } catch (directError) {
+          console.log('[eye] direct submission lookup skipped; using list fallback', {
+            submissionId,
+            message:
+              directError instanceof Error ? directError.message : String(directError),
+          });
         }
       }
 
@@ -262,6 +271,11 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setMessage('');
           return;
         } catch (detailError) {
+          console.log('[eye] detail fetch failed', {
+            status: normalizedStatus,
+            submissionId: idToFetch,
+            error: String(detailError),
+          });
           if (!canUpdate()) return;
           if (!isCompletedStatus(normalizedStatus)) {
             setResult(null);
@@ -314,7 +328,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
     const timer = setTimeout(() => {
       loadResult();
-    }, 2000);
+    }, 5000);
 
     return () => clearTimeout(timer);
   }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
@@ -325,6 +339,29 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     return JSON.stringify(result, null, 2);
+  }, [result]);
+
+  // 결과 데이터 파싱
+  const parsedResults = useMemo(() => {
+    if (!result || typeof result !== 'object') {
+      return [];
+    }
+
+    // results 배열 추출
+    const resultsArray = (result as any).results;
+    if (!Array.isArray(resultsArray)) {
+      return [];
+    }
+
+    return resultsArray.map((item: any) => ({
+      disease: item.disease || '미확인',
+      probability: typeof item.probability === 'number'
+        ? (item.probability * 100).toFixed(1)
+        : (parseFloat(item.probability) * 100).toFixed(1),
+      condition: item.condition || {},
+      name: item.condition?.name || item.disease || '미확인',
+      description: item.condition?.description || '',
+    }));
   }, [result]);
 
   const goHome = () => {
@@ -356,10 +393,45 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.resultContainer}>
         <Text style={styles.resultTitle}>안구 진단 결과</Text>
 
-        <View style={styles.resultBox}>
-          <Text style={styles.resultBoxTitle}>결과 요약</Text>
-          <Text style={styles.resultText}>{resultText}</Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.resultScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {parsedResults.length > 0 ? (
+            <>
+              {parsedResults.map((item, index) => (
+                <View key={index} style={styles.resultCard}>
+                  <View style={styles.resultCardHeader}>
+                    <Text style={styles.resultCardTitle}>{item.name}</Text>
+                    <View style={styles.probabilityBadge}>
+                      <Text style={styles.probabilityText}>{item.probability}%</Text>
+                    </View>
+                  </View>
+
+                  {item.description ? (
+                    <Text style={styles.resultCardDescription}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </>
+          ) : (
+            <View style={styles.noResultBox}>
+              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={goHome}
+          >
+            <Text style={styles.homeButtonText}>홈으로</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: 80 }} />
+        </ScrollView>
       </View>
     );
   };
@@ -511,36 +583,84 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  resultContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 48,
-    backgroundColor: '#FFFFFF',
-  },
-  resultTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2024',
-    marginLeft: 28,
-    marginBottom: 16,
-  },
-  resultBox: {
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  resultBoxTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2024',
-    marginBottom: 8,
-  },
-  resultText: {
-    fontSize: 14,
-    color: '#1F2024',
-    lineHeight: 20,
-  },
+   resultContainer: {
+     flex: 1,
+     paddingHorizontal: 20,
+     paddingTop: 48,
+     backgroundColor: '#FFFFFF',
+   },
+   resultScrollContent: {
+     paddingHorizontal: 8,
+     paddingTop: 12,
+   },
+   resultTitle: {
+     fontSize: 22,
+     fontWeight: '700',
+     color: '#1F2024',
+     marginLeft: 28,
+     marginBottom: 16,
+   },
+   resultCard: {
+     marginBottom: 12,
+     padding: 14,
+     borderRadius: 12,
+     backgroundColor: '#F8FBFF',
+     borderLeftWidth: 4,
+     borderLeftColor: '#0081D5',
+   },
+   resultCardHeader: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     alignItems: 'center',
+     marginBottom: 8,
+   },
+   resultCardTitle: {
+     fontSize: 16,
+     fontWeight: '700',
+     color: '#1F2024',
+     flex: 1,
+   },
+   probabilityBadge: {
+     paddingHorizontal: 10,
+     paddingVertical: 4,
+     borderRadius: 16,
+     backgroundColor: '#0081D5',
+   },
+   probabilityText: {
+     fontSize: 12,
+     fontWeight: '700',
+     color: '#FFFFFF',
+   },
+   resultCardDescription: {
+     fontSize: 13,
+     color: '#555555',
+     lineHeight: 19,
+   },
+   noResultBox: {
+     marginTop: 40,
+     alignItems: 'center',
+   },
+   noResultText: {
+     fontSize: 16,
+     color: '#999999',
+   },
+   resultBox: {
+     marginTop: 12,
+     padding: 16,
+     borderRadius: 12,
+     backgroundColor: '#F5F7FA',
+   },
+   resultBoxTitle: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: '#1F2024',
+     marginBottom: 8,
+   },
+   resultText: {
+     fontSize: 14,
+     color: '#1F2024',
+     lineHeight: 20,
+   },
 
   messageContainer: {
     flex: 1,

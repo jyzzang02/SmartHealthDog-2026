@@ -5,6 +5,7 @@ import {
   BackHandler,
   Image,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -186,7 +187,12 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setResult(direct);
           setMessage('');
           return;
-        } catch {
+        } catch (directError) {
+          console.log('[urine] direct submission lookup skipped; using list fallback', {
+            submissionId,
+            message:
+              directError instanceof Error ? directError.message : String(directError),
+          });
         }
       }
 
@@ -323,6 +329,25 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     return JSON.stringify(result, null, 2);
   }, [result]);
 
+  // 결과 데이터 파싱 - 소변 검사 결과
+  const parsedResults = useMemo(() => {
+    if (!result || typeof result !== 'object') {
+      return [];
+    }
+
+    // results 배열 추출
+    const resultsArray = (result as any).results;
+    if (!Array.isArray(resultsArray)) {
+      return [];
+    }
+
+    return resultsArray.map((item: any) => ({
+      analyte: item.analyte || '미확인',
+      value: item.value || '-',
+      colorRGB: item.colorRGB || [],
+    }));
+  }, [result]);
+
   const goHome = () => {
     navigation.navigate('Main');
   };
@@ -352,10 +377,57 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.resultContainer}>
         <Text style={styles.resultTitle}>소변키트 진단 결과</Text>
 
-        <View style={styles.resultBox}>
-          <Text style={styles.resultBoxTitle}>결과 요약</Text>
-          <Text style={styles.resultText}>{resultText}</Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.resultScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {parsedResults.length > 0 ? (
+            <>
+              {parsedResults.map((item, index) => (
+                <View key={index} style={styles.resultCard}>
+                  <View style={styles.resultCardHeader}>
+                    <Text style={styles.resultCardTitle}>{item.analyte}</Text>
+                  </View>
+
+                  <View style={styles.resultCardRow}>
+                    <Text style={styles.resultCardLabel}>검사 결과:</Text>
+                    <Text style={styles.resultCardValue}>{item.value}</Text>
+                  </View>
+
+                  {item.colorRGB && item.colorRGB.length === 3 && (
+                    <View style={styles.resultCardRow}>
+                      <View
+                        style={[
+                          styles.colorBox,
+                          {
+                            backgroundColor: `rgb(${item.colorRGB[0]}, ${item.colorRGB[1]}, ${item.colorRGB[2]})`
+                          }
+                        ]}
+                      />
+                      <Text style={styles.resultCardLabel}>
+                        RGB: ({item.colorRGB.join(', ')})
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </>
+          ) : (
+            <View style={styles.noResultBox}>
+              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={goHome}
+          >
+            <Text style={styles.homeButtonText}>홈으로</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: 80 }} />
+        </ScrollView>
       </View>
     );
   };
@@ -507,36 +579,87 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  resultContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 48,
-    backgroundColor: '#FFFFFF',
-  },
-  resultTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2024',
-    marginLeft: 28,
-    marginBottom: 16,
-  },
-  resultBox: {
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  resultBoxTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2024',
-    marginBottom: 8,
-  },
-  resultText: {
-    fontSize: 14,
-    color: '#1F2024',
-    lineHeight: 20,
-  },
+   resultContainer: {
+     flex: 1,
+     paddingHorizontal: 20,
+     paddingTop: 48,
+     backgroundColor: '#FFFFFF',
+   },
+   resultScrollContent: {
+     paddingHorizontal: 8,
+     paddingTop: 12,
+   },
+   resultTitle: {
+     fontSize: 22,
+     fontWeight: '700',
+     color: '#1F2024',
+     marginLeft: 28,
+     marginBottom: 16,
+   },
+   resultCard: {
+     marginBottom: 12,
+     padding: 14,
+     borderRadius: 12,
+     backgroundColor: '#FFF9F0',
+     borderLeftWidth: 4,
+     borderLeftColor: '#FF9500',
+   },
+   resultCardHeader: {
+     marginBottom: 10,
+   },
+   resultCardTitle: {
+     fontSize: 15,
+     fontWeight: '700',
+     color: '#1F2024',
+   },
+   resultCardRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     marginBottom: 8,
+   },
+   resultCardLabel: {
+     fontSize: 12,
+     color: '#666666',
+     marginRight: 6,
+   },
+   resultCardValue: {
+     fontSize: 13,
+     fontWeight: '600',
+     color: '#FF9500',
+   },
+   colorBox: {
+     width: 24,
+     height: 24,
+     borderRadius: 4,
+     marginRight: 8,
+     borderWidth: 1,
+     borderColor: '#DDDDDD',
+   },
+   noResultBox: {
+     marginTop: 40,
+     alignItems: 'center',
+   },
+   noResultText: {
+     fontSize: 16,
+     color: '#999999',
+   },
+   resultBox: {
+     marginTop: 12,
+     padding: 16,
+     borderRadius: 12,
+     backgroundColor: '#F5F7FA',
+   },
+   resultBoxTitle: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: '#1F2024',
+     marginBottom: 8,
+   },
+   resultText: {
+     fontSize: 14,
+     color: '#1F2024',
+     lineHeight: 20,
+   },
 
   messageContainer: {
     flex: 1,
