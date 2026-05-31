@@ -68,7 +68,7 @@ interface AnimalInfo {
   image: any;
 }
 
-// 지역/군구 더미데이터 (HealthScreen과 동일하게 유지)
+// 지역/군구 선택 목록
 const REGIONS = [
   '서울특별시',
   '경기도',
@@ -182,9 +182,7 @@ export default function AdoptScreen() {
                 lng: position.coords.longitude,
               });
             },
-            (error: unknown) => {
-              console.log('위치 조회 실패', error);
-            },
+            () => {},
             {
               enableHighAccuracy: true,
               timeout: 10000,
@@ -193,8 +191,8 @@ export default function AdoptScreen() {
             }
           );
         }
-      } catch (error) {
-        console.log('위치 권한 요청 실패', error);
+      } catch {
+        return;
       }
     };
 
@@ -279,7 +277,6 @@ export default function AdoptScreen() {
           radius_km: 100,
           sort_by: 'distance',
         };
-        console.log('[AdoptScreen] using district coords:', selectedDistrict, districtCoords);
       }
     } else if (selectedRegion) {
       // If only region selected, use a center coordinate (e.g., first district)
@@ -292,7 +289,6 @@ export default function AdoptScreen() {
           radius_km: 100,
           sort_by: 'distance',
         };
-        console.log('[AdoptScreen] using region coords:', selectedRegion, regionCoords);
       }
     }
 
@@ -300,14 +296,11 @@ export default function AdoptScreen() {
     setShelterError(null);
     try {
       const response = await searchShelters(params);
-      console.log('[AdoptScreen] fetchShelters response:', response);
       let mapped = (response.items || []).map(mapToShelterInfo);
 
-      console.log('[AdoptScreen] mapped shelters count:', mapped.length);
       setShelters(mapped);
     } catch (error) {
       const message = error instanceof Error ? error.message : '보호소 정보를 불러오지 못했습니다.';
-      console.log('[AdoptScreen] fetchShelters error:', message);
 
       setShelterError(message);
       setShelters([]);
@@ -320,7 +313,6 @@ export default function AdoptScreen() {
     if (activeTab !== '입양 홍보') return;
 
     const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
-    console.log('[AdoptScreen] fetchAdoptPets shelterSources:', shelterSources.length);
     if (shelterSources.length === 0) {
       setAdoptPets([]);
       return;
@@ -335,7 +327,6 @@ export default function AdoptScreen() {
             limit: 20,
             offset: 0,
           });
-          console.log(`[AdoptScreen] shelter ${shelter.shelterId} pets count:`, response.items.length);
           const animals = response.items.map((pet) =>
             mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
           );
@@ -344,12 +335,10 @@ export default function AdoptScreen() {
       );
       let merged = petResults.flat();
 
-      console.log('[AdoptScreen] total merged pets:', merged.length);
       setAdoptPets(merged);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
-      console.log('[AdoptScreen] fetchAdoptPets error:', message);
 
       setAdoptError(message);
       setAdoptPets([]);
@@ -367,14 +356,10 @@ export default function AdoptScreen() {
     fetchShelters();
   }, [fetchShelters, selectedRegion, selectedDistrict, showAllShelters]);
 
-  // 전체 보호소 버튼 동작: 서버에 전체 조회 API가 없을 수 있으니 큰 limit으로 시도
   const fetchAllShelters = useCallback(async () => {
     setIsShelterLoading(true);
     setShelterError(null);
     try {
-      // Many shelter APIs require either a location name or lat/lng.
-      // Calling with only limit may trigger server-side validation (INVALID_INPUT).
-      // Use current location with a large radius to attempt a global fetch.
       const res = await searchShelters({
         lat: currentLocation.lat,
         lng: currentLocation.lng,
@@ -382,14 +367,12 @@ export default function AdoptScreen() {
         limit: 1000,
         offset: 0,
       });
-      console.log('[AdoptScreen] fetchAllShelters response (lat/lng):', res);
       const mapped = (res.items || []).map(mapToShelterInfo);
 
       setShelters(mapped);
       setShowAllShelters(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : '전체 보호소 정보를 불러오지 못했습니다.';
-      console.log('[AdoptScreen] fetchAllShelters error:', message);
       setShelterError(message);
       setShelters([]);
     } finally {
@@ -425,8 +408,8 @@ export default function AdoptScreen() {
           openHours: detail.operating_hours || prev.openHours,
         };
       });
-    } catch (error) {
-      console.log('[shelters] detail load failed', error);
+    } catch {
+      return;
     }
   };
 

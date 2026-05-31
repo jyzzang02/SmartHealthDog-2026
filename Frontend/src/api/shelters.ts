@@ -144,12 +144,7 @@ const authorizedFetch = async (
       },
     });
 
-  // 요청이 실제로 어디로 나가는지 확인하는 로그
-  console.log('[shelters] request url', input);
-  console.log('[shelters] accessToken len', accessToken.length);
-
   let response = await doFetch(accessToken);
-  console.log('[shelters] fetch status', response.status);
 
   // 403은 토큰 만료가 아니라 권한/서버 설정 문제일 가능성이 큼.
   // 따라서 refresh token을 시도하지 않고 그대로 반환.
@@ -173,15 +168,10 @@ const authorizedFetch = async (
     await storeAuthTokens(newTokens);
     accessToken = newTokens.accessToken;
 
-    console.log('[shelters] token refreshed');
-    console.log('[shelters] refreshed accessToken len', accessToken.length);
-
     response = await doFetch(accessToken);
-    console.log('[shelters] fetch status after refresh', response.status);
 
     return response;
-  } catch (err) {
-    console.warn('[shelters] token refresh 실패', err);
+  } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
 };
@@ -199,8 +189,6 @@ const handleShelterError = async (
       response,
       '보호소 API 접근이 거부되었습니다.'
     );
-
-    console.log('[shelters] 403 error body', serverMessage);
 
     throw new Error(
       `보호소 API 접근이 거부되었습니다. 서버 권한 설정 또는 배포 반영 여부를 확인해 주세요. (HTTP 403)\n서버 응답: ${serverMessage}`
@@ -242,10 +230,6 @@ export const searchShelters = async (
   }
 
   const data = await parseJsonSafe(response);
-
-  // 응답 데이터 디버깅
-  console.log('[shelters] response data:', JSON.stringify(data, null, 2));
-  console.log('[shelters] data.items type:', typeof data?.items, 'isArray:', Array.isArray(data?.items), 'length:', data?.items?.length);
 
   return {
     center: data?.center,
@@ -311,10 +295,6 @@ export const getShelterPets = async (
     : Array.isArray(data?.pets)
       ? data.pets
       : [];
-
-  // 응답 데이터 디버깅
-  console.log('[shelters] getShelterPets response:', JSON.stringify(data, null, 2));
-  console.log('[shelters] getShelterPets items count:', items.length);
 
   return {
     items,

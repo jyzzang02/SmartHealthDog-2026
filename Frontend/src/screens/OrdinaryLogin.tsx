@@ -69,7 +69,6 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
         routes: [{ name: 'Main' }],
       });
     } catch (error) {
-      console.error('[login] 로그인 실패', error);
       if (isApiError(error)) {
         Alert.alert('로그인 실패', error.message);
       } else {
