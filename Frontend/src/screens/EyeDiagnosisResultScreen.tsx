@@ -26,6 +26,51 @@ const STATUS_COMPLETED = 'COMPLETED';
 const STATUS_FAILED = 'FAILED';
 const STATUS_DELETED = 'DELETED';
 
+const normalizeStatus = (status?: string) => (status || '').trim().toUpperCase();
+
+const PROCESSING_STATUSES = new Set([
+  STATUS_PENDING,
+  STATUS_PROCESSING,
+  'QUEUED',
+  'IN_PROGRESS',
+  'RUNNING',
+  'ANALYZING',
+]);
+
+const COMPLETED_STATUSES = new Set([
+  STATUS_COMPLETED,
+  'SUCCESS',
+  'SUCCEEDED',
+  'DONE',
+  'FINISHED',
+]);
+
+const FAILED_STATUSES = new Set([
+  STATUS_FAILED,
+  'ERROR',
+  'REJECTED',
+  'CANCELED',
+  'CANCELLED',
+]);
+
+const DELETED_STATUSES = new Set([
+  STATUS_DELETED,
+  'EXPIRED',
+  'TIMEOUT',
+]);
+
+const isProcessingStatus = (status?: string) =>
+  PROCESSING_STATUSES.has(normalizeStatus(status));
+
+const isCompletedStatus = (status?: string) =>
+  COMPLETED_STATUSES.has(normalizeStatus(status));
+
+const isFailedStatus = (status?: string) =>
+  FAILED_STATUSES.has(normalizeStatus(status));
+
+const isDeletedStatus = (status?: string) =>
+  DELETED_STATUSES.has(normalizeStatus(status));
+
 const dogImage = require('../assets/eyeDog.png');
 
 type Props = NativeStackScreenProps<RootStackParamList, 'EyeDiagnosisResult'>;
@@ -63,14 +108,12 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const origin = (route.params as any)?.origin;
   const bypassBeforeRemoveRef = useRef(false);
-  const directLookupTriedRef = useRef(false);
   const isFocused = useIsFocused();
 
   const petName = (route.params as any)?.petName;
 
   const handleBack = useCallback(() => {
-    if (origin === 'history') {
-      // Try to pop back to an existing DiagnosisHistory in the stack to avoid duplicates
+    if (origin === 'history' || origin === 'upload') {
       const state = navigation.getState();
       const routes = state.routes || [];
       const lastIndex = routes.map((r) => r.name).lastIndexOf('DiagnosisHistory');
@@ -101,7 +144,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (event) => {
-      if (origin !== 'history' || bypassBeforeRemoveRef.current) {
+      if ((origin !== 'history' && origin !== 'upload') || bypassBeforeRemoveRef.current) {
         return;
       }
 
@@ -127,7 +170,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
-  const status = submission?.status?.toUpperCase() ?? '';
+  const status = normalizeStatus(submission?.status);
 
   const loadResult = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -137,8 +180,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsLoading(true);
 
     try {
-      if (submissionId && !directLookupTriedRef.current) {
-        directLookupTriedRef.current = true;
+      if (submissionId) {
         try {
           const direct = await getEyeSubmissionResult(submissionId);
           if (!canUpdate()) return;
@@ -146,8 +188,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setResult(direct);
           setMessage('');
           return;
-        } catch (directError) {
-          console.log('[eye] direct submission lookup failed once, falling back to list', directError);
+        } catch {
         }
       }
 
@@ -179,7 +220,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       setSubmission(target);
 
-      const normalizedStatus = target.status?.toUpperCase() ?? '';
+      const normalizedStatus = normalizeStatus(target.status);
       const idToFetch = getSubmissionId(target);
 
       if (!idToFetch) {
@@ -188,16 +229,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (
-        normalizedStatus === STATUS_PENDING ||
-        normalizedStatus === STATUS_PROCESSING
-      ) {
+      if (isProcessingStatus(normalizedStatus)) {
         setResult(null);
         setMessage('AI가 안구질환을 분석 중입니다.');
         return;
       }
 
-      if (normalizedStatus === STATUS_FAILED) {
+      if (isFailedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) ||
@@ -206,7 +244,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_DELETED) {
+      if (isDeletedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) === 'TIMEOUT'
@@ -216,12 +254,22 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_COMPLETED) {
-        const detail = await getEyeSubmissionResult(idToFetch);
-        if (!canUpdate()) return;
-        setResult(detail);
-        setMessage('');
-        return;
+      if (isCompletedStatus(normalizedStatus) || normalizedStatus.length > 0) {
+        try {
+          const detail = await getEyeSubmissionResult(idToFetch);
+          if (!canUpdate()) return;
+          setResult(detail);
+          setMessage('');
+          return;
+        } catch (detailError) {
+          if (!canUpdate()) return;
+          if (!isCompletedStatus(normalizedStatus)) {
+            setResult(null);
+            setMessage('AI가 안구질환을 분석 중입니다.');
+            return;
+          }
+          throw detailError;
+        }
       }
 
       setResult(null);
@@ -252,16 +300,24 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
-    if (status !== STATUS_PENDING && status !== STATUS_PROCESSING) {
+    if (result) {
+      return;
+    }
+
+    if (isFailedStatus(status) || isDeletedStatus(status)) {
+      return;
+    }
+
+    if (!submission && !submissionId) {
       return;
     }
 
     const timer = setTimeout(() => {
       loadResult();
-    }, 5000);
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, [isFocused, isLoading, loadResult, status]);
+  }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
 
   const resultText = useMemo(() => {
     if (!result) {
@@ -342,7 +398,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  if (status === STATUS_PENDING || status === STATUS_PROCESSING) {
+  if (isProcessingStatus(status)) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -545,4 +601,3 @@ const styles = StyleSheet.create({
 });
 
 export default EyeDiagnosisResultScreen;
-

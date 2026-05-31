@@ -175,21 +175,10 @@ const EyeCameraScreen = () => {
 
   const handleUpload = useCallback(
     async (image: EyeDiagnosisImage) => {
-      console.log('[eye] upload payload', {
-        uri: image.uri,
-        type: image.type,
-        fileName: image.fileName,
-        fileSize: image.fileSize,
-      });
-
       if (!isValidPetId(selectedPetId)) {
         Alert.alert('안내', '진단할 반려동물을 다시 선택해 주세요.');
         return;
       }
-
-      console.log('[eye] upload url:', `/api/pets/${selectedPetId}/submissions/eye`);
-      console.log('[eye] petId:', selectedPetId);
-      console.log('[eye] formData part:', 'image');
 
       const resolvedType = resolveMimeType(image);
       if (resolvedType !== 'image/jpeg' && resolvedType !== 'image/png') {
@@ -218,7 +207,14 @@ const EyeCameraScreen = () => {
           [
             {
               text: '확인',
-              onPress: () => navigation.navigate('EyeDiagnosisResult', { petId: selectedPetId, ...(createdSubmissionId ? { submissionId: createdSubmissionId } : {}) }),
+              onPress: () => {
+                navigation.navigate('DiagnosisHistory');
+                navigation.navigate('EyeDiagnosisResult', {
+                  petId: selectedPetId,
+                  ...(createdSubmissionId ? { submissionId: createdSubmissionId } : {}),
+                  origin: 'upload',
+                });
+              },
             },
           ]
         );

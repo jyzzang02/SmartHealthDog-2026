@@ -221,8 +221,7 @@ const authorizedFetch = async (
     await storeAuthTokens(newTokens);
     accessToken = newTokens.accessToken;
     response = await doFetch(accessToken);
-  } catch (error) {
-    console.warn('[diagnosis] token refresh 실패', error);
+  } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
 
@@ -275,15 +274,6 @@ export const requestEyeDiagnosis = async (
   const mimeType = resolveMimeType(image);
   const fileName = image.fileName || normalizeFileName(image.uri, 'eye.jpg');
 
-  console.log('[eye] upload url:', uploadUrl);
-  console.log('[eye] petId:', petId);
-  console.log('[eye] formData part:', 'image');
-  console.log('[eye] file payload', {
-    fileName,
-    type: mimeType,
-    fileSize: image.fileSize,
-  });
-
   formData.append('image', {
     uri: image.uri,
     type: mimeType,
@@ -296,7 +286,6 @@ export const requestEyeDiagnosis = async (
   });
 
   if (response.status === 201) {
-    console.log('[eye] upload success', { url: uploadUrl, petId, status: response.status });
     const data = await parseJsonSafe(response);
     if (data && typeof data === 'object') {
       return data as SubmissionCreateResponse;
@@ -306,9 +295,6 @@ export const requestEyeDiagnosis = async (
     );
     return idFromLocation ? { submissionId: idFromLocation } : null;
   }
-
-  const errorText = await response.clone().text().catch(() => '');
-  console.log('[eye] upload 실패 상태', response.status, errorText);
 
   const message = await parseErrorResponse(response);
   throw new Error(message);
@@ -337,25 +323,11 @@ export const getPetSubmissions = async (
       const list = rawList
         .map((item) => normalizeSubmissionItem(item))
         .filter((item): item is SubmissionSummary => !!item);
-      console.log('[diagnosis] submissions fetched', {
-        url,
-        count: list.length,
-        shape: Array.isArray(data)
-          ? 'array'
-          : data && typeof data === 'object'
-          ? Object.keys(data).join(',')
-          : typeof data,
-        sampleKeys:
-          list.length > 0 ? Object.keys((rawList[0] as any) || {}).join(',') : 'none',
-        sampleType: list[0]?.type,
-        sampleStatus: list[0]?.status,
-      });
       if (list.length > 0 || url === endpoints[endpoints.length - 1]) {
         return list;
       }
     } catch (error) {
       lastError = error instanceof Error ? error : new Error('unknown error');
-      console.warn('[diagnosis] submissions endpoint failed', { url, error: String(lastError) });
     }
   }
 

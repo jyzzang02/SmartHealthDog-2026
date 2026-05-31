@@ -67,15 +67,22 @@ const formatDateTime = (isoText: string) => {
   return `${yyyy}.${mm}.${dd} ${hh}:${min}`;
 };
 
-const normalizeSubmission = (submission: SubmissionSummary): NormalizedSubmission | null => {
+const normalizeSubmission = (
+  submission: SubmissionSummary,
+): NormalizedSubmission | null => {
   const id = getSubmissionId(submission);
   const rawTypeOriginal = submission.type ?? '';
   const rawType = rawTypeOriginal.toUpperCase();
-  const type = rawType.includes('URINE') || rawTypeOriginal.includes('소변') || rawTypeOriginal.includes('요')
-    ? 'URINE'
-    : rawType.includes('EYE') || rawTypeOriginal.includes('안구') || rawTypeOriginal.includes('눈')
-    ? 'EYE'
-    : rawType;
+  const type =
+    rawType.includes('URINE') ||
+    rawTypeOriginal.includes('소변') ||
+    rawTypeOriginal.includes('요')
+      ? 'URINE'
+      : rawType.includes('EYE') ||
+        rawTypeOriginal.includes('안구') ||
+        rawTypeOriginal.includes('눈')
+      ? 'EYE'
+      : rawType;
   if (!id || !type) return null;
 
   const submittedAt =
@@ -103,10 +110,10 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
   // When no petId provided, show pet chooser first
   const [pets, setPets] = useState<PetListItem[] | null>(null);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(
-    paramPetId ?? null
+    paramPetId ?? null,
   );
   const [selectedPetName, setSelectedPetName] = useState<string | undefined>(
-    paramPetName
+    paramPetName,
   );
 
   const loadHistory = useCallback(async () => {
@@ -125,7 +132,9 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
       setItems(normalized);
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : '진단 이력을 불러오지 못했습니다.';
+        error instanceof Error
+          ? error.message
+          : '진단 이력을 불러오지 못했습니다.';
       setErrorMessage(message);
     } finally {
       setIsLoading(false);
@@ -170,7 +179,12 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
     const petToSend = selectedPetId ?? paramPetId;
     const petNameToSend = selectedPetName ?? paramPetName;
     if (!petToSend) return;
-    const commonParams = { petId: petToSend, submissionId: item.id, origin: 'history' as const, petName: petNameToSend };
+    const commonParams = {
+      petId: petToSend,
+      submissionId: item.id,
+      origin: 'history' as const,
+      petName: petNameToSend,
+    };
     if (item.type === 'EYE') {
       navigation.navigate('EyeDiagnosisResult', commonParams as any);
       return;
@@ -203,7 +217,7 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
       });
 
       return () => sub.remove();
-    }, [paramPetId, selectedPetId])
+    }, [paramPetId, selectedPetId]),
   );
 
   return (
@@ -221,30 +235,39 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
         <ScrollView contentContainerStyle={styles.scrollContent}>
           {!selectedPetId && pets && (
             <View style={styles.petList}>
-              <Text style={styles.helperText}>진단할 반려동물을 선택하세요.</Text>
-              {pets.map((pet) => (
-                <TouchableOpacity
-                  key={pet.id}
-                  style={styles.petRow}
-                  activeOpacity={0.8}
-                  onPress={() => handleSelectPet(pet)}
-                >
-                  <View style={styles.petInfo}>
-                    {resolveImageUri(pet.profilePicture) ? (
-                      <Image
-                        source={{ uri: resolveImageUri(pet.profilePicture) }}
-                        style={styles.petThumb}
-                      />
-                    ) : (
-                      <View style={styles.petThumb} />
-                    )}
-                    <View>
-                      <Text style={styles.petName}>{pet.name || '이름 없음'}</Text>
-                      <Text style={styles.petMeta}>{pet.breed || pet.species || ''}</Text>
+              <Text style={styles.helperText}>
+                진단할 반려동물을 선택하세요.
+              </Text>
+              {pets.map(pet => {
+                const petImageUri = resolveImageUri(pet.profilePicture);
+                return (
+                  <TouchableOpacity
+                    key={pet.id}
+                    style={styles.petRow}
+                    activeOpacity={0.8}
+                    onPress={() => handleSelectPet(pet)}
+                  >
+                    <View style={styles.petInfo}>
+                      {petImageUri ? (
+                        <Image
+                          source={{ uri: petImageUri }}
+                          style={styles.petThumb}
+                        />
+                      ) : (
+                        <View style={styles.petThumb} />
+                      )}
+                      <View>
+                        <Text style={styles.petName}>
+                          {pet.name || '이름 없음'}
+                        </Text>
+                        <Text style={styles.petMeta}>
+                          {pet.breed || pet.species || ''}
+                        </Text>
+                      </View>
                     </View>
-                  </View>
-                </TouchableOpacity>
-              ))}
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           )}
 
@@ -260,7 +283,7 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
             </View>
           )}
 
-          {items.map((item) => (
+          {items.map(item => (
             <TouchableOpacity
               key={item.id}
               style={styles.historyCard}
@@ -269,11 +292,17 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
             >
               <View style={styles.cardRow}>
                 <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{TYPE_LABELS[item.type] ?? item.type}</Text>
+                  <Text style={styles.badgeText}>
+                    {TYPE_LABELS[item.type] ?? item.type}
+                  </Text>
                 </View>
-                <Text style={styles.statusText}>{STATUS_LABELS[item.status] ?? item.status}</Text>
+                <Text style={styles.statusText}>
+                  {STATUS_LABELS[item.status] ?? item.status}
+                </Text>
               </View>
-              <Text style={styles.dateText}>{formatDateTime(item.submittedAt)}</Text>
+              <Text style={styles.dateText}>
+                {formatDateTime(item.submittedAt)}
+              </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
@@ -399,4 +428,3 @@ const styles = StyleSheet.create({
 });
 
 export default DiagnosisHistoryScreen;
-

@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -38,8 +44,8 @@ const UrineCameraScreen = () => {
   const isMountedRef = useRef(true);
 
   const selectedPet = useMemo(
-    () => pets.find((pet) => pet.id === selectedPetId) || null,
-    [pets, selectedPetId]
+    () => pets.find(pet => pet.id === selectedPetId) || null,
+    [pets, selectedPetId],
   );
 
   useEffect(() => {
@@ -68,7 +74,10 @@ const UrineCameraScreen = () => {
       }
     } catch (error) {
       if (!isMountedRef.current) return;
-      const message = error instanceof Error ? error.message : '반려동물 정보를 불러오지 못했습니다.';
+      const message =
+        error instanceof Error
+          ? error.message
+          : '반려동물 정보를 불러오지 못했습니다.';
       Alert.alert('오류', message);
     } finally {
       if (isMountedRef.current) {
@@ -117,7 +126,7 @@ const UrineCameraScreen = () => {
         buttonNeutral: '나중에',
         buttonNegative: '취소',
         buttonPositive: '확인',
-      }
+      },
     );
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
@@ -140,35 +149,42 @@ const UrineCameraScreen = () => {
     return granted === PermissionsAndroid.RESULTS.GRANTED;
   };
 
-  const resolveMimeType = useCallback((image: { uri: string; type?: string }) => {
-    if (image.type) {
-      return image.type;
-    }
-    const lower = image.uri.toLowerCase();
-    if (lower.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
-      return 'image/jpeg';
-    }
-    return 'image/*';
-  }, []);
+  const resolveMimeType = useCallback(
+    (image: { uri: string; type?: string }) => {
+      if (image.type) {
+        return image.type;
+      }
+      const lower = image.uri.toLowerCase();
+      if (lower.endsWith('.png')) {
+        return 'image/png';
+      }
+      if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) {
+        return 'image/jpeg';
+      }
+      return 'image/*';
+    },
+    [],
+  );
 
-  const isSupportedImage = useCallback((image: { uri: string; type?: string }) => {
-    const type = resolveMimeType(image);
-    return type === 'image/png' || type === 'image/jpeg';
-  }, [resolveMimeType]);
+  const isSupportedImage = useCallback(
+    (image: { uri: string; type?: string }) => {
+      const type = resolveMimeType(image);
+      return type === 'image/png' || type === 'image/jpeg';
+    },
+    [resolveMimeType],
+  );
 
   const handleUpload = useCallback(
-    async (image: { uri: string; type?: string; fileName?: string; fileSize?: number }) => {
+    async (image: {
+      uri: string;
+      type?: string;
+      fileName?: string;
+      fileSize?: number;
+    }) => {
       if (!isValidPetId(selectedPetId)) {
         Alert.alert('안내', '진단할 반려동물을 다시 선택해 주세요.');
         return;
       }
-
-      console.log('[urine] upload url:', `/api/pets/${selectedPetId}/submissions/urine`);
-      console.log('[urine] petId:', selectedPetId);
-      console.log('[urine] formData part:', 'image');
 
       const resolvedType = resolveMimeType(image);
       if (resolvedType !== 'image/jpeg' && resolvedType !== 'image/png') {
@@ -183,35 +199,47 @@ const UrineCameraScreen = () => {
         Alert.alert('안내', 'jpg, jpeg, png 이미지만 업로드할 수 있습니다.');
         return;
       }
-       setIsUploading(true);
-       try {
-         const created = await requestUrineDiagnosis(selectedPetId as number, image);
-         const createdSubmissionId = created?.submissionId || created?.id;
-         if (!isMountedRef.current) return;
-         Alert.alert(
-           '접수 완료',
-           '진단 요청이 접수되었습니다. AI 분석 완료 후 결과를 확인할 수 있습니다.',
-           [
-             {
-               text: '확인',
-               onPress: () => navigation.navigate('UrineDiagnosisResult', { petId: selectedPetId, ...(createdSubmissionId ? { submissionId: createdSubmissionId } : {}) }),
-             },
-           ]
-         );
-       } catch (error) {
-         if (!isMountedRef.current) return;
-         const message =
-           error instanceof Error
-             ? error.message
-             : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
-         Alert.alert('오류', message);
-       } finally {
-         if (isMountedRef.current) {
-           setIsUploading(false);
-         }
-       }
+      setIsUploading(true);
+      try {
+        const created = await requestUrineDiagnosis(
+          selectedPetId as number,
+          image,
+        );
+        const createdSubmissionId = created?.submissionId || created?.id;
+        if (!isMountedRef.current) return;
+        Alert.alert(
+          '접수 완료',
+          '진단 요청이 접수되었습니다. AI 분석 완료 후 결과를 확인할 수 있습니다.',
+          [
+            {
+              text: '확인',
+              onPress: () => {
+                navigation.navigate('DiagnosisHistory');
+                navigation.navigate('UrineDiagnosisResult', {
+                  petId: selectedPetId,
+                  ...(createdSubmissionId
+                    ? { submissionId: createdSubmissionId }
+                    : {}),
+                  origin: 'upload',
+                });
+              },
+            },
+          ],
+        );
+      } catch (error) {
+        if (!isMountedRef.current) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
+        Alert.alert('오류', message);
+      } finally {
+        if (isMountedRef.current) {
+          setIsUploading(false);
+        }
+      }
     },
-    [isSupportedImage, navigation, resolveMimeType, selectedPetId]
+    [isSupportedImage, navigation, resolveMimeType, selectedPetId],
   );
 
   const handleCameraPick = useCallback(async () => {
@@ -235,7 +263,10 @@ const UrineCameraScreen = () => {
           return;
         }
         if (response.errorCode) {
-          Alert.alert('오류', response.errorMessage || '카메라를 열 수 없습니다.');
+          Alert.alert(
+            '오류',
+            response.errorMessage || '카메라를 열 수 없습니다.',
+          );
           return;
         }
         const asset = response.assets?.[0];
@@ -249,7 +280,7 @@ const UrineCameraScreen = () => {
           fileName: asset.fileName,
           fileSize: asset.fileSize,
         });
-      }
+      },
     );
   }, [ensurePetSelected, handleUpload]);
 
@@ -274,7 +305,10 @@ const UrineCameraScreen = () => {
           return;
         }
         if (response.errorCode) {
-          Alert.alert('오류', response.errorMessage || '사진을 불러올 수 없습니다.');
+          Alert.alert(
+            '오류',
+            response.errorMessage || '사진을 불러올 수 없습니다.',
+          );
           return;
         }
         const asset = response.assets?.[0];
@@ -288,7 +322,7 @@ const UrineCameraScreen = () => {
           fileName: asset.fileName,
           fileSize: asset.fileSize,
         });
-      }
+      },
     );
   }, [ensurePetSelected, handleUpload]);
 
@@ -318,7 +352,9 @@ const UrineCameraScreen = () => {
           </View>
         </View>
 
-        <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 12 }]}>
+        <View
+          style={[styles.bottomPanel, { paddingBottom: insets.bottom + 12 }]}
+        >
           <View style={styles.petRow}>
             <Text style={styles.petLabel}>진단 대상:</Text>
             <Text style={styles.petName}>
@@ -341,7 +377,9 @@ const UrineCameraScreen = () => {
           <View style={styles.controlRow}>
             <TouchableOpacity
               style={styles.sideButton}
-              onPress={() => Alert.alert('안내', '플래시 기능은 준비 중입니다.')}
+              onPress={() =>
+                Alert.alert('안내', '플래시 기능은 준비 중입니다.')
+              }
               disabled={!canInteract}
             >
               <Text style={styles.sideButtonText}>FLASH</Text>
@@ -380,12 +418,14 @@ const UrineCameraScreen = () => {
         <View style={styles.petPickerOverlay}>
           <View style={styles.petPickerModal}>
             <Text style={styles.petPickerTitle}>반려동물 선택</Text>
-            <Text style={styles.petPickerSubtitle}>진단할 반려동물을 선택해 주세요.</Text>
+            <Text style={styles.petPickerSubtitle}>
+              진단할 반려동물을 선택해 주세요.
+            </Text>
             <ScrollView
               style={styles.petPickerList}
               contentContainerStyle={styles.petPickerListContent}
             >
-              {pets.map((pet) => (
+              {pets.map(pet => (
                 <TouchableOpacity
                   key={pet.id}
                   style={styles.petPickerItem}
@@ -394,7 +434,9 @@ const UrineCameraScreen = () => {
                     setPetPickerVisible(false);
                   }}
                 >
-                  <Text style={styles.petPickerItemText}>{pet.name || '이름 없음'}</Text>
+                  <Text style={styles.petPickerItemText}>
+                    {pet.name || '이름 없음'}
+                  </Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
@@ -593,4 +635,3 @@ const styles = StyleSheet.create({
 });
 
 export default UrineCameraScreen;
-
