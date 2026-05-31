@@ -135,11 +135,9 @@ export default function WalkScreen() {
 
       try {
         const thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
-        console.log('[walk] this-week walks count', thisWeekWalks.length);
         walkSource = thisWeekWalks;
         merged = thisWeekWalks.map((item) => normalizeWalk(item, petList));
-      } catch (error) {
-        console.log('[walk] this-week endpoint failed; falling back to per-pet walk list');
+      } catch {
         const settled = await Promise.allSettled(
           petList.map(async (pet) => {
             const response = await getPetWalks(pet.id, {
@@ -158,14 +156,6 @@ export default function WalkScreen() {
             ? result.value.items.map((item) => normalizeWalk(item, petList, result.value.pet))
             : []
         );
-      }
-
-      if (walkSource.length > 0) {
-        console.log('[walk] sample walk item', {
-          pet_id: (walkSource[0] as any).pet_id,
-          petId: (walkSource[0] as any).petId,
-          pet: (walkSource[0] as any).pet,
-        });
       }
 
       const enrichedPets = petList.map((pet) => {
@@ -193,8 +183,7 @@ export default function WalkScreen() {
       setPets(enrichedPets);
       merged.sort((a, b) => (b.id || 0) - (a.id || 0));
       setWalkRecords(merged);
-    } catch (error) {
-      console.warn('[walk] failed to load this week walks', error);
+    } catch {
       setWalkRecords([]);
     } finally {
       setIsLoading(false);

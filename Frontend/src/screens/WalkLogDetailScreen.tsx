@@ -105,8 +105,8 @@ export default function WalkLogDetailScreen() {
     try {
       const detail = await getWalkDetail(record.id);
       setWalkDetail(detail);
-    } catch (error) {
-      console.warn('[walk] failed to load walk detail', error);
+    } catch {
+      setWalkDetail(null);
     } finally {
       setIsLoading(false);
     }
