@@ -8,6 +8,7 @@ import {
   ImageSourcePropType,
 } from "react-native";
 import BlueButton from "./BlueButton";
+import { resolveImageUri } from "../utils/imageUri";
 
 interface PetProfileCardProps {
   name: string;
@@ -32,11 +33,15 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
   onPressHistory,
   onPressEdit,
 }) => {
-  const hasImage = Boolean(imageUrl);
+  const resolvedImageUrl =
+    typeof imageUrl === "string" ? resolveImageUri(imageUrl) : undefined;
   const imageSource: ImageSourcePropType | undefined =
     typeof imageUrl === "string"
-      ? { uri: imageUrl }
+      ? resolvedImageUrl
+        ? { uri: resolvedImageUrl }
+        : undefined
       : imageUrl ?? undefined;
+  const hasImage = Boolean(imageSource);
 
   return (
     <View style={styles.cardWrapper}>

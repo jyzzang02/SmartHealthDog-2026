@@ -35,6 +35,7 @@ const MyPageScreen = () => {
   const [isPetsLoading, setIsPetsLoading] = useState(false);
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -150,11 +151,22 @@ const MyPageScreen = () => {
   );
 
   const resolvedUserImage = resolveImageUri(user?.profilePicture);
+  const shouldUseAuthHeaderForUserImage = Boolean(
+    resolvedUserImage && /^https?:\/\/api\.puppydoc\.ovh:8080\//i.test(resolvedUserImage)
+  );
+  useEffect(() => {
+    setUserImageLoadFailed(false);
+  }, [resolvedUserImage]);
   const userImageSource: ImageSourcePropType | undefined = resolvedUserImage
-    ? {
+    ? !userImageLoadFailed
+      ? {
         uri: resolvedUserImage,
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        headers:
+          shouldUseAuthHeaderForUserImage && accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
       }
+      : undefined
     : undefined;
 
   return (
@@ -172,13 +184,17 @@ const MyPageScreen = () => {
         onPress={() => navigation.navigate("ProfileEdit")}
         activeOpacity={0.8}
       >
-        <Image
-          source={userImageSource}
-          style={styles.userImage}
-          onError={(event) => {
-            console.log('[profile] mypage image load failed', event.nativeEvent?.error);
-          }}
-        />
+        {userImageSource ? (
+          <Image
+            source={userImageSource}
+            style={styles.userImage}
+            onError={() => {
+              setUserImageLoadFailed(true);
+            }}
+          />
+        ) : (
+          <View style={styles.userImage} />
+        )}
 
         <View style={styles.userRightBox}>
           <Text style={styles.userName}>{user?.nickname || "사용자"} 님</Text>

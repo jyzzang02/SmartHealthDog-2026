@@ -1,25 +1,34 @@
-const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
-const ASSET_BASE_URL = API_BASE_URL;
+const ALLOWED_IMAGE_URI_PATTERN = /^(https?|file|content):\/\//i;
 
-export const resolveImageUri = (value?: string | null) => {
+export const resolveImageUri = (value?: string | null): string | null => {
   if (!value || typeof value !== 'string') {
-    return undefined;
+    return null;
   }
 
   const trimmed = value.trim();
   if (!trimmed) {
-    return undefined;
+    return null;
   }
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    return trimmed;
+  const lowered = trimmed.toLowerCase();
+  if (
+    lowered === 'null' ||
+    lowered === 'undefined' ||
+    lowered === 'none' ||
+    lowered === 'n/a'
+  ) {
+    return null;
   }
 
-  if (trimmed.startsWith('/')) {
-    return `${API_BASE_URL}${trimmed}`;
+  if (!ALLOWED_IMAGE_URI_PATTERN.test(trimmed)) {
+    return null;
   }
 
-  const normalized = trimmed.replace(/^\/+/, '');
-  return `${ASSET_BASE_URL}/${normalized}`;
+  const withoutQuery = trimmed.split(/[?#]/)[0] || '';
+  const pathOnly = withoutQuery.replace(/^[a-z][a-z0-9+\-.]*:\/\/[^/]+/i, '');
+  if (!pathOnly || pathOnly === '/') {
+    return null;
+  }
+
+  return trimmed;
 };
-

@@ -17,6 +17,7 @@ import { useNavigation } from "@react-navigation/native";
 import { logout } from "../api/auth";
 import { getMyProfile, updateMyProfile, UserProfile } from "../api/users";
 import { clearAuthTokens, getStoredRefreshToken } from "../storage/tokenStorage";
+import { resolveImageUri } from "../utils/imageUri";
 
 const ProfileEditScreen = () => {
   const navigation = useNavigation();
@@ -108,8 +109,7 @@ const ProfileEditScreen = () => {
         buttonPositive: '확인',
       });
       return granted === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (error) {
-      console.warn('권한 요청 에러:', error);
+    } catch {
       return false;
     }
   }, []);
@@ -148,17 +148,17 @@ const ProfileEditScreen = () => {
 
          setProfileImageUri(uri);
          try {
-           const updated = await updateMyProfile({
-             nickname: fallbackNickname,
-             profilePictureUri: uri,
-           });
-           setProfile(updated);
-           setNickname(updated.nickname ?? fallbackNickname);
-           setProfileImageUri(updated.profilePicture ?? uri);
-           Alert.alert('저장 완료', '프로필 사진이 변경되었습니다.', [
-             {
-               text: '확인',
-               onPress: () => navigation.goBack(),
+            const updated = await updateMyProfile({
+              nickname: fallbackNickname,
+              profilePictureUri: uri,
+            });
+            setProfile(updated);
+            setNickname(updated.nickname ?? fallbackNickname);
+            setProfileImageUri(null);
+            Alert.alert('저장 완료', '프로필 사진이 변경되었습니다.', [
+              {
+                text: '확인',
+                onPress: () => navigation.goBack(),
              },
            ]);
          } catch (error) {
@@ -210,6 +210,7 @@ const ProfileEditScreen = () => {
 
   // 비회원(로그인 에러) 상태일 때 저장 버튼 숨김 여부 결정
   const isGuestMode = !!profileError;
+  const resolvedServerProfileImage = resolveImageUri(profile?.profilePicture);
 
   return (
     <View style={styles.wrapper}>
@@ -247,9 +248,9 @@ const ProfileEditScreen = () => {
         <View style={styles.imageBox}>
           {profileImageUri ? (
             <Image source={{ uri: profileImageUri }} style={styles.profileImage} />
-          ) : profile?.profilePicture ? (
+          ) : resolvedServerProfileImage ? (
             <Image
-              source={{ uri: profile.profilePicture }}
+              source={{ uri: resolvedServerProfileImage }}
               style={styles.profileImage}
             />
           ) : (

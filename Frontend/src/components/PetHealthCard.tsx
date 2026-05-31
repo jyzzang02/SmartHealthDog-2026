@@ -35,8 +35,8 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
     try {
       const data = await getMyPets();
       setPets(data);
-    } catch (error) {
-      console.error('Failed to load pets:', error);
+    } catch {
+      setPets([]);
     } finally {
       setLoading(false);
     }
