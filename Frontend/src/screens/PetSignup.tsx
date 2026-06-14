@@ -78,6 +78,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
   const [breed, setBreed] = useState('');
   const [petSpecies, setPetSpecies] = useState<PetSpecies | null>(null);
   const [petGender, setPetGender] = useState<PetGender | null>(null);
+  const [weightKg, setWeightKg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
   const requestAndroidPermissions = async (): Promise<boolean> => {
@@ -115,8 +116,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
       );
 
       return granted === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (err) {
-      console.warn('권한 요청 에러:', err);
+    } catch {
       return false;
     }
   };
@@ -143,9 +143,8 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
       },
       (response: ImagePickerResponse) => {
         if (response.didCancel) {
-          console.log('이미지 선택 취소');
+          return;
         } else if (response.errorCode) {
-          console.log('이미지 선택 에러:', response.errorMessage);
           Alert.alert('오류', '이미지를 불러올 수 없습니다.');
         } else if (response.assets && response.assets.length > 0) {
           const uri = response.assets[0].uri;
@@ -201,6 +200,16 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
     ).padStart(2, '0')}`;
   };
 
+  const buildPetRequest = (formattedBirthday: string) => ({
+    name: petName.trim(),
+    species: petSpecies as PetSpecies,
+    breed: breed.trim(),
+    gender: petGender as PetGender,
+    birthday: formattedBirthday,
+    neutered: false,
+    weightKg: weightKg.trim() ? Number(weightKg) : undefined,
+  });
+
   const handleCreatePetOnly = async () => {
     if (isLoading) return;
 
@@ -220,14 +229,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
     try {
       await createPet({
-        request: {
-          name: petName.trim(),
-          species: petSpecies,
-          breed: breed.trim(),
-          gender: petGender,
-          birthday: formattedBirthday,
-          neutered: false,
-        },
+        request: buildPetRequest(formattedBirthday),
         profilePictureUri: petImage ?? null,
       });
 
@@ -238,8 +240,6 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
         },
       ]);
     } catch (error) {
-      console.error('[pet] 추가 실패', error);
-
       if (isApiError(error)) {
         Alert.alert('오류', error.message);
       } else {
@@ -272,14 +272,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
         if (formattedBirthday && petSpecies && petGender) {
           await createPet({
-            request: {
-              name: petName.trim(),
-              species: petSpecies,
-              breed: breed.trim(),
-              gender: petGender,
-              birthday: formattedBirthday,
-              neutered: false,
-            },
+            request: buildPetRequest(formattedBirthday),
             profilePictureUri: petImage ?? null,
           });
         }
@@ -299,8 +292,6 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
         },
       ]);
     } catch (error) {
-      console.error('[signup] 회원가입 실패', error);
-
       if (isApiError(error)) {
         Alert.alert('오류', error.message);
       } else {
@@ -508,6 +499,17 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
             />
           </View>
 
+          <View style={styles.inputContainer}>
+            <TextInput
+              style={styles.input}
+              placeholder="체중(kg)을 입력해 주세요"
+              placeholderTextColor="#7B7C7D"
+              value={weightKg}
+              onChangeText={setWeightKg}
+              keyboardType="decimal-pad"
+            />
+          </View>
+
           {isLoading ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#0081D5" />
@@ -694,3 +696,4 @@ const styles = StyleSheet.create({
 });
 
 export default PetSignup;
+

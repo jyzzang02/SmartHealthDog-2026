@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Sample React Native App
  * https://github.com/facebook/react-native
  *
@@ -7,46 +7,46 @@
 
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
-import {
-  NavigationContainer,
-  DefaultTheme,
-} from '@react-navigation/native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
+import AuthLoadingScreen from './src/screens/AuthLoadingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import OrdinaryLogin from './src/screens/OrdinaryLogin';
 import OrdinarySignup from './src/screens/OrdinarySignup';
 import UserSignup from './src/screens/UserSignup';
 import PetSignup from './src/screens/PetSignup';
 import TabNavigator from './src/navigation/TabBar';
+
 import AnimalDetailScreen from './src/screens/AnimalDetailScreen';
 import SymptomResultScreen from './src/screens/SymptomResultScreen';
+import DiagnosisHistoryScreen from './src/screens/DiagnosisHistoryScreen';
+
 import EyeDiagnosisScreen from './src/screens/EyeDiagnosisScreen';
+import EyeCameraScreen from './src/screens/EyeCameraScreen';
+import EyeDiagnosisResultScreen from './src/screens/EyeDiagnosisResultScreen';
 import UrineDiagnosisScreen from './src/screens/UrineDiagnosisScreen';
+import UrineCameraScreen from './src/screens/UrineCameraScreen';
+import UrineDiagnosisResultScreen from './src/screens/UrineDiagnosisResultScreen';
+
 import MyPageScreen from './src/screens/MyPageScreen';
 import GameScreen from './src/screens/GameScreen';
 import PetEditScreen from './src/screens/PetEditScreen';
 import ProfileEditScreen from './src/screens/ProfileEditScreen';
+
 import WalkLogDetailScreen from './src/screens/WalkLogDetailScreen';
 import WalkWeeklyReportScreen from './src/screens/WalkWeeklyReportScreen';
 import WalkActiveScreen from './src/screens/WalkActiveScreen';
+import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
 
 export type RootStackParamList = {
+  AuthLoading: undefined;
   Login: undefined;
   Home: undefined;
+
   OrdinaryLogin: undefined;
   OrdinarySignup: undefined;
-  SymptomResult: undefined;
-  EyeDiagnosis: undefined;
-  UrineDiagnosis: undefined;
-  MyPage: undefined;
-  GameScreen: undefined;
-  ProfileEdit: undefined;
-
-  PetEdit: {
-    petId: number;
-  };
 
   UserSignup: {
     email: string;
@@ -65,13 +65,42 @@ export type RootStackParamList = {
 
   Main: undefined;
 
+  SymptomResult: undefined;
+
+  EyeDiagnosis: undefined;
+  EyeCamera: undefined;
+  EyeDiagnosisResult: {
+    petId: number;
+    submissionId?: string;
+  };
+
+   UrineDiagnosis: undefined;
+   UrineCamera: undefined;
+   UrineDiagnosisResult: {
+     petId: number;
+     submissionId?: string;
+   };
+
+  MyPage: undefined;
+  GameScreen: undefined;
+  ProfileEdit: undefined;
+
+  DiagnosisHistory: {
+    petId: number;
+    petName?: string;
+  };
+
+  PetEdit: {
+    petId: number;
+  };
+
   AnimalDetail: {
     animalData: {
       id?: number;
       shelterId?: number;
       shelterName?: string;
       shelterPhone?: string;
-      type: '강아지' | '고양이';
+      type: string;
       tags: string[];
       breed: string;
       age: string;
@@ -82,20 +111,31 @@ export type RootStackParamList = {
 
   WalkLogDetail: {
     record: {
-      id: number;
+      id?: number;
+      petId: number;
       petName: string;
       petImage: any;
       date: string;
       distance: string;
       duration: string;
+      distanceKm?: number;
+      durationSec?: number;
       startTime?: string;
       endTime?: string;
+      pathCoordinates?: Array<[number, number]>;
     };
   };
 
   WalkWeeklyReport: undefined;
 
+  WalkPetHistory: {
+    petId: number;
+    petName: string;
+    petImage: any;
+  };
+
   WalkActive: {
+    petId: number;
     petName: string;
     petImage: any;
   };
@@ -123,7 +163,7 @@ function AppNavigator() {
       />
 
       <Stack.Navigator
-        initialRouteName="Login"
+        initialRouteName="AuthLoading"
         screenOptions={{
           headerShown: false,
           contentStyle: {
@@ -131,22 +171,54 @@ function AppNavigator() {
           },
         }}
       >
+        {/* Auth Loading (Splash screen with token check) */}
+        <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />
+
+        {/* Auth */}
         <Stack.Screen name="Login" component={LoginScreen} />
         <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
         <Stack.Screen name="OrdinarySignup" component={OrdinarySignup} />
         <Stack.Screen name="UserSignup" component={UserSignup} />
         <Stack.Screen name="PetSignup" component={PetSignup} />
+
+        {/* Main Tab */}
         <Stack.Screen name="Main" component={TabNavigator} />
+
+        {/* Adoption */}
         <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
+
+        {/* Health */}
         <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
         <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
+        <Stack.Screen name="EyeCamera" component={EyeCameraScreen} />
+        <Stack.Screen
+          name="EyeDiagnosisResult"
+          component={EyeDiagnosisResultScreen}
+        />
         <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
+        <Stack.Screen name="UrineCamera" component={UrineCameraScreen} />
+        <Stack.Screen
+          name="UrineDiagnosisResult"
+          component={UrineDiagnosisResultScreen}
+        />
+        <Stack.Screen
+          name="DiagnosisHistory"
+          component={DiagnosisHistoryScreen}
+        />
+
+        {/* My Page */}
         <Stack.Screen name="MyPage" component={MyPageScreen} />
         <Stack.Screen name="GameScreen" component={GameScreen} />
         <Stack.Screen name="PetEdit" component={PetEditScreen} />
         <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
+
+        {/* Walk */}
         <Stack.Screen name="WalkLogDetail" component={WalkLogDetailScreen} />
-        <Stack.Screen name="WalkWeeklyReport" component={WalkWeeklyReportScreen} />
+        <Stack.Screen
+          name="WalkWeeklyReport"
+          component={WalkWeeklyReportScreen}
+        />
+        <Stack.Screen name="WalkPetHistory" component={WalkPetHistoryScreen} />
         <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
       </Stack.Navigator>
     </NavigationContainer>
@@ -162,3 +234,4 @@ function App() {
 }
 
 export default App;
+

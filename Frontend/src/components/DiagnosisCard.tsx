@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 
 interface Props {
   title: string;
@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 20,
     padding: 20,
-    overflow: 'visible',
+    overflow: 'hidden',
 
     shadowColor: '#B3B6B8',
     shadowOffset: { width: 0, height: 0 },
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     width: 85,
     height: 100,
     position: 'absolute',
-    bottom: -0,     // ★ 원하는 높이로 조절
+    bottom: 8,     // ★ 카드 내에 들어오도록 조정
     left: 75,
     right: 0,
     

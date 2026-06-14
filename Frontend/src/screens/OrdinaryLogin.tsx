@@ -8,6 +8,11 @@ import {
   TouchableOpacity,
   Image,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+  Keyboard,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import CustomButton from '../components/CustomButton';
@@ -64,7 +69,6 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
         routes: [{ name: 'Main' }],
       });
     } catch (error) {
-      console.error('[login] 로그인 실패', error);
       if (isApiError(error)) {
         Alert.alert('로그인 실패', error.message);
       } else {
@@ -80,57 +84,67 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.navBar}>
-        <TouchableOpacity
-          style={styles.backButton}
-          onPress={() => navigation.goBack()}
-        >
-          <Image
-            source={require('../assets/icon_navBack.png')}
-            style={styles.backIcon}
-            resizeMode="contain"
-          />
-        </TouchableOpacity>
-      </View>
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 80 : 60}
+      >
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+          <ScrollView contentContainerStyle={{ flexGrow: 1 }} keyboardShouldPersistTaps="handled">
+            <View style={styles.navBar}>
+              <TouchableOpacity
+                style={styles.backButton}
+                onPress={() => navigation.goBack()}
+              >
+                <Image
+                  source={require('../assets/icon_navBack.png')}
+                  style={styles.backIcon}
+                  resizeMode="contain"
+                />
+              </TouchableOpacity>
+            </View>
 
-      <View style={styles.content}>
-        <Text style={styles.title}>로그인</Text>
+            <View style={styles.contentWrapper}>
+              <Text style={styles.title}>로그인</Text>
 
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="이메일 주소를 입력해 주세요"
-            placeholderTextColor="#7B7C7D"
-            value={email}
-            onChangeText={validateEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          {emailError !== '' && (
-            <Text style={styles.errorText}>{emailError}</Text>
-          )}
-        </View>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="이메일 주소를 입력해 주세요"
+                  placeholderTextColor="#7B7C7D"
+                  value={email}
+                  onChangeText={validateEmail}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                {emailError !== '' && (
+                  <Text style={styles.errorText}>{emailError}</Text>
+                )}
+              </View>
 
-        <View style={styles.inputContainer}>
-          <TextInput
-            style={styles.input}
-            placeholder="비밀번호를 입력해 주세요"
-            placeholderTextColor="#7B7C7D"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-        </View>
+              <View style={styles.inputContainer}>
+                <TextInput
+                  style={styles.input}
+                  placeholder="비밀번호를 입력해 주세요"
+                  placeholderTextColor="#7B7C7D"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              </View>
 
-        <CustomButton
-          text="로그인"
-          onPress={handleLogin}
-          disabled={!isLoginEnabled}
-        />
-      </View>
+              <CustomButton
+                text="로그인"
+                onPress={handleLogin}
+                disabled={!isLoginEnabled}
+              />
+            </View>
+          </ScrollView>
+        </TouchableWithoutFeedback>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 };
@@ -158,6 +172,10 @@ const styles = StyleSheet.create({
   content: {
     alignItems: 'center',
     marginTop: 190,
+  },
+  contentWrapper: {
+    alignItems: 'center',
+    marginTop: 120,
   },
   title: {
     fontSize: 24,
