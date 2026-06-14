@@ -41,6 +41,7 @@ import WalkActiveScreen from './src/screens/WalkActiveScreen';
 import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
 import HealthCheckInputScreen from './src/screens/HealthCheckInputScreen';
 import HealthCheckResultScreen from './src/screens/HealthCheckResultScreen';
+import HealthDetailScreen from './src/screens/HealthDetailScreen';
 import type { HealthSummary } from './src/types/health';
 
 export type RootStackParamList = {
@@ -153,6 +154,11 @@ export type RootStackParamList = {
     petName: string;
     summary: HealthSummary;
   };
+
+  HealthDetail: {
+    petId: number;
+    petName: string;
+  };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -238,6 +244,7 @@ function AppNavigator() {
         {/* Health Check Input */}
         <Stack.Screen name="HealthCheckInput" component={HealthCheckInputScreen} />
         <Stack.Screen name="HealthCheckResult" component={HealthCheckResultScreen} />
+        <Stack.Screen name="HealthDetail" component={HealthDetailScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
