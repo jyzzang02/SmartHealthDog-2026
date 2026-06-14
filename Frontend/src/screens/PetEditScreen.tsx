@@ -24,6 +24,7 @@ import {
   PetGender,
   PetSpecies,
 } from "../api/pets";
+import { resolveImageUri } from "../utils/imageUri";
 
 const PetEditScreen = () => {
   const navigation = useNavigation<any>();
@@ -45,6 +46,13 @@ const PetEditScreen = () => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+
+  const resolvedPetImage = petImageUri || resolveImageUri(pet?.profilePicture);
+
+  useEffect(() => {
+    setImageLoadFailed(false);
+  }, [resolvedPetImage]);
 
   // 데이터 로드
   useEffect(() => {
@@ -131,8 +139,7 @@ const PetEditScreen = () => {
 
       Alert.alert("성공", "반려동물 정보가 수정되었습니다.");
       navigation.goBack();
-    } catch (err) {
-      console.error(err);
+    } catch {
       Alert.alert("오류", "정보 저장에 실패했습니다.");
     } finally {
       setIsSaving(false);
@@ -150,7 +157,7 @@ const PetEditScreen = () => {
           try {
             await deletePet(petId);
             navigation.goBack();
-          } catch (err) {
+          } catch {
             Alert.alert("오류", "삭제에 실패했습니다.");
           } finally {
             setIsDeleting(false);
@@ -180,10 +187,13 @@ const PetEditScreen = () => {
       {!!errorMessage && <Text style={styles.errorText}>{errorMessage}</Text>}
 
       <View style={styles.imageBox}>
-        {petImageUri || pet?.profilePicture ? (
+        {resolvedPetImage && !imageLoadFailed ? (
           <Image
-            source={{ uri: petImageUri || pet?.profilePicture }}
+            source={{ uri: resolvedPetImage }}
             style={styles.petImagePlaceholder}
+            onError={() => {
+              setImageLoadFailed(true);
+            }}
           />
         ) : (
           <View style={styles.petImagePlaceholder} />

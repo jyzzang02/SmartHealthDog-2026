@@ -18,13 +18,9 @@ const AuthLoadingScreen: React.FC = () => {
   useEffect(() => {
     const bootstrapAsync = async () => {
       try {
-        console.log('[AuthLoading] 🔵 App started, checking for saved tokens...');
-
-        // Step 1: Check if access token exists
         const accessToken = await getStoredAccessToken();
 
         if (!accessToken) {
-          console.log('[AuthLoading] ℹ️  No saved access token found. → Redirecting to Login');
           navigation.reset({
             index: 0,
             routes: [{ name: 'Login' }],
@@ -32,30 +28,20 @@ const AuthLoadingScreen: React.FC = () => {
           return;
         }
 
-        console.log('[AuthLoading] 🔑 Access token found. Validating...');
-
-        // Step 2: Validate token by calling getMyProfile
         try {
-          const profile = await getMyProfile();
-          console.log('[AuthLoading] ✅ Token validation success. User:', profile.nickname);
-          console.log('[AuthLoading] 🟢 Redirecting to Main (Home)');
+          await getMyProfile();
           navigation.reset({
             index: 0,
             routes: [{ name: 'Main' }],
           });
-        } catch (validateError) {
-          console.warn('[AuthLoading] ❌ Token validation failed:', validateError);
-          // Token is invalid, clear it and redirect to login
+        } catch {
           await clearAuthTokens();
-          console.log('[AuthLoading] Cleared invalid token. → Redirecting to Login');
           navigation.reset({
             index: 0,
             routes: [{ name: 'Login' }],
           });
         }
-      } catch (error) {
-        console.error('[AuthLoading] 💥 Unexpected error:', error);
-        // On error, redirect to login to be safe
+      } catch {
         navigation.reset({
           index: 0,
           routes: [{ name: 'Login' }],

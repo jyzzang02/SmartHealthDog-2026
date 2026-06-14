@@ -1,127 +1,131 @@
-import React from "react";
-import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import CustomButton from "../components/CustomButton";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import React from 'react';
+import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import CustomButton from '../components/CustomButton';
 
-const eyeDog = require("../assets/eyeDog.png");
-const EXTRA_BOTTOM_PADDING = 40;
+const eyeDog = require('../assets/eyeDog.png');
+const DIAGNOSIS_IMAGE_SIZE = 240;
 
 const EyeDiagnosisScreen = () => {
   const navigation = useNavigation<any>();
   const insets = useSafeAreaInsets();
 
   return (
-    <ScrollView
-      contentContainerStyle={[
-        styles.container,
-        { paddingBottom: insets.bottom + EXTRA_BOTTOM_PADDING },
-      ]}
-      scrollEnabled={false}
-      showsVerticalScrollIndicator={false}
-    >
-      {/* Back Button */}
-      <TouchableOpacity 
-        style={styles.backButton}
-        onPress={() => navigation.goBack()}
-        activeOpacity={0.8}
-      >
-        <Image
-          source={require("../assets/icon_back.png")}
-          style={styles.backIcon}
-        />
-      </TouchableOpacity>
-
-      <View style={styles.content}>
-        {/* Title */}
-        <Text style={styles.title}>안구질환 진단</Text>
-
-        {/* 설명 문구 */}
-        <Text style={styles.subtitle}>
-          안구질환 진단 서비스는 앱 내에서{"\n"}
-          촬영 후 AI를 사용해 진단해주는 서비스입니다.
-        </Text>
-
-        {/* 캐릭터 이미지 */}
-        <Image source={eyeDog} style={styles.image} />
-      </View>
-
-      <View style={styles.buttonContainer}>
-        {/* 진단 시작 버튼 */}
-        <CustomButton
-          text="진단시작"
-          onPress={() => navigation.navigate("EyeCamera")}
-        />
+    <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
+      <View style={styles.container}>
         <TouchableOpacity
-          style={extraStyles.linkButton}
-          onPress={() => navigation.navigate('DiagnosisHistory')}
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
           activeOpacity={0.8}
         >
-          <Text style={extraStyles.linkButtonText}>최근 진단 보기</Text>
+          <Image
+            source={require('../assets/icon_back.png')}
+            style={styles.backIcon}
+          />
         </TouchableOpacity>
-      </View>
 
-    </ScrollView>
+        <View style={styles.content}>
+          <Text style={styles.title}>안구질환 진단</Text>
+          <Text style={styles.subtitle}>
+            안구질환 진단 서비스는 앱 내에서{'\n'}
+            촬영 후 AI를 사용해 진단해주는 서비스입니다.
+          </Text>
+          <Image source={eyeDog} style={styles.image} />
+        </View>
+
+        <View
+          style={[
+            styles.buttonContainer,
+            { paddingBottom: insets.bottom + 28 },
+          ]}
+        >
+          <CustomButton
+            text="진단시작"
+            onPress={() => navigation.navigate('EyeCamera')}
+          />
+          <TouchableOpacity
+            style={styles.historyButton}
+            onPress={() => navigation.navigate('DiagnosisHistory')}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.historyButtonText}>진단 이력 보기</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </SafeAreaView>
   );
 };
 
 export default EyeDiagnosisScreen;
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
   container: {
-    flexGrow: 1,
-    backgroundColor: "#FFF",
-    alignItems: "center",
-    paddingTop: 80,
-    justifyContent: "space-between",
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    paddingTop: 60,
   },
   content: {
-    alignItems: "center",
-  },
-  buttonContainer: {
-    width: "100%",
-    alignItems: "center",
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
   },
   backButton: {
-    position: "absolute",
+    position: 'absolute',
     top: 55,
     left: 20,
     padding: 6,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "700",
-    color: "#000",
-    marginTop: 70,
-  },
-  subtitle: {
-    fontSize: 18,
-    fontWeight: "500",
-    color: "#3C4144",
-    textAlign: "center",
-    marginTop: 24,
-    lineHeight: 26,
-  },
-  image: {
-    width: 250,
-    height: 250,
-    marginTop: 90,
-    resizeMode: "contain",
+    zIndex: 1,
   },
   backIcon: {
     width: 20,
     height: 20,
-  }
-});
-
-const extraStyles = StyleSheet.create({
-  linkButton: {
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: '700',
+    color: '#000000',
+  },
+  subtitle: {
+    fontSize: 18,
+    fontWeight: '500',
+    color: '#3C4144',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 26,
+  },
+  image: {
+    width: DIAGNOSIS_IMAGE_SIZE,
+    height: DIAGNOSIS_IMAGE_SIZE,
+    marginTop: 32,
+    resizeMode: 'contain',
+  },
+  buttonContainer: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: 12,
+  },
+  historyButton: {
+    width: 310,
     marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 9,
+    borderWidth: 2,
+    borderColor: '#0081D5',
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  linkButtonText: {
-    color: '#0081D5',
+  historyButtonText: {
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
+    color: '#0081D5',
   },
 });
-

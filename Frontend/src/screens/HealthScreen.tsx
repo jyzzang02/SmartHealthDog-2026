@@ -108,7 +108,7 @@ const HealthScreen: React.FC = () => {
               address="서울시 양천구 신목로 100 2층"
               phone="02-1234-5678"
               image={require('../assets/adopt_placeholder.png')}
-              onPress={() => console.log('병원 클릭')}
+              onPress={() => {}}
             />
           ))}
         </View>

@@ -32,32 +32,24 @@ interface Props {
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [showLoginForm, setShowLoginForm] = useState(false);
   
-  // 애니메이션 값들
   const animationLayerOpacity = useRef(new Animated.Value(1)).current;
   const buttonsOpacity = useRef(new Animated.Value(0)).current;
 
-  const handleKakaoLogin = () => {
-    // 카카오 로그인 로직 (추후 구현)
-    console.log('카카오 로그인 클릭');
-  };
+  const handleKakaoLogin = () => {};
 
   const handleNormalLogin = () => {
-    // OrdinaryLogin 화면으로 이동
     navigation.navigate('OrdinaryLogin');
   };
 
   const handleSignUp = () => {
-    // OrdinarySignup 화면으로 이동
     navigation.navigate('OrdinarySignup');
   };
 
   const handleGoToHome = () => {
-    // 개발용: Main(TabNavigator) 화면으로 바로 이동
     navigation.navigate('Main');
   };
 
   const handleAnimationComplete = () => {
-    // 애니메이션 레이어 페이드 아웃 & 버튼 페이드 인 동시 실행
     Animated.parallel([
       Animated.timing(animationLayerOpacity, {
         toValue: 0,
@@ -77,7 +69,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* LogoAnimation 레이어 (페이드 아웃) */}
       <Animated.View 
         style={[
           styles.animationLayer,
@@ -90,13 +81,11 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <LogoAnimation onAnimationComplete={handleAnimationComplete} />
       </Animated.View>
 
-      {/* LoginScreen 레이어 (하단에 항상 존재) */}
       <KeyboardAvoidingView 
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardAvoidingView}
       >
         <View style={styles.content}>
-          {/* 로고 영역 - 항상 렌더링 */}
           <View style={styles.logoContainer}>
             <Image
               source={require('../assets/logo_full.png')}
@@ -105,7 +94,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             />
           </View>
 
-          {/* 버튼 영역 - 페이드 인 */}
           <Animated.View 
             style={[
               styles.buttonContainer,
@@ -148,7 +136,6 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               </View>
             </TouchableOpacity>
 
-            {/* 개발용 임시 버튼 */}
             <TouchableOpacity
               onPress={handleGoToHome}
               disabled={!showLoginForm}

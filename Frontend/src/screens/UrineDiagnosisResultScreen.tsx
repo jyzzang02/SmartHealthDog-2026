@@ -5,6 +5,7 @@ import {
   BackHandler,
   Image,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,6 +26,51 @@ const STATUS_PROCESSING = 'PROCESSING';
 const STATUS_COMPLETED = 'COMPLETED';
 const STATUS_FAILED = 'FAILED';
 const STATUS_DELETED = 'DELETED';
+
+const normalizeStatus = (status?: string) => (status || '').trim().toUpperCase();
+
+const PROCESSING_STATUSES = new Set([
+  STATUS_PENDING,
+  STATUS_PROCESSING,
+  'QUEUED',
+  'IN_PROGRESS',
+  'RUNNING',
+  'ANALYZING',
+]);
+
+const COMPLETED_STATUSES = new Set([
+  STATUS_COMPLETED,
+  'SUCCESS',
+  'SUCCEEDED',
+  'DONE',
+  'FINISHED',
+]);
+
+const FAILED_STATUSES = new Set([
+  STATUS_FAILED,
+  'ERROR',
+  'REJECTED',
+  'CANCELED',
+  'CANCELLED',
+]);
+
+const DELETED_STATUSES = new Set([
+  STATUS_DELETED,
+  'EXPIRED',
+  'TIMEOUT',
+]);
+
+const isProcessingStatus = (status?: string) =>
+  PROCESSING_STATUSES.has(normalizeStatus(status));
+
+const isCompletedStatus = (status?: string) =>
+  COMPLETED_STATUSES.has(normalizeStatus(status));
+
+const isFailedStatus = (status?: string) =>
+  FAILED_STATUSES.has(normalizeStatus(status));
+
+const isDeletedStatus = (status?: string) =>
+  DELETED_STATUSES.has(normalizeStatus(status));
 
 const dogImage = require('../assets/eyeDog.png');
 
@@ -62,13 +108,12 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const { petId, submissionId } = route.params;
   const origin = (route.params as any)?.origin;
   const bypassBeforeRemoveRef = useRef(false);
-  const directLookupTriedRef = useRef(false);
   const isFocused = useIsFocused();
 
   const petName = (route.params as any)?.petName;
 
   const handleBack = useCallback(() => {
-    if (origin === 'history') {
+    if (origin === 'history' || origin === 'upload') {
       const state = navigation.getState();
       const routes = state.routes || [];
       const lastIndex = routes.map((r) => r.name).lastIndexOf('DiagnosisHistory');
@@ -98,7 +143,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   useEffect(() => {
     const unsub = navigation.addListener('beforeRemove', (event) => {
-      if (origin !== 'history' || bypassBeforeRemoveRef.current) {
+      if ((origin !== 'history' && origin !== 'upload') || bypassBeforeRemoveRef.current) {
         return;
       }
 
@@ -124,7 +169,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
-  const status = submission?.status?.toUpperCase() ?? '';
+  const status = normalizeStatus(submission?.status);
 
   const loadResult = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -134,8 +179,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     setIsLoading(true);
 
     try {
-      if (submissionId && !directLookupTriedRef.current) {
-        directLookupTriedRef.current = true;
+      if (submissionId) {
         try {
           const direct = await getUrineSubmissionResult(submissionId);
           if (!canUpdate()) return;
@@ -144,7 +188,11 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setMessage('');
           return;
         } catch (directError) {
-          console.log('[urine] direct submission lookup failed once, falling back to list', directError);
+          console.log('[urine] direct submission lookup skipped; using list fallback', {
+            submissionId,
+            message:
+              directError instanceof Error ? directError.message : String(directError),
+          });
         }
       }
 
@@ -174,7 +222,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       setSubmission(target);
 
-      const normalizedStatus = target.status?.toUpperCase() ?? '';
+      const normalizedStatus = normalizeStatus(target.status);
       const idToFetch = getSubmissionId(target);
 
       if (!idToFetch) {
@@ -183,16 +231,13 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (
-        normalizedStatus === STATUS_PENDING ||
-        normalizedStatus === STATUS_PROCESSING
-      ) {
+      if (isProcessingStatus(normalizedStatus)) {
         setResult(null);
         setMessage('AI가 소변키트를 분석 중입니다.');
         return;
       }
 
-      if (normalizedStatus === STATUS_FAILED) {
+      if (isFailedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) ||
@@ -201,7 +246,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_DELETED) {
+      if (isDeletedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) === 'TIMEOUT'
@@ -211,12 +256,22 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_COMPLETED) {
-        const detail = await getUrineSubmissionResult(idToFetch);
-        if (!canUpdate()) return;
-        setResult(detail);
-        setMessage('');
-        return;
+      if (isCompletedStatus(normalizedStatus) || normalizedStatus.length > 0) {
+        try {
+          const detail = await getUrineSubmissionResult(idToFetch);
+          if (!canUpdate()) return;
+          setResult(detail);
+          setMessage('');
+          return;
+        } catch (detailError) {
+          if (!canUpdate()) return;
+          if (!isCompletedStatus(normalizedStatus)) {
+            setResult(null);
+            setMessage('AI가 소변키트를 분석 중입니다.');
+            return;
+          }
+          throw detailError;
+        }
       }
 
       setResult(null);
@@ -247,16 +302,24 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
-    if (status !== STATUS_PENDING && status !== STATUS_PROCESSING) {
+    if (result) {
+      return;
+    }
+
+    if (isFailedStatus(status) || isDeletedStatus(status)) {
+      return;
+    }
+
+    if (!submission && !submissionId) {
       return;
     }
 
     const timer = setTimeout(() => {
       loadResult();
-    }, 5000);
+    }, 2000);
 
     return () => clearTimeout(timer);
-  }, [isFocused, isLoading, loadResult, status]);
+  }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
 
   const resultText = useMemo(() => {
     if (!result) {
@@ -264,6 +327,25 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     return JSON.stringify(result, null, 2);
+  }, [result]);
+
+  // 결과 데이터 파싱 - 소변 검사 결과
+  const parsedResults = useMemo(() => {
+    if (!result || typeof result !== 'object') {
+      return [];
+    }
+
+    // results 배열 추출
+    const resultsArray = (result as any).results;
+    if (!Array.isArray(resultsArray)) {
+      return [];
+    }
+
+    return resultsArray.map((item: any) => ({
+      analyte: item.analyte || '미확인',
+      value: item.value || '-',
+      colorRGB: item.colorRGB || [],
+    }));
   }, [result]);
 
   const goHome = () => {
@@ -295,10 +377,57 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.resultContainer}>
         <Text style={styles.resultTitle}>소변키트 진단 결과</Text>
 
-        <View style={styles.resultBox}>
-          <Text style={styles.resultBoxTitle}>결과 요약</Text>
-          <Text style={styles.resultText}>{resultText}</Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.resultScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {parsedResults.length > 0 ? (
+            <>
+              {parsedResults.map((item, index) => (
+                <View key={index} style={styles.resultCard}>
+                  <View style={styles.resultCardHeader}>
+                    <Text style={styles.resultCardTitle}>{item.analyte}</Text>
+                  </View>
+
+                  <View style={styles.resultCardRow}>
+                    <Text style={styles.resultCardLabel}>검사 결과:</Text>
+                    <Text style={styles.resultCardValue}>{item.value}</Text>
+                  </View>
+
+                  {item.colorRGB && item.colorRGB.length === 3 && (
+                    <View style={styles.resultCardRow}>
+                      <View
+                        style={[
+                          styles.colorBox,
+                          {
+                            backgroundColor: `rgb(${item.colorRGB[0]}, ${item.colorRGB[1]}, ${item.colorRGB[2]})`
+                          }
+                        ]}
+                      />
+                      <Text style={styles.resultCardLabel}>
+                        RGB: ({item.colorRGB.join(', ')})
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              ))}
+            </>
+          ) : (
+            <View style={styles.noResultBox}>
+              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={goHome}
+          >
+            <Text style={styles.homeButtonText}>홈으로</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: 80 }} />
+        </ScrollView>
       </View>
     );
   };
@@ -337,7 +466,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  if (status === STATUS_PENDING || status === STATUS_PROCESSING) {
+  if (isProcessingStatus(status)) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -450,36 +579,87 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  resultContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 48,
-    backgroundColor: '#FFFFFF',
-  },
-  resultTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2024',
-    marginLeft: 28,
-    marginBottom: 16,
-  },
-  resultBox: {
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  resultBoxTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2024',
-    marginBottom: 8,
-  },
-  resultText: {
-    fontSize: 14,
-    color: '#1F2024',
-    lineHeight: 20,
-  },
+   resultContainer: {
+     flex: 1,
+     paddingHorizontal: 20,
+     paddingTop: 48,
+     backgroundColor: '#FFFFFF',
+   },
+   resultScrollContent: {
+     paddingHorizontal: 8,
+     paddingTop: 12,
+   },
+   resultTitle: {
+     fontSize: 22,
+     fontWeight: '700',
+     color: '#1F2024',
+     marginLeft: 28,
+     marginBottom: 16,
+   },
+   resultCard: {
+     marginBottom: 12,
+     padding: 14,
+     borderRadius: 12,
+     backgroundColor: '#FFF9F0',
+     borderLeftWidth: 4,
+     borderLeftColor: '#FF9500',
+   },
+   resultCardHeader: {
+     marginBottom: 10,
+   },
+   resultCardTitle: {
+     fontSize: 15,
+     fontWeight: '700',
+     color: '#1F2024',
+   },
+   resultCardRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     marginBottom: 8,
+   },
+   resultCardLabel: {
+     fontSize: 12,
+     color: '#666666',
+     marginRight: 6,
+   },
+   resultCardValue: {
+     fontSize: 13,
+     fontWeight: '600',
+     color: '#FF9500',
+   },
+   colorBox: {
+     width: 24,
+     height: 24,
+     borderRadius: 4,
+     marginRight: 8,
+     borderWidth: 1,
+     borderColor: '#DDDDDD',
+   },
+   noResultBox: {
+     marginTop: 40,
+     alignItems: 'center',
+   },
+   noResultText: {
+     fontSize: 16,
+     color: '#999999',
+   },
+   resultBox: {
+     marginTop: 12,
+     padding: 16,
+     borderRadius: 12,
+     backgroundColor: '#F5F7FA',
+   },
+   resultBoxTitle: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: '#1F2024',
+     marginBottom: 8,
+   },
+   resultText: {
+     fontSize: 14,
+     color: '#1F2024',
+     lineHeight: 20,
+   },
 
   messageContainer: {
     flex: 1,
@@ -540,4 +720,3 @@ const styles = StyleSheet.create({
 });
 
 export default UrineDiagnosisResultScreen;
-

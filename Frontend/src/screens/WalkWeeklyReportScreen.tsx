@@ -55,9 +55,7 @@ export default function WalkWeeklyReportScreen() {
       let thisWeekWalks = [];
       try {
         thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
-        console.log('[walk] weekly report walks count', thisWeekWalks.length);
-      } catch (error) {
-        console.log('[walk] this-week endpoint failed in report; falling back to per-pet walk list');
+      } catch {
         const settled = await Promise.allSettled(
           petList.map(async (pet) => {
             const response = await getPetWalks(pet.id, {
@@ -70,14 +68,6 @@ export default function WalkWeeklyReportScreen() {
           })
         );
         thisWeekWalks = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
-      }
-
-      if (thisWeekWalks.length > 0) {
-        console.log('[walk] weekly report sample walk item', {
-          pet_id: (thisWeekWalks[0] as any).pet_id,
-          petId: (thisWeekWalks[0] as any).petId,
-          pet: (thisWeekWalks[0] as any).pet,
-        });
       }
 
       const enrichedPets = petList.map((pet) => {
@@ -116,8 +106,9 @@ export default function WalkWeeklyReportScreen() {
       });
 
       setDailyDistanceByPetId(dailyMap);
-    } catch (error) {
-      console.warn('[walk] failed to load weekly report', error);
+    } catch {
+      setWeeklySummaryByPetId({});
+      setDailyDistanceByPetId({});
     } finally {
       setIsLoading(false);
     }

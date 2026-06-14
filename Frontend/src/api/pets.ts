@@ -5,6 +5,7 @@ import {
   storeAuthTokens,
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
+import { resolveImageUri } from '../utils/imageUri';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
@@ -24,11 +25,16 @@ export interface PetListItem {
   weightKg?: number;
   ownerId?: number;
   profilePicture?: string;
+  profilePictureUrl?: string;
   profileImage?: string;
+  profileImageUrl?: string;
   profile_image?: string;
+  profilePic?: string;
+  profile_pic?: string;
+  image_url?: string;
+  photo_url?: string;
   imageUrl?: string;
   photoUrl?: string;
-  profilePictureUrl?: string;
   profile_picture?: string;
   image?: string;
   thumbnailUrl?: string;
@@ -130,7 +136,6 @@ const authorizedFetch = async (
     });
 
   let response = await doFetch(accessToken);
-  console.log('[pets] fetch status', response.status);
 
   if (response.status === 403) {
     throw new Error('권한이 없습니다.');
@@ -151,13 +156,9 @@ const authorizedFetch = async (
     await storeAuthTokens(newTokens);
     accessToken = newTokens.accessToken;
     response = await doFetch(accessToken);
-    console.log('[pets] token refreshed');
-  } catch (error) {
-    console.warn('[pets] token refresh 실패', error);
+  } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
-
-  console.log('[pets] fetch status', response.status);
 
   if (response.status === 403) {
     throw new Error('권한이 없습니다.');
@@ -194,32 +195,33 @@ const buildPetFormData = (
   return formData;
 };
 
-const extractPetImage = (data?: Partial<PetListItem> | null) =>
-  data?.profilePicture ||
-  data?.profileImage ||
-  (data as any)?.profile_image ||
-  (data as any)?.profilePictureUrl ||
-  (data as any)?.profile_picture ||
-  (data as any)?.imageUrl ||
-  (data as any)?.photoUrl ||
-  (data as any)?.thumbnailUrl ||
-  (data as any)?.image ||
-  undefined;
-
-const logPetImageFields = (data?: Partial<PetListItem> | null) => {
-  if (!data) return;
-  console.log('[pets] pet image fields', {
-    profilePicture: data.profilePicture,
-    profileImage: (data as any).profileImage,
-    profile_image: (data as any).profile_image,
-    profilePictureUrl: (data as any).profilePictureUrl,
-    profile_picture: (data as any).profile_picture,
-    imageUrl: (data as any).imageUrl,
-    photoUrl: (data as any).photoUrl,
-    thumbnailUrl: (data as any).thumbnailUrl,
-    image: (data as any).image,
-  });
+const pickFirstResolvableImage = (candidates: unknown[]): string | undefined => {
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string') continue;
+    const imageUri = resolveImageUri(candidate);
+    if (!imageUri) continue;
+    return imageUri;
+  }
+  return undefined;
 };
+
+const extractPetImage = (data?: Partial<PetListItem> | null) =>
+  pickFirstResolvableImage([
+    (data as any)?.photoUrl,
+    (data as any)?.photo_url,
+    (data as any)?.imageUrl,
+    (data as any)?.image_url,
+    (data as any)?.profilePictureUrl,
+    (data as any)?.profileImageUrl,
+    data?.profilePicture,
+    data?.profileImage,
+    (data as any)?.profile_image,
+    (data as any)?.profilePic,
+    (data as any)?.profile_pic,
+    (data as any)?.profile_picture,
+    (data as any)?.thumbnailUrl,
+    (data as any)?.image,
+  ]);
 
 const extractSubmissionIdFromLocation = (location?: string | null) => {
   if (!location) return undefined;
@@ -256,10 +258,44 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
 
   const data = await parseJsonSafe(response);
   const items = (Array.isArray(data) ? data : []) as PetListItem[];
-  if (items.length > 0) {
-    logPetImageFields(items[0]);
+  const normalizedPets = items.map((item) => normalizePet(item));
+  const needsImageEnrichment = normalizedPets.some(
+    (pet) => !extractPetImage(pet) && Number.isFinite(pet.id)
+  );
+
+  if (!needsImageEnrichment) {
+    return normalizedPets;
   }
-  return items.map((item) => normalizePet(item));
+
+  const enriched = await Promise.all(
+    normalizedPets.map(async (pet) => {
+      if (extractPetImage(pet) || !Number.isFinite(pet.id)) {
+        return pet;
+      }
+
+      try {
+        const detailResponse = await authorizedFetch(`${API_BASE_URL}/api/pets/${pet.id}`, {
+          method: 'GET',
+        });
+
+        if (!detailResponse.ok) {
+          return pet;
+        }
+
+        const detailData = await parseJsonSafe(detailResponse);
+        const detail = normalizePet(detailData as PetListItem);
+        return {
+          ...pet,
+          ...detail,
+          profilePicture: detail.profilePicture || pet.profilePicture,
+        };
+      } catch {
+        return pet;
+      }
+    })
+  );
+
+  return enriched;
 };
 
 export const getPetDetail = async (id: number): Promise<PetListItem> => {
@@ -406,12 +442,12 @@ export const requestUrineDiagnosis = async (
   const mimeType = image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg';
   const fileName = image.fileName || normalizeFileName(image.uri) || 'urine.jpg';
 
-  console.log('[urine] upload url:', uploadUrl);
-  console.log('[urine] petId:', petId);
-  console.log('[urine] formData part:', 'image');
-  console.log('[urine] file payload', {
+  console.log('[diagnosis] upload:urine:start', {
+    petId,
+    uploadUrl,
+    uri: image.uri,
     fileName,
-    type: mimeType,
+    mimeType,
     fileSize: image.fileSize,
   });
 
@@ -427,7 +463,6 @@ export const requestUrineDiagnosis = async (
   });
 
   if (response.status === 201) {
-    console.log('[urine] upload success', { url: uploadUrl, petId, status: response.status });
     const data = await parseJsonSafe(response);
     if (data && typeof data === 'object') {
       return data as { id?: string; submissionId?: string };
@@ -439,7 +474,11 @@ export const requestUrineDiagnosis = async (
   }
 
   const errorText = await readErrorBody(response);
-  console.log('[urine] upload 실패 상태', response.status, errorText);
+  console.log('[diagnosis] upload:urine:error', {
+    status: response.status,
+    statusText: response.statusText,
+    message: errorText,
+  });
   throw new Error(
     errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
   );

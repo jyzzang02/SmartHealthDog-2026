@@ -21,8 +21,9 @@ export default function HomeScreen() {
       const [profileData, petsData] = await Promise.all([getMyProfile(), getMyPets()]);
       setProfile(profileData);
       setPets(petsData);
-    } catch (error) {
-      console.warn('[home] failed to load profile/pets', error);
+    } catch {
+      setProfile(null);
+      setPets([]);
     } finally {
       setProfileLoading(false);
       setPetsLoading(false);

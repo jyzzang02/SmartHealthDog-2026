@@ -17,6 +17,7 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const shouldFetch = profileProp === undefined;
 
   useEffect(() => {
@@ -38,8 +39,8 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
     try {
       const data = await getMyProfile();
       setProfile(data);
-    } catch (error) {
-      console.error('Failed to load profile:', error);
+    } catch {
+      setProfile(null);
     } finally {
       setLoading(false);
     }
@@ -62,11 +63,22 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
   const effectiveProfile = shouldFetch ? profile : profileProp ?? null;
   const effectiveLoading = shouldFetch ? loading : Boolean(loadingProp);
   const resolvedProfileImage = resolveImageUri(effectiveProfile?.profilePicture);
+  const shouldUseAuthHeaderForImage = Boolean(
+    resolvedProfileImage && /^https?:\/\/api\.puppydoc\.ovh:8080\//i.test(resolvedProfileImage)
+  );
+  useEffect(() => {
+    setImageLoadFailed(false);
+  }, [resolvedProfileImage]);
   const profileImageSource: ImageSourcePropType | undefined = resolvedProfileImage
-    ? {
+    ? !imageLoadFailed
+      ? {
         uri: resolvedProfileImage,
-        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+        headers:
+          shouldUseAuthHeaderForImage && accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
       }
+      : undefined
     : undefined;
 
   if (effectiveLoading) {
@@ -84,8 +96,8 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
         <Image
           source={profileImageSource}
           style={styles.profileImage}
-          onError={(event) => {
-            console.log('[profile] image load failed', event.nativeEvent?.error);
+          onError={() => {
+            setImageLoadFailed(true);
           }}
         />
       ) : (

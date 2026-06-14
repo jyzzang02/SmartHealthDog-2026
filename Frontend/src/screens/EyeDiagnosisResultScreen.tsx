@@ -5,6 +5,7 @@ import {
   BackHandler,
   Image,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -25,6 +26,51 @@ const STATUS_PROCESSING = 'PROCESSING';
 const STATUS_COMPLETED = 'COMPLETED';
 const STATUS_FAILED = 'FAILED';
 const STATUS_DELETED = 'DELETED';
+
+const normalizeStatus = (status?: string) => (status || '').trim().toUpperCase();
+
+const PROCESSING_STATUSES = new Set([
+  STATUS_PENDING,
+  STATUS_PROCESSING,
+  'QUEUED',
+  'IN_PROGRESS',
+  'RUNNING',
+  'ANALYZING',
+]);
+
+const COMPLETED_STATUSES = new Set([
+  STATUS_COMPLETED,
+  'SUCCESS',
+  'SUCCEEDED',
+  'DONE',
+  'FINISHED',
+]);
+
+const FAILED_STATUSES = new Set([
+  STATUS_FAILED,
+  'ERROR',
+  'REJECTED',
+  'CANCELED',
+  'CANCELLED',
+]);
+
+const DELETED_STATUSES = new Set([
+  STATUS_DELETED,
+  'EXPIRED',
+  'TIMEOUT',
+]);
+
+const isProcessingStatus = (status?: string) =>
+  PROCESSING_STATUSES.has(normalizeStatus(status));
+
+const isCompletedStatus = (status?: string) =>
+  COMPLETED_STATUSES.has(normalizeStatus(status));
+
+const isFailedStatus = (status?: string) =>
+  FAILED_STATUSES.has(normalizeStatus(status));
+
+const isDeletedStatus = (status?: string) =>
+  DELETED_STATUSES.has(normalizeStatus(status));
 
 const dogImage = require('../assets/eyeDog.png');
 
@@ -127,7 +173,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     };
   }, []);
 
-  const status = submission?.status?.toUpperCase() ?? '';
+  const status = normalizeStatus(submission?.status);
 
   const loadResult = useCallback(async () => {
     const requestId = requestIdRef.current + 1;
@@ -147,7 +193,11 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setMessage('');
           return;
         } catch (directError) {
-          console.log('[eye] direct submission lookup failed once, falling back to list', directError);
+          console.log('[eye] direct submission lookup skipped; using list fallback', {
+            submissionId,
+            message:
+              directError instanceof Error ? directError.message : String(directError),
+          });
         }
       }
 
@@ -179,7 +229,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       setSubmission(target);
 
-      const normalizedStatus = target.status?.toUpperCase() ?? '';
+      const normalizedStatus = normalizeStatus(target.status);
       const idToFetch = getSubmissionId(target);
 
       if (!idToFetch) {
@@ -188,16 +238,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (
-        normalizedStatus === STATUS_PENDING ||
-        normalizedStatus === STATUS_PROCESSING
-      ) {
+      if (isProcessingStatus(normalizedStatus)) {
         setResult(null);
         setMessage('AI가 안구질환을 분석 중입니다.');
         return;
       }
 
-      if (normalizedStatus === STATUS_FAILED) {
+      if (isFailedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) ||
@@ -206,7 +253,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_DELETED) {
+      if (isDeletedStatus(normalizedStatus)) {
         setResult(null);
         setMessage(
           getFailureReason(target) === 'TIMEOUT'
@@ -216,12 +263,27 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         return;
       }
 
-      if (normalizedStatus === STATUS_COMPLETED) {
-        const detail = await getEyeSubmissionResult(idToFetch);
-        if (!canUpdate()) return;
-        setResult(detail);
-        setMessage('');
-        return;
+      if (isCompletedStatus(normalizedStatus) || normalizedStatus.length > 0) {
+        try {
+          const detail = await getEyeSubmissionResult(idToFetch);
+          if (!canUpdate()) return;
+          setResult(detail);
+          setMessage('');
+          return;
+        } catch (detailError) {
+          console.log('[eye] detail fetch failed', {
+            status: normalizedStatus,
+            submissionId: idToFetch,
+            error: String(detailError),
+          });
+          if (!canUpdate()) return;
+          if (!isCompletedStatus(normalizedStatus)) {
+            setResult(null);
+            setMessage('AI가 안구질환을 분석 중입니다.');
+            return;
+          }
+          throw detailError;
+        }
       }
 
       setResult(null);
@@ -252,7 +314,15 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
-    if (status !== STATUS_PENDING && status !== STATUS_PROCESSING) {
+    if (result) {
+      return;
+    }
+
+    if (isFailedStatus(status) || isDeletedStatus(status)) {
+      return;
+    }
+
+    if (!submission && !submissionId) {
       return;
     }
 
@@ -261,7 +331,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }, 5000);
 
     return () => clearTimeout(timer);
-  }, [isFocused, isLoading, loadResult, status]);
+  }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
 
   const resultText = useMemo(() => {
     if (!result) {
@@ -269,6 +339,29 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     return JSON.stringify(result, null, 2);
+  }, [result]);
+
+  // 결과 데이터 파싱
+  const parsedResults = useMemo(() => {
+    if (!result || typeof result !== 'object') {
+      return [];
+    }
+
+    // results 배열 추출
+    const resultsArray = (result as any).results;
+    if (!Array.isArray(resultsArray)) {
+      return [];
+    }
+
+    return resultsArray.map((item: any) => ({
+      disease: item.disease || '미확인',
+      probability: typeof item.probability === 'number'
+        ? (item.probability * 100).toFixed(1)
+        : (parseFloat(item.probability) * 100).toFixed(1),
+      condition: item.condition || {},
+      name: item.condition?.name || item.disease || '미확인',
+      description: item.condition?.description || '',
+    }));
   }, [result]);
 
   const goHome = () => {
@@ -300,10 +393,45 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       <View style={styles.resultContainer}>
         <Text style={styles.resultTitle}>안구 진단 결과</Text>
 
-        <View style={styles.resultBox}>
-          <Text style={styles.resultBoxTitle}>결과 요약</Text>
-          <Text style={styles.resultText}>{resultText}</Text>
-        </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={styles.resultScrollContent}
+          showsVerticalScrollIndicator={false}
+        >
+          {parsedResults.length > 0 ? (
+            <>
+              {parsedResults.map((item, index) => (
+                <View key={index} style={styles.resultCard}>
+                  <View style={styles.resultCardHeader}>
+                    <Text style={styles.resultCardTitle}>{item.name}</Text>
+                    <View style={styles.probabilityBadge}>
+                      <Text style={styles.probabilityText}>{item.probability}%</Text>
+                    </View>
+                  </View>
+
+                  {item.description ? (
+                    <Text style={styles.resultCardDescription}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+                </View>
+              ))}
+            </>
+          ) : (
+            <View style={styles.noResultBox}>
+              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={styles.homeButton}
+            onPress={goHome}
+          >
+            <Text style={styles.homeButtonText}>홈으로</Text>
+          </TouchableOpacity>
+
+          <View style={{ height: 80 }} />
+        </ScrollView>
       </View>
     );
   };
@@ -342,7 +470,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   }
 
-  if (status === STATUS_PENDING || status === STATUS_PROCESSING) {
+  if (isProcessingStatus(status)) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -455,36 +583,84 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
 
-  resultContainer: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 48,
-    backgroundColor: '#FFFFFF',
-  },
-  resultTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#1F2024',
-    marginLeft: 28,
-    marginBottom: 16,
-  },
-  resultBox: {
-    marginTop: 12,
-    padding: 16,
-    borderRadius: 12,
-    backgroundColor: '#F5F7FA',
-  },
-  resultBoxTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#1F2024',
-    marginBottom: 8,
-  },
-  resultText: {
-    fontSize: 14,
-    color: '#1F2024',
-    lineHeight: 20,
-  },
+   resultContainer: {
+     flex: 1,
+     paddingHorizontal: 20,
+     paddingTop: 48,
+     backgroundColor: '#FFFFFF',
+   },
+   resultScrollContent: {
+     paddingHorizontal: 8,
+     paddingTop: 12,
+   },
+   resultTitle: {
+     fontSize: 22,
+     fontWeight: '700',
+     color: '#1F2024',
+     marginLeft: 28,
+     marginBottom: 16,
+   },
+   resultCard: {
+     marginBottom: 12,
+     padding: 14,
+     borderRadius: 12,
+     backgroundColor: '#F8FBFF',
+     borderLeftWidth: 4,
+     borderLeftColor: '#0081D5',
+   },
+   resultCardHeader: {
+     flexDirection: 'row',
+     justifyContent: 'space-between',
+     alignItems: 'center',
+     marginBottom: 8,
+   },
+   resultCardTitle: {
+     fontSize: 16,
+     fontWeight: '700',
+     color: '#1F2024',
+     flex: 1,
+   },
+   probabilityBadge: {
+     paddingHorizontal: 10,
+     paddingVertical: 4,
+     borderRadius: 16,
+     backgroundColor: '#0081D5',
+   },
+   probabilityText: {
+     fontSize: 12,
+     fontWeight: '700',
+     color: '#FFFFFF',
+   },
+   resultCardDescription: {
+     fontSize: 13,
+     color: '#555555',
+     lineHeight: 19,
+   },
+   noResultBox: {
+     marginTop: 40,
+     alignItems: 'center',
+   },
+   noResultText: {
+     fontSize: 16,
+     color: '#999999',
+   },
+   resultBox: {
+     marginTop: 12,
+     padding: 16,
+     borderRadius: 12,
+     backgroundColor: '#F5F7FA',
+   },
+   resultBoxTitle: {
+     fontSize: 16,
+     fontWeight: '600',
+     color: '#1F2024',
+     marginBottom: 8,
+   },
+   resultText: {
+     fontSize: 14,
+     color: '#1F2024',
+     lineHeight: 20,
+   },
 
   messageContainer: {
     flex: 1,
@@ -545,4 +721,3 @@ const styles = StyleSheet.create({
 });
 
 export default EyeDiagnosisResultScreen;
-

@@ -119,7 +119,6 @@ const OrdinarySignup: React.FC<Props> = ({ navigation }) => {
         setShowVerificationField(true);
         Alert.alert('인증 코드 전송', '인증 코드가 이메일로 전송되었습니다.');
       } catch (error) {
-        console.error('[signup] 이메일 인증 요청 실패', error);
         if (isApiError(error)) {
           Alert.alert('오류', error.message);
         } else {
