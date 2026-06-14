@@ -13,7 +13,6 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
-import { healthStore } from '../store/healthStore';
 import type { PhysicalResult, HealthSummary, OverallCondition } from '../types/health';
 
 /* ─── 상수 ─── */
@@ -117,8 +116,7 @@ const HealthCheckInputScreen = () => {
       recommendation: calcRecommendation(overallCondition),
     };
 
-    healthStore.set(petId, summary);
-    navigation.goBack();
+    navigation.navigate('HealthCheckResult', { petId, petName, summary });
   };
 
   /* ─── 렌더 ─── */
@@ -393,7 +391,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   examTypeBtnActive: {
-    borderColor: '#2A7BE4',
+    borderColor: '#0081D5',
     backgroundColor: '#EEF7FD',
   },
   examTypeBtnText: {
@@ -401,7 +399,7 @@ const styles = StyleSheet.create({
     color: '#333',
   },
   examTypeBtnTextActive: {
-    color: '#2A7BE4',
+    color: '#0081D5',
     fontWeight: '600',
   },
 
@@ -442,8 +440,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff',
   },
   physicalBtnActive: {
-    backgroundColor: '#2A7BE4',
-    borderColor: '#2A7BE4',
+    backgroundColor: '#0081D5',
+    borderColor: '#0081D5',
   },
   physicalBtnText: {
     fontSize: 13,
@@ -460,6 +458,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF7FD',
     borderRadius: 12,
     padding: 20,
+    borderWidth: 1,
+    borderColor: '#0081D5',
   },
   importTitle: {
     fontSize: 15,
@@ -474,7 +474,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   importBtn: {
-    backgroundColor: '#2A7BE4',
+    backgroundColor: '#0081D5',
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
@@ -524,7 +524,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 16,
     borderRadius: 12,
-    backgroundColor: '#2A7BE4',
+    backgroundColor: '#0081D5',
     alignItems: 'center',
   },
   submitBtnText: {

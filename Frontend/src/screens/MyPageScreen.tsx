@@ -20,6 +20,8 @@ import { getStoredAccessToken } from "../storage/tokenStorage";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
+import { healthStore } from "../store/healthStore";
+import type { HealthSummary } from "../types/health";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
@@ -36,6 +38,7 @@ const MyPageScreen = () => {
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
+  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const isMountedRef = useRef(true);
 
   useEffect(() => {
@@ -135,19 +138,35 @@ const MyPageScreen = () => {
     }, [loadData])
   );
 
+  // HealthCheckInputScreen / HealthCheckResultScreen 에서 돌아올 때마다 캐시 동기화
+  useFocusEffect(
+    useCallback(() => {
+      setHealthData(healthStore.getAll());
+    }, [])
+  );
+
   const petCards = useMemo(
     () =>
-      petList.map((pet) => ({
-        id: pet.id,
-        name: pet.name || "이름 없음",
-        type: pet.breed || mapSpeciesLabel(pet.species) || "",
-        gender: mapGenderLabel(pet.sex) || "",
-        birth: formatBirthDate(pet.birthDate) || "",
-        imageUrl: resolveImageUri(pet.profilePicture) || null,
-        healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
-        condition: "정보 없음",
-      })),
-    [petList]
+      petList.map((pet) => {
+        const summary = healthData[pet.id];
+        return {
+          id: pet.id,
+          name: pet.name || "이름 없음",
+          type: pet.breed || mapSpeciesLabel(pet.species) || "",
+          gender: mapGenderLabel(pet.sex) || "",
+          birth: formatBirthDate(pet.birthDate) || "",
+          imageUrl: resolveImageUri(pet.profilePicture) || null,
+          healthInfo: summary
+            ? summary.healthTags.length > 0
+              ? summary.healthTags
+              : ["특이사항 없음"]
+            : Array.isArray(pet.healthInfo)
+              ? pet.healthInfo
+              : [],
+          condition: summary ? summary.overallCondition : "정보 없음",
+        };
+      }),
+    [petList, healthData]
   );
 
   const resolvedUserImage = resolveImageUri(user?.profilePicture);
@@ -231,16 +250,36 @@ const MyPageScreen = () => {
       )}
 
       {petCards.length === 1 && (
-        <PetProfileCard
-          {...petCards[0]}
-          onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
-          onPressHistory={() =>
-            navigation.navigate("DiagnosisHistory", {
-              petId: petCards[0].id,
-              petName: petCards[0].name,
-            })
-          }
-        />
+        <>
+          <PetProfileCard
+            {...petCards[0]}
+            onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+            onPressHistory={() =>
+              navigation.navigate("DiagnosisHistory", {
+                petId: petCards[0].id,
+                petName: petCards[0].name,
+              })
+            }
+          />
+          {!healthData[petCards[0].id] && (
+            <TouchableOpacity
+              style={styles.healthInputBtn}
+              onPress={() =>
+                navigation.navigate("HealthCheckInput", {
+                  petId: petCards[0].id,
+                  petName: petCards[0].name,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
+              <Image
+                source={require("../assets/icon_right.png")}
+                style={styles.healthInputBtnArrow}
+              />
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
       {petCards.length > 1 && (
@@ -286,6 +325,25 @@ const MyPageScreen = () => {
               />
             ))}
           </View>
+
+          {petCards[currentIndex] && !healthData[petCards[currentIndex].id] && (
+            <TouchableOpacity
+              style={styles.healthInputBtn}
+              onPress={() =>
+                navigation.navigate("HealthCheckInput", {
+                  petId: petCards[currentIndex].id,
+                  petName: petCards[currentIndex].name,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
+              <Image
+                source={require("../assets/icon_right.png")}
+                style={styles.healthInputBtnArrow}
+              />
+            </TouchableOpacity>
+          )}
         </>
       )}
 
@@ -381,6 +439,31 @@ const styles = StyleSheet.create({
     height: 16,
     tintColor: "#7B7C7D",
   },
+
+  /* ────── 건강검진 정보 입력 ────── */
+  healthInputBtn: {
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#EEF7FD",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#0081D5",
+  },
+  healthInputBtnText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: "#0081D5",
+  },
+  healthInputBtnArrow: {
+    width: 14,
+    height: 14,
+    tintColor: "#0081D5",
+  },
+
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
