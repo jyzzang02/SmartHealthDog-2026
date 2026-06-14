@@ -14,6 +14,14 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthDetail'>;
 
 const TAB_LABELS = ['검진 기록', '변화 추이', '모니터링', '혈통 위험도'];
 
+type ActiveTab = '검진 기록' | '변화 추이' | '모니터링' | '혈통 위험도';
+
+const VITAL_ITEMS: { key: 'weight' | 'heartRate' | 'temperature'; label: string; unit: string }[] = [
+  { key: 'weight', label: '체중', unit: 'kg' },
+  { key: 'heartRate', label: '심박수', unit: 'bpm' },
+  { key: 'temperature', label: '체온', unit: '°C' },
+];
+
 const calcAgeYears = (birthDate?: string): number | null => {
   if (!birthDate) return null;
   const parsed = new Date(birthDate.split('T')[0]);
@@ -50,10 +58,13 @@ const HealthDetailScreen = () => {
 
   const [pet, setPet] = useState<PetListItem | null>(null);
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
+  const [previous, setPrevious] = useState<HealthSummary | undefined>(undefined);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('검진 기록');
 
   useFocusEffect(
     useCallback(() => {
       setSummary(healthStore.get(petId));
+      setPrevious(healthStore.getPrevious(petId));
       let mounted = true;
       getMyPets()
         .then((pets) => {
@@ -137,49 +148,99 @@ const HealthDetailScreen = () => {
 
         {/* 탭 행 */}
         <View style={styles.tabRow}>
-          {TAB_LABELS.map((label) => (
-            <View key={label} style={styles.tabItem}>
-              <Text
-                style={[
-                  styles.tabText,
-                  label === '검진 기록' ? styles.tabTextActive : styles.tabTextInactive,
-                ]}
+          {TAB_LABELS.map((label) => {
+            const isActive = label === activeTab;
+            return (
+              <TouchableOpacity
+                key={label}
+                style={styles.tabItem}
+                activeOpacity={0.7}
+                onPress={() => setActiveTab(label as ActiveTab)}
               >
-                {label}
-              </Text>
-              <View
-                style={[
-                  styles.tabIndicator,
-                  label === '검진 기록' ? styles.tabIndicatorActive : styles.tabIndicatorInactive,
-                ]}
-              />
-            </View>
-          ))}
+                <Text
+                  style={[
+                    styles.tabText,
+                    isActive ? styles.tabTextActive : styles.tabTextInactive,
+                  ]}
+                >
+                  {label}
+                </Text>
+                <View
+                  style={[
+                    styles.tabIndicator,
+                    isActive ? styles.tabIndicatorActive : styles.tabIndicatorInactive,
+                  ]}
+                />
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
-        {/* 검진 기록 리스트 */}
+        {/* 탭별 콘텐츠 */}
         <View style={styles.recordListContainer}>
-          {summary && summary.examTypes.length > 0 ? (
-            summary.examTypes.map((examType, idx) => (
-              <View key={examType + idx} style={styles.examCard}>
-                <View style={styles.examCardTopRow}>
-                  <View style={styles.examTagChip}>
-                    <Text style={styles.examTagChipText}>{examType}</Text>
+          {activeTab === '검진 기록' && (
+            summary && summary.examTypes.length > 0 ? (
+              summary.examTypes.map((examType, idx) => (
+                <View key={examType + idx} style={styles.examCard}>
+                  <View style={styles.examCardTopRow}>
+                    <View style={styles.examTagChip}>
+                      <Text style={styles.examTagChipText}>{examType}</Text>
+                    </View>
+                    <Text style={styles.examDate}>{summary.checkupDate}</Text>
                   </View>
-                  <Text style={styles.examDate}>{summary.checkupDate}</Text>
+                  <Text style={styles.examNoteLine}>{noteLine}</Text>
+                  <View style={styles.examResultBox}>
+                    <Text style={styles.examResultLabel}>검진 결과</Text>
+                    <Text style={[styles.examResultValue, { color: resultColor }]}>{resultValue}</Text>
+                  </View>
+                  <View style={styles.examBottomNoteWrap}>
+                    <Text style={styles.examBottomNoteText}>{summary.recommendation}</Text>
+                  </View>
                 </View>
-                <Text style={styles.examNoteLine}>{noteLine}</Text>
-                <View style={styles.examResultBox}>
-                  <Text style={styles.examResultLabel}>검진 결과</Text>
-                  <Text style={[styles.examResultValue, { color: resultColor }]}>{resultValue}</Text>
-                </View>
-                <View style={styles.examBottomNoteWrap}>
-                  <Text style={styles.examBottomNoteText}>{summary.recommendation}</Text>
+              ))
+            ) : (
+              <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
+            )
+          )}
+
+          {activeTab === '변화 추이' && (
+            summary ? (
+              <View style={styles.trendCard}>
+                <Text style={styles.trendCardTitle}>주요 수치 비교</Text>
+                <View style={styles.vitalsList}>
+                  {VITAL_ITEMS.map(({ key, label, unit }) => {
+                    const currentValue = summary[key];
+                    const previousValue = previous?.[key];
+                    return (
+                      <View key={key} style={styles.vitalRow}>
+                        <Text style={styles.vitalLabel}>{label}</Text>
+                        <View style={styles.vitalValueGroup}>
+                          {currentValue === undefined ? (
+                            <Text style={styles.vitalEmptyValue}>측정값 없음</Text>
+                          ) : (
+                            <>
+                              {previousValue !== undefined && (
+                                <>
+                                  <Text style={styles.vitalPrevValue}>{previousValue}{unit}</Text>
+                                  <Text style={styles.vitalArrow}>→</Text>
+                                </>
+                              )}
+                              <Text style={styles.vitalCurrentValue}>{currentValue}{unit}</Text>
+                            </>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
               </View>
-            ))
-          ) : (
-            <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
+            ) : (
+              <Text style={styles.emptyRecordText}>등록된 건강검진 정보가 없습니다.</Text>
+            )
+          )}
+
+          {(activeTab === '모니터링' || activeTab === '혈통 위험도') && (
+            <Text style={styles.emptyRecordText}>준비 중인 기능입니다.</Text>
           )}
         </View>
       </ScrollView>
@@ -289,4 +350,35 @@ const styles = StyleSheet.create({
   examResultValue: { fontSize: 16, fontWeight: '700' },
   examBottomNoteWrap: { borderTopWidth: 1, borderTopColor: '#F3F4F5', paddingTop: 8, marginTop: 4 },
   examBottomNoteText: { fontSize: 14, color: '#3C4144' },
+
+  trendCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#EAECEE',
+    borderRadius: 12,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+    gap: 16,
+  },
+  trendCardTitle: { fontSize: 16, color: '#2F3036' },
+  vitalsList: { gap: 12 },
+  vitalRow: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  vitalLabel: { fontSize: 14, color: '#3C4144' },
+  vitalValueGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  vitalPrevValue: { fontSize: 13, color: '#B3B6B8' },
+  vitalArrow: { fontSize: 14, color: '#B3B6B8' },
+  vitalCurrentValue: { fontSize: 14, color: '#0081D5' },
+  vitalEmptyValue: { fontSize: 14, color: '#B3B6B8' },
 });

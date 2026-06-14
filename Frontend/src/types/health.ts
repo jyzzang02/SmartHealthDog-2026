@@ -11,6 +11,9 @@ export interface HealthSummary {
   overallCondition: OverallCondition;
   healthTags: string[];           // 소견 있는 항목명 목록
   recommendation: string;         // 권고 문구
+  weight?: number;                // 체중 (kg)
+  heartRate?: number;             // 심박수 (bpm)
+  temperature?: number;           // 체온 (°C)
 }
 
 export const CONDITION_COLORS: Record<OverallCondition, { bg: string; text: string }> = {
