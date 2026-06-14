@@ -11,14 +11,17 @@ import {
   Platform,
   PermissionsAndroid,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
 import { useNavigation } from "@react-navigation/native";
 import { logout } from "../api/auth";
 import { getMyProfile, updateMyProfile, UserProfile } from "../api/users";
 import { clearAuthTokens, getStoredRefreshToken } from "../storage/tokenStorage";
+import { resolveImageUri } from "../utils/imageUri";
 
 const ProfileEditScreen = () => {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [nickname, setNickname] = useState("");
@@ -106,39 +109,66 @@ const ProfileEditScreen = () => {
         buttonPositive: '확인',
       });
       return granted === PermissionsAndroid.RESULTS.GRANTED;
-    } catch (error) {
-      console.warn('권한 요청 에러:', error);
+    } catch {
       return false;
     }
   }, []);
 
-  const handleSelectProfileImage = useCallback(async () => {
-    const hasPermission = await requestImagePermission();
-    if (!hasPermission) {
-      Alert.alert('권한 필요', '사진을 선택하려면 권한을 허용해 주세요.');
-      return;
-    }
+   const handleSelectProfileImage = useCallback(async () => {
+     const hasPermission = await requestImagePermission();
+     if (!hasPermission) {
+       Alert.alert('권한 필요', '사진을 선택하려면 권한을 허용해 주세요.');
+       return;
+     }
 
-    launchImageLibrary(
-      {
-        mediaType: 'photo',
-        quality: 1,
-        maxWidth: 500,
-        maxHeight: 500,
-      },
-      (response: ImagePickerResponse) => {
-        if (response.didCancel) return;
-        if (response.errorCode) {
-          Alert.alert('오류', '이미지를 불러올 수 없습니다.');
-          return;
-        }
-        const uri = response.assets?.[0]?.uri;
-        if (uri) {
-          setProfileImageUri(uri);
-        }
-      }
-    );
-  }, [requestImagePermission]);
+     launchImageLibrary(
+       {
+         mediaType: 'photo',
+         quality: 1,
+         maxWidth: 500,
+         maxHeight: 500,
+       },
+       async (response: ImagePickerResponse) => {
+         if (response.didCancel) return;
+         if (response.errorCode) {
+           Alert.alert('오류', '이미지를 불러올 수 없습니다.');
+           return;
+         }
+         const uri = response.assets?.[0]?.uri;
+         if (!uri) {
+           Alert.alert('오류', '이미지를 불러올 수 없습니다.');
+           return;
+         }
+
+         const fallbackNickname = nickname.trim() || profile?.nickname?.trim();
+         if (!fallbackNickname) {
+           Alert.alert('오류', '닉네임 정보를 먼저 불러오거나 입력해 주세요.');
+           return;
+         }
+
+         setProfileImageUri(uri);
+         try {
+            const updated = await updateMyProfile({
+              nickname: fallbackNickname,
+              profilePictureUri: uri,
+            });
+            setProfile(updated);
+            setNickname(updated.nickname ?? fallbackNickname);
+            setProfileImageUri(null);
+            Alert.alert('저장 완료', '프로필 사진이 변경되었습니다.', [
+              {
+                text: '확인',
+                onPress: () => navigation.goBack(),
+             },
+           ]);
+         } catch (error) {
+           const message =
+             error instanceof Error ? error.message : '프로필 사진 변경에 실패했습니다.';
+           Alert.alert('오류', message);
+         }
+       }
+     );
+   }, [nickname, profile?.nickname, requestImagePermission, navigation]);
 
   const handleSaveProfile = useCallback(async () => {
     if (isSavingProfile) return;
@@ -157,7 +187,12 @@ const ProfileEditScreen = () => {
       setProfile(updated);
       setNickname(updated.nickname ?? trimmedNickname);
       setProfileImageUri(null);
-      Alert.alert("저장 완료", "프로필이 저장되었습니다.");
+      Alert.alert("저장 완료", "프로필이 저장되었습니다.", [
+        {
+          text: "확인",
+          onPress: () => navigation.goBack(),
+        },
+      ]);
     } catch (error) {
       const message =
         error instanceof Error
@@ -167,15 +202,26 @@ const ProfileEditScreen = () => {
     } finally {
       setIsSavingProfile(false);
     }
-  }, [isSavingProfile, nickname, profileImageUri]);
+  }, [isSavingProfile, nickname, profileImageUri, navigation]);
 
   const handleChangeAddress = useCallback(() => {
     Alert.alert('주소 변경', '주소 검색 기능은 준비 중입니다.');
   }, []);
 
+  // 비회원(로그인 에러) 상태일 때 저장 버튼 숨김 여부 결정
+  const isGuestMode = !!profileError;
+  const resolvedServerProfileImage = resolveImageUri(profile?.profilePicture);
+
   return (
     <View style={styles.wrapper}>
-      <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingBottom: insets.bottom + (isGuestMode ? 40 : 120) } // 여유로운 하단 여백
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         {/* 🔙 헤더 */}
         <View style={styles.headerRow}>
           <TouchableOpacity
@@ -202,16 +248,21 @@ const ProfileEditScreen = () => {
         <View style={styles.imageBox}>
           {profileImageUri ? (
             <Image source={{ uri: profileImageUri }} style={styles.profileImage} />
-          ) : profile?.profilePicture ? (
+          ) : resolvedServerProfileImage ? (
             <Image
-              source={{ uri: profile.profilePicture }}
+              source={{ uri: resolvedServerProfileImage }}
               style={styles.profileImage}
             />
           ) : (
             <View style={styles.imagePlaceholder} />
           )}
 
-          <TouchableOpacity style={styles.editTag} onPress={handleSelectProfileImage}>
+          <TouchableOpacity
+            style={styles.editTag}
+            onPress={handleSelectProfileImage}
+            activeOpacity={0.8}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Image
               source={require("../assets/icon_edit.png")}
               style={styles.editSmallIcon}
@@ -251,25 +302,29 @@ const ProfileEditScreen = () => {
         </View>
 
         {/* 로그아웃 */}
-        <TouchableOpacity onPress={handleLogout} disabled={isLoggingOut}>
+        <TouchableOpacity
+          style={styles.logoutBtn}
+          onPress={handleLogout}
+          disabled={isLoggingOut}
+        >
           <Text style={styles.logoutText}>
             {isLoggingOut ? "로그아웃 중..." : "로그아웃"}
           </Text>
         </TouchableOpacity>
-
-        <View style={{ height: 120 }} />
       </ScrollView>
 
-      {/* 저장 버튼 */}
-      <TouchableOpacity
-        style={styles.saveBtn}
-        onPress={handleSaveProfile}
-        disabled={isSavingProfile}
-      >
-        <Text style={styles.saveBtnText}>
-          {isSavingProfile ? "저장 중..." : "저장하기"}
-        </Text>
-      </TouchableOpacity>
+      {/* 저장 버튼: 비회원(에러) 상태가 아닐 때만 표시 */}
+      {!isGuestMode && (
+        <TouchableOpacity
+          style={[styles.saveBtn, { bottom: insets.bottom + 16 }]}
+          onPress={handleSaveProfile}
+          disabled={isSavingProfile}
+        >
+          <Text style={styles.saveBtnText}>
+            {isSavingProfile ? "저장 중..." : "저장하기"}
+          </Text>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -285,6 +340,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
+  },
+
+  scrollContent: {
     padding: 20,
   },
 
@@ -313,7 +371,7 @@ const styles = StyleSheet.create({
 
   imageBox: {
     width: "100%",
-    height: 180,
+    height: 140,
     backgroundColor: "#F1F1F1",
     borderRadius: 12,
     marginTop: 24,
@@ -342,6 +400,8 @@ const styles = StyleSheet.create({
     backgroundColor: "#fff",
     borderWidth: 1,
     borderColor: "#ddd",
+    zIndex: 10,
+    elevation: 10,
   },
 
   editTagText: {
@@ -414,16 +474,20 @@ const styles = StyleSheet.create({
     color: "#1F2024",
   },
 
+  logoutBtn: {
+    marginTop: 40,
+    paddingVertical: 10,
+    alignSelf: 'flex-start',
+  },
+
   logoutText: {
     fontSize: 15,
     color: "#5A5A5A",
     textDecorationLine: "underline",
-    marginTop: 28,
   },
 
   saveBtn: {
     position: "absolute",
-    bottom: 24,
     left: 20,
     right: 20,
     backgroundColor: "#2A7BE4",
@@ -439,9 +503,10 @@ const styles = StyleSheet.create({
   },
 
   errorText: {
-    fontSize: 12,
+    fontSize: 13,
     color: "#EF5F5F",
-    marginTop: 8,
+    marginTop: 12,
+    fontWeight: "600",
   },
 
   loadingText: {

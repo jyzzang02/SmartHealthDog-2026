@@ -7,7 +7,9 @@ import {
   NativeScrollEvent,
   NativeSyntheticEvent,
   Image,
+  TouchableOpacity,
 } from "react-native";
+import { useNavigation } from "@react-navigation/native";
 
 const { width } = Dimensions.get("window");
 const BANNER_ASPECT = 1010 / 569;
@@ -20,6 +22,7 @@ const banners = [
 const bannerData = [...banners, { ...banners[0], id: "loop-0" }]; // 마지막에 첫 배너 복제 (고유 id로 키 충돌 방지)
 
 export default function BannerSlider() {
+  const navigation = useNavigation<any>();
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const AUTO_INTERVAL = 3500;
@@ -67,7 +70,11 @@ export default function BannerSlider() {
         onMomentumScrollEnd={handleScroll}
         scrollEventThrottle={16}
         renderItem={({ item }) => (
-          <View style={styles.bannerBox}>
+          <TouchableOpacity
+            activeOpacity={0.9}
+            onPress={() => navigation.navigate("입양")}
+            style={styles.bannerBox}
+          >
             <Image source={item.image} style={styles.bannerImage} />
 
             {/* 🔹 배너 내부 아래 중앙에 위치하는 Dot */}
@@ -79,7 +86,7 @@ export default function BannerSlider() {
                 />
               ))}
             </View>
-          </View>
+          </TouchableOpacity>
         )}
       />
     </View>
@@ -89,7 +96,8 @@ export default function BannerSlider() {
 const styles = StyleSheet.create({
   container: {
     width: width,
-    marginTop: 20,
+    marginTop: 0,
+    marginBottom: 100,
   },
 
   bannerBox: {
@@ -97,7 +105,7 @@ const styles = StyleSheet.create({
     aspectRatio: BANNER_ASPECT, // 원본 비율 유지
     justifyContent: "center",
     alignItems: "center",
-    marginTop: 10,
+    marginTop: 0,
   },
 
   bannerImage: {

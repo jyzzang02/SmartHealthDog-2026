@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   ViewStyle,
-  TextStyle,
 } from 'react-native';
 
 interface CustomButtonProps {

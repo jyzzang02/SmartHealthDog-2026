@@ -25,24 +25,36 @@ export default function AnimalDetailScreen() {
   const [isPetLoading, setIsPetLoading] = useState(false);
 
   useEffect(() => {
-    if (!animalData.shelterId || !animalData.id) return;
+    const shelterId = animalData.shelterId;
+    const petId = animalData.id;
+    if (shelterId === undefined || petId === undefined) return;
+
+    let isActive = true;
 
     const fetchPetDetail = async () => {
       setIsPetLoading(true);
       setPetError(null);
       try {
-        const detail = await getShelterPetDetail(animalData.shelterId, animalData.id);
+        const detail = await getShelterPetDetail(shelterId, petId);
+        if (!isActive) return;
         setPetDetail(detail);
       } catch (error) {
+        if (!isActive) return;
         const message =
           error instanceof Error ? error.message : '동물 상세 정보를 불러오지 못했습니다.';
         setPetError(message);
       } finally {
-        setIsPetLoading(false);
+        if (isActive) {
+          setIsPetLoading(false);
+        }
       }
     };
 
     fetchPetDetail();
+
+    return () => {
+      isActive = false;
+    };
   }, [animalData.id, animalData.shelterId]);
 
   const imageSource = useMemo(() => {

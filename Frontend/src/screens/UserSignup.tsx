@@ -93,8 +93,7 @@ const UserSignup: React.FC<Props> = ({ navigation, route }) => {
         );
         return granted === PermissionsAndroid.RESULTS.GRANTED;
       }
-    } catch (err) {
-      console.warn('권한 요청 에러:', err);
+    } catch {
       return false;
     }
   };
@@ -120,9 +119,8 @@ const UserSignup: React.FC<Props> = ({ navigation, route }) => {
       },
       (response: ImagePickerResponse) => {
         if (response.didCancel) {
-          console.log('이미지 선택 취소');
+          return;
         } else if (response.errorCode) {
-          console.log('이미지 선택 에러:', response.errorMessage);
           Alert.alert('오류', '이미지를 불러올 수 없습니다.');
         } else if (response.assets && response.assets.length > 0) {
           const uri = response.assets[0].uri;
