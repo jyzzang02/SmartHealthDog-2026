@@ -16,4 +16,5 @@ mlruns/
 .ipynb_checkpoints/
 
 benchmark_results/
+benchmark_data/
 mlflow.db

@@ -2,32 +2,126 @@ import time
 import logging
 import os
 import hashlib
+import argparse
+from pathlib import Path
+
+import requests
 from fastai.vision.all import *
 from PIL import Image
 
-# --- Configuration ---
-# Set the folder containing your test images
-TEST_IMAGE_DIR = "input" 
-INFERENCE_INTERVAL_SECONDS = 10 
-# Set logging level for visibility
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+# =========================
+# Configuration
+# =========================
 
-# --- Model Initialization Setup (from your original code) ---
+TEST_IMAGE_DIR = os.getenv("TEST_IMAGE_DIR", "input")
+INFERENCE_INTERVAL_SECONDS = int(os.getenv("INFERENCE_INTERVAL_SECONDS", "5"))
 
-# Function to calculate MD5 hash of a file (optional, but kept for model tracking)
+AI_MODEL_SERVICE_EMAIL = os.getenv("AI_MODEL_SERVICE_EMAIL", "ai-model@smarthealthdog.local")
+AI_MODEL_SERVICE_PASSWORD = os.getenv("AI_MODEL_SERVICE_PASSWORD", "AiService1234!")
+
+AI_MODEL_SERVICE_LOGIN_ENDPOINT = os.getenv(
+    "AI_MODEL_SERVICE_LOGIN_ENDPOINT",
+    "http://10.177.27.188:8088/api/auth/login"
+)
+
+AI_MODEL_SERVICE_EYE_UPDATE_ENDPOINT = os.getenv(
+    "AI_MODEL_SERVICE_EYE_UPDATE_ENDPOINT",
+    "http://10.177.27.188:8088/api/submissions/{id}/eye"
+)
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+
+
+# =========================
+# Utility
+# =========================
+
 def calculate_file_md5(file_path: str, chunk_size: int = 4096) -> str | None:
-    """Calculates the MD5 hash of a file."""
     if not os.path.isfile(file_path):
         return None
-        
+
     md5_hash = hashlib.md5()
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             for byte_block in iter(lambda: f.read(chunk_size), b""):
                 md5_hash.update(byte_block)
         return md5_hash.hexdigest()
     except IOError:
         return None
+
+
+def login_to_backend() -> str:
+    payload = {
+        "email": AI_MODEL_SERVICE_EMAIL,
+        "password": AI_MODEL_SERVICE_PASSWORD,
+    }
+
+    logging.info(f"Logging in to backend: {AI_MODEL_SERVICE_LOGIN_ENDPOINT}")
+
+    response = requests.post(
+        AI_MODEL_SERVICE_LOGIN_ENDPOINT,
+        json=payload,
+        timeout=10
+    )
+
+    if response.status_code != 200:
+        logging.error(f"Login failed. status={response.status_code}, body={response.text}")
+        response.raise_for_status()
+
+    data = response.json()
+    access_token = data.get("accessToken")
+
+    if not access_token:
+        raise RuntimeError(f"accessToken not found in login response: {data}")
+
+    logging.info("Backend login successful.")
+    return access_token
+
+
+def send_eye_results_to_backend(submission_id: str, prediction_results: dict, access_token: str):
+    url = AI_MODEL_SERVICE_EYE_UPDATE_ENDPOINT.replace("{id}", str(submission_id))
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 백엔드 DTO가 정확히 다르면 여기 payload만 맞춰주면 됨
+    payload = {
+        "diagnoses": [
+            {
+                "disease": result["disease"],
+                "probability": float(result["probability"]),
+                "modelMd5Hash": result["modelMd5Hash"],
+            }
+            for result in prediction_results.values()
+            if "error" not in result
+        ]
+    }
+
+    logging.info(f"Sending eye results to backend: {url}")
+    logging.info(f"Payload: {payload}")
+
+    response = requests.post(
+        url,
+        headers=headers,
+        json=payload,
+        timeout=15
+    )
+
+    if response.status_code not in (200, 201, 204):
+        logging.error(f"Result send failed. status={response.status_code}, body={response.text}")
+        response.raise_for_status()
+
+    logging.info(f"Eye results sent successfully. status={response.status_code}")
+
+
+# =========================
+# Model Setup
+# =========================
 
 DOG_MODELS_NAMES = {
     "./dog_models/dog_blepharitis.pkl": "Dog-Blepharitis",
@@ -50,111 +144,137 @@ CAT_MODELS_NAMES = {
     "./cat_models/cat_non_ulcerative_keratitis.pkl": "Cat-Non-ulcerative Keratitis",
 }
 
-# Load all models once 
-try:
-    ## For GPU acceleration
-    # DOG_MODELS = {name: load_learner(path, cpu=False) for path, name in DOG_MODELS_NAMES.items()}
-    # DOG_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in DOG_MODELS_NAMES.items()}
-    
-    # CAT_MODELS = {name: load_learner(path, cpu=False) for path, name in CAT_MODELS_NAMES.items()}
-    # CAT_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in CAT_MODELS_NAMES.items()}
 
-    ## For CPU inference (uncomment if no GPU available)
-    DOG_MODELS = {name: load_learner(path, cpu=False) for path, name in DOG_MODELS_NAMES.items()}
-    DOG_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in DOG_MODELS_NAMES.items()}
-    CAT_MODELS = {name: load_learner(path, cpu=False) for path, name in CAT_MODELS_NAMES.items()}
-    CAT_MODELS_HASHES = {name: calculate_file_md5(path) for path, name in CAT_MODELS_NAMES.items()}
-    
-    # Combine all models and hashes into single dictionaries
+try:
+    DOG_MODELS = {
+        name: load_learner(path, cpu=False)
+        for path, name in DOG_MODELS_NAMES.items()
+    }
+
+    DOG_MODELS_HASHES = {
+        name: calculate_file_md5(path)
+        for path, name in DOG_MODELS_NAMES.items()
+    }
+
+    CAT_MODELS = {
+        name: load_learner(path, cpu=False)
+        for path, name in CAT_MODELS_NAMES.items()
+    }
+
+    CAT_MODELS_HASHES = {
+        name: calculate_file_md5(path)
+        for path, name in CAT_MODELS_NAMES.items()
+    }
+
     ALL_MODELS = {**DOG_MODELS, **CAT_MODELS}
     ALL_MODELS_HASHES = {**DOG_MODELS_HASHES, **CAT_MODELS_HASHES}
 
     logging.info(f"Loaded {len(ALL_MODELS)} models successfully.")
     logging.info(f"All loaded models: {list(ALL_MODELS.keys())}")
+
 except Exception as e:
     logging.error(f"Failed to load models. Check paths and fastai environment. Error: {e}")
     exit(1)
 
-## For GPU acceleration (uncomment if GPU is available)
-# device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# # Set device attribute on each learner's DataLoaders to avoid AttributeError during predict
-# for learn in ALL_MODELS.values():
-#     learn.dls.device = device
-#     learn.to(device)
-
-# --- Inference Function ---
+# =========================
+# Inference
+# =========================
 
 def make_universal_prediction(img_path: Path):
-    """
-    Performs inference on a single image using ALL loaded models.
-    """
     logging.info(f"Starting universal inference for: {img_path.name}")
     results = {}
-    
+
     try:
-        # Load the image using fastai's method
         img = PILImage.create(img_path)
     except Exception as e:
         logging.error(f"Failed to load image {img_path.name}: {e}")
         return {"error": f"Image load failed for {img_path.name}"}
 
-    # Iterate over ALL combined models
     for key, learn in ALL_MODELS.items():
-        # predict() returns a tuple: (predicted_class, class_index, probabilities)
-        pred_class, pred_idx, probs = learn.predict(img)
+        try:
+            pred_class, pred_idx, probs = learn.predict(img)
 
-        # NoDisease가 더 높은 확률이라면 Disease로 변환하고, 확률을 1 - NoDisease로 설정
-        if pred_class == "NoDisease":
-            pred_class = "Disease"
-            pred_idx = 0
-            probs[pred_idx] = 1 - probs[1]
+            if pred_class == "NoDisease":
+                pred_class = "Disease"
+                pred_idx = 0
+                probs[pred_idx] = 1 - probs[1]
 
-        # Store the result for this model
-        results[key] = {
-            "disease": key,
-            "probability": f"{probs[pred_idx]:.4f}",
-            "modelMd5Hash": DOG_MODELS_HASHES.get(key)
-        }
-    
+            results[key] = {
+                "disease": key,
+                "probability": f"{float(probs[pred_idx]):.4f}",
+                "modelMd5Hash": ALL_MODELS_HASHES.get(key),
+            }
+
+        except Exception as e:
+            logging.error(f"Prediction failed for model={key}, image={img_path.name}: {e}")
+
     return results
 
-# --- Main Loop ---
 
-if __name__ == "__main__":
-    
-    # 1. Get a list of all image files in the test directory
+# =========================
+# Main
+# =========================
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--submission-id",
+        required=True,
+        help="Backend submissions.id value"
+    )
+    parser.add_argument(
+        "--once",
+        action="store_true",
+        help="Run only one inference cycle"
+    )
+
+    args = parser.parse_args()
+    submission_id = args.submission_id
+
     all_image_paths = get_image_files(TEST_IMAGE_DIR)
-    
+
     if not all_image_paths:
-        logging.error(f"No image files found in '{TEST_IMAGE_DIR}'. Please add some images.")
+        logging.error(f"No image files found in '{TEST_IMAGE_DIR}'. Please add images.")
         exit(1)
 
-    logging.info(f"Found {len(all_image_paths)} images to process universally.")
-    
+    logging.info(f"Found {len(all_image_paths)} images to process.")
+
+    access_token = login_to_backend()
+
     while True:
         start_time = time.time()
-        
+
         logging.info("-" * 40)
         logging.info("STARTING NEW UNIVERSAL INFERENCE CYCLE")
-        
+
         for img_path in all_image_paths:
-            # Perform prediction against ALL models
             prediction_results = make_universal_prediction(img_path)
-            
-            # Log a summary
+
             if "error" in prediction_results:
                 logging.error(f"Inference error for {img_path.name}: {prediction_results['error']}")
-            else:
-                logging.info(f"Inference complete for {img_path.name}. Total {len(prediction_results)} predictions made.")
+                continue
 
-        end_time = time.time()
-        
-        # Calculate time taken and delay for the required interval
-        cycle_duration = end_time - start_time
-        
+            logging.info(
+                f"Inference complete for {img_path.name}. "
+                f"Total {len(prediction_results)} predictions made."
+            )
+
+            send_eye_results_to_backend(
+                submission_id=submission_id,
+                prediction_results=prediction_results,
+                access_token=access_token
+            )
+
+        cycle_duration = time.time() - start_time
         logging.info(f"Inference cycle took {cycle_duration:.2f} seconds.")
 
-        ## Log that we are sleeping for 5 seconds
-        logging.info("Sleeping for 5 seconds before next cycle...") 
-        time.sleep(5)
+        if args.once:
+            break
+
+        logging.info(f"Sleeping for {INFERENCE_INTERVAL_SECONDS} seconds before next cycle...")
+        time.sleep(INFERENCE_INTERVAL_SECONDS)
+
+
+if __name__ == "__main__":
+    main()
