@@ -22,6 +22,17 @@ const VITAL_ITEMS: { key: 'weight' | 'heartRate' | 'temperature'; label: string;
   { key: 'temperature', label: '체온', unit: '°C' },
 ];
 
+const MONITORING_MEMO = '일상 생활에서 건강 상태를 지속적으로 관찰하고 있습니다.';
+
+const MONITORING_ITEMS = [
+  { label: '생활 적응 상태', status: '양호', description: '새로운 환경에 잘 적응하고 있음' },
+  { label: '식욕', status: '정상', description: '식사량 안정적' },
+  { label: '활력', status: '양호', description: '활동성 증가' },
+  { label: '이상 행동', status: '없음', description: '특이사항 없음' },
+] as const;
+
+const MONITORING_WARNING = '정기적인 건강검진을 통해 지속적으로 모니터링하고 있습니다.';
+
 const calcAgeYears = (birthDate?: string): number | null => {
   if (!birthDate) return null;
   const parsed = new Date(birthDate.split('T')[0]);
@@ -239,7 +250,40 @@ const HealthDetailScreen = () => {
             )
           )}
 
-          {(activeTab === '모니터링' || activeTab === '혈통 위험도') && (
+          {activeTab === '모니터링' && (
+            <>
+              <View style={styles.monitoringMemoCard}>
+                <View style={styles.monitoringMemoRow}>
+                  <View style={styles.monitoringMemoIconWrap}>
+                    <Text style={styles.monitoringMemoIconText}>〜</Text>
+                  </View>
+                  <View style={styles.monitoringMemoTextWrap}>
+                    <Text style={styles.monitoringMemoTitle}>보호소 관찰 메모</Text>
+                    <Text style={styles.monitoringMemoDesc}>{MONITORING_MEMO}</Text>
+                  </View>
+                </View>
+              </View>
+
+              {MONITORING_ITEMS.map((item) => (
+                <View key={item.label} style={styles.monitoringCard}>
+                  <View style={styles.monitoringCardRow}>
+                    <Text style={styles.monitoringCardLabel}>{item.label}</Text>
+                    <View style={styles.monitoringBadge}>
+                      <Text style={styles.monitoringBadgeText}>{item.status}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.monitoringCardDesc}>{item.description}</Text>
+                </View>
+              ))}
+
+              <View style={styles.monitoringWarningCard}>
+                <Text style={styles.monitoringWarningTitle}>추가 확인 필요</Text>
+                <Text style={styles.monitoringWarningDesc}>{MONITORING_WARNING}</Text>
+              </View>
+            </>
+          )}
+
+          {activeTab === '혈통 위험도' && (
             <Text style={styles.emptyRecordText}>준비 중인 기능입니다.</Text>
           )}
         </View>
@@ -381,4 +425,65 @@ const styles = StyleSheet.create({
   vitalArrow: { fontSize: 14, color: '#B3B6B8' },
   vitalCurrentValue: { fontSize: 14, color: '#0081D5' },
   vitalEmptyValue: { fontSize: 14, color: '#B3B6B8' },
+
+  monitoringMemoCard: {
+    backgroundColor: '#EEF7FD',
+    borderRadius: 12,
+    padding: 16,
+  },
+  monitoringMemoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  monitoringMemoIconWrap: {
+    width: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  monitoringMemoIconText: { fontSize: 16, color: '#0081D5' },
+  monitoringMemoTextWrap: { flex: 1 },
+  monitoringMemoTitle: { fontSize: 15, color: '#2F3036', marginBottom: 4 },
+  monitoringMemoDesc: { fontSize: 14, color: '#7B7C7D', lineHeight: 20 },
+
+  monitoringCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#EAECEE',
+    borderRadius: 12,
+    padding: 16,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  monitoringCardRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  monitoringCardLabel: { fontSize: 15, color: '#2F3036' },
+  monitoringBadge: {
+    backgroundColor: '#EEF7FD',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  monitoringBadgeText: { fontSize: 13, color: '#0081D5' },
+  monitoringCardDesc: { fontSize: 14, color: '#7B7C7D' },
+
+  monitoringWarningCard: {
+    backgroundColor: '#FFF9E6',
+    borderWidth: 1,
+    borderColor: '#FFE0A3',
+    borderRadius: 12,
+    padding: 16,
+    gap: 4,
+  },
+  monitoringWarningTitle: { fontSize: 14, color: '#8B6914' },
+  monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
 });
