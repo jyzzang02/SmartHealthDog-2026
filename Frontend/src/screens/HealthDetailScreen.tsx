@@ -311,9 +311,7 @@ const HealthDetailScreen = () => {
                   key={breed.name + idx}
                   style={styles.breedCard}
                   activeOpacity={0.8}
-                  onPress={() => {
-                    // TODO: 견종 유전병 목록 페이지로 이동 (추후 구현)
-                  }}
+                  onPress={() => navigation.navigate('BreedDetail', { breedName: breed.name })}
                 >
                   <View style={styles.breedCardLeft}>
                     <View style={styles.breedAvatar}>
