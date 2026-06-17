@@ -8,6 +8,13 @@ import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import { CONDITION_COLORS } from '../types/health';
 import type { HealthSummary } from '../types/health';
+import {
+  BREED_RISK_LIST,
+  RISK_COLORS,
+  PEDIGREE_INTRO_TEXT,
+  PEDIGREE_INFO_TITLE,
+  PEDIGREE_INFO_DESC,
+} from '../data/breedRisk';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthDetail'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthDetail'>;
@@ -284,7 +291,52 @@ const HealthDetailScreen = () => {
           )}
 
           {activeTab === '혈통 위험도' && (
-            <Text style={styles.emptyRecordText}>준비 중인 기능입니다.</Text>
+            <>
+              <Text style={styles.pedigreeIntroText}>{PEDIGREE_INTRO_TEXT}</Text>
+
+              {/* 목록 안내 (단순 텍스트 카드) */}
+              <View style={styles.pedigreeInfoCard}>
+                <View style={styles.pedigreeInfoIcon}>
+                  <Text style={styles.pedigreeInfoIconText}>i</Text>
+                </View>
+                <View style={styles.pedigreeInfoTextWrap}>
+                  <Text style={styles.pedigreeInfoTitle}>{PEDIGREE_INFO_TITLE}</Text>
+                  <Text style={styles.pedigreeInfoDesc}>{PEDIGREE_INFO_DESC}</Text>
+                </View>
+              </View>
+
+              {/* 견종 목록 (클릭 시 견종별 유전병 목록 페이지로 이동 예정) */}
+              {BREED_RISK_LIST.map((breed, idx) => (
+                <TouchableOpacity
+                  key={breed.name + idx}
+                  style={styles.breedCard}
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    // TODO: 견종 유전병 목록 페이지로 이동 (추후 구현)
+                  }}
+                >
+                  <View style={styles.breedCardLeft}>
+                    <View style={styles.breedAvatar}>
+                      <Image
+                        source={breed.image}
+                        style={styles.breedAvatarImage}
+                        resizeMode="cover"
+                      />
+                    </View>
+                    <View style={styles.breedInfo}>
+                      <Text style={styles.breedName}>{breed.name}</Text>
+                      <Text style={styles.breedRiskCount}>위험 항목 {breed.riskCount}개</Text>
+                    </View>
+                  </View>
+                  <View style={styles.breedCardRight}>
+                    <View style={[styles.breedBadge, { backgroundColor: RISK_COLORS[breed.riskLevel] }]}>
+                      <Text style={styles.breedBadgeText}>{breed.riskLevel}</Text>
+                    </View>
+                    <Image source={require('../assets/icon_right.png')} style={styles.breedChevron} />
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </>
           )}
         </View>
       </ScrollView>
@@ -486,4 +538,69 @@ const styles = StyleSheet.create({
   },
   monitoringWarningTitle: { fontSize: 14, color: '#8B6914' },
   monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
+
+  // 혈통 위험도 탭
+  pedigreeIntroText: { fontSize: 14, color: '#7B7C7D', lineHeight: 21, marginBottom: 4 },
+
+  pedigreeInfoCard: {
+    backgroundColor: '#EAF4FB',
+    borderWidth: 1,
+    borderColor: '#0081D5',
+    borderLeftWidth: 3,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingLeft: 16,
+    paddingRight: 16,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  pedigreeInfoIcon: {
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    backgroundColor: '#0081D5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 1,
+  },
+  pedigreeInfoIconText: { fontSize: 12, color: '#fff', fontWeight: '700', lineHeight: 18 },
+  pedigreeInfoTextWrap: { flex: 1, gap: 4 },
+  pedigreeInfoTitle: { fontSize: 13, color: '#0081D5', fontWeight: '600', lineHeight: 19.5 },
+  pedigreeInfoDesc: { fontSize: 12, color: '#3C4144', lineHeight: 18 },
+
+  breedCard: {
+    backgroundColor: '#fff',
+    borderWidth: 1,
+    borderColor: '#EAECEE',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 17,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 4,
+    elevation: 1,
+  },
+  breedCardLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, marginRight: 8 },
+  breedAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 999,
+    backgroundColor: '#F3F4F5',
+    borderWidth: 1,
+    borderColor: '#EAECEE',
+    overflow: 'hidden',
+  },
+  breedAvatarImage: { width: '100%', height: '100%' },
+  breedInfo: { flex: 1, gap: 4 },
+  breedName: { fontSize: 16, color: '#2F3036', lineHeight: 24 },
+  breedRiskCount: { fontSize: 13, color: '#7B7C7D', lineHeight: 19.5 },
+
+  breedCardRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  breedBadge: { borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+  breedBadgeText: { fontSize: 12, color: '#fff', lineHeight: 18 },
+  breedChevron: { width: 18, height: 18, tintColor: '#C4C4C4' },
 });
