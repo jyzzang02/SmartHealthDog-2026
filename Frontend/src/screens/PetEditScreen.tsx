@@ -23,6 +23,7 @@ import {
   deletePet,
   PetGender,
   PetSpecies,
+  PetImageUpload,
 } from "../api/pets";
 import { resolveImageUri } from "../utils/imageUri";
 
@@ -38,7 +39,7 @@ const PetEditScreen = () => {
   const [sex, setSex] = useState<string | null>(null);
   const [birthday, setBirthday] = useState<Date | null>(null);
   const [isNeutered, setIsNeutered] = useState<boolean | null>(null);
-  const [petImageUri, setPetImageUri] = useState<string | null>(null);
+  const [selectedPetImage, setSelectedPetImage] = useState<PetImageUpload | null>(null);
   const [weightKg, setWeightKg] = useState("");
 
   const [isLoading, setIsLoading] = useState(true);
@@ -48,7 +49,7 @@ const PetEditScreen = () => {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
 
-  const resolvedPetImage = petImageUri || resolveImageUri(pet?.profilePicture);
+  const resolvedPetImage = selectedPetImage?.uri || resolveImageUri(pet?.profilePicture);
 
   useEffect(() => {
     setImageLoadFailed(false);
@@ -99,11 +100,50 @@ const PetEditScreen = () => {
 
 
   const handleSelectPetImage = () => {
-    launchImageLibrary({ mediaType: "photo", quality: 0.8 }, (response) => {
-      if (response.assets && response.assets[0].uri) {
-        setPetImageUri(response.assets[0].uri);
+    launchImageLibrary(
+      {
+        mediaType: "photo",
+        quality: 0.8,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        selectionLimit: 1,
+      },
+      (response) => {
+        if (response.didCancel) return;
+        if (response.errorCode) {
+          Alert.alert("오류", "이미지를 불러올 수 없습니다.");
+          return;
+        }
+
+        const asset = response.assets?.[0];
+        if (!asset?.uri) {
+          Alert.alert("오류", "이미지를 불러올 수 없습니다.");
+          return;
+        }
+
+        setSelectedPetImage({
+          uri: asset.uri,
+          type: asset.type,
+          fileName: asset.fileName,
+        });
       }
-    });
+    );
+  };
+
+  const waitForUpdatedImage = async (previousImage?: string) => {
+    const previousPath = resolveImageUri(previousImage)?.split("?")[0];
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 600));
+
+      try {
+        const updatedPet = await getPetDetail(petId);
+        const updatedPath = resolveImageUri(updatedPet.profilePicture)?.split("?")[0];
+        if (updatedPath && updatedPath !== previousPath) return;
+      } catch {
+        // The main update already succeeded; a later screen refresh can retry this lookup.
+      }
+    }
   };
 
   const handleSave = async () => {
@@ -133,8 +173,12 @@ const PetEditScreen = () => {
       await updatePetFull({
         id: petId,
         request,
-        profilePictureUri: petImageUri,
+        profilePicture: selectedPetImage,
       });
+
+      if (selectedPetImage) {
+        await waitForUpdatedImage(pet.profilePicture);
+      }
 
 
       Alert.alert("성공", "반려동물 정보가 수정되었습니다.");
