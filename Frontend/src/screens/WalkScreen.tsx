@@ -17,6 +17,7 @@ import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getMyThisWeekWalks, getPetWalks, WalkRecordDto } from '../api/walks';
 import { resolveImageUri } from '../utils/imageUri';
+import { filterToLatestWeek } from '../utils/walkWeek';
 
 const WALK_SHEET_HEIGHT = 420;
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -96,6 +97,7 @@ const normalizeWalk = (
     duration: `${h}:${m}:${s}`,
     startTime: startClock,
     endTime: endClock,
+    startedAt: startTimeIso,
     distanceKm,
     durationSec,
     pathCoordinates,
@@ -256,25 +258,34 @@ export default function WalkScreen() {
   };
 
   const weeklyData = useMemo(() => {
-    const firstPet = petOptions[0]?.name;
-    const secondPet = petOptions[1]?.name;
-    const totals: Record<string, { [pet: string]: number }> = {};
+    const latestWeekRecords = filterToLatestWeek(
+      walkRecords,
+      (record) => record.startedAt
+    );
+    const primaryPetId = latestWeekRecords.find((record) => record.petId)?.petId;
+    const totals: Record<string, { pet1: number; pet2: number }> = {};
 
     DAYS.forEach((day) => {
-      totals[day] = {};
+      totals[day] = { pet1: 0, pet2: 0 };
     });
 
-    walkRecords.forEach((record) => {
+    latestWeekRecords.forEach((record) => {
       const day = getDayLabel(record.date);
-      totals[day][record.petName] = (totals[day][record.petName] ?? 0) + record.distanceKm;
+      const key = record.petId === primaryPetId ? 'pet1' : 'pet2';
+      totals[day][key] += record.distanceKm;
     });
 
     return DAYS.map((day) => ({
       day,
-      pet1: firstPet ? totals[day][firstPet] ?? 0 : 0,
-      pet2: secondPet ? totals[day][secondPet] ?? 0 : 0,
+      pet1: totals[day].pet1,
+      pet2: totals[day].pet2,
     }));
-  }, [walkRecords, petOptions]);
+  }, [walkRecords]);
+
+  const maxDailyDistance = useMemo(
+    () => Math.max(...weeklyData.map((item) => item.pet1 + item.pet2), 0),
+    [weeklyData]
+  );
 
   const getPetPaletteIndex = useCallback(
     (petId: number) => {
@@ -331,7 +342,10 @@ export default function WalkScreen() {
           {weeklyData.map((item, index) => {
             const total = item.pet1 + item.pet2;
             const maxHeight = 110;
-            const scaledTotal = total > 0 ? (total / 5) * (maxHeight / 2) : 0;
+            const scaledTotal =
+              total > 0 && maxDailyDistance > 0
+                ? Math.max(10, (total / maxDailyDistance) * maxHeight)
+                : 0;
             const h1 = total > 0 ? (item.pet1 / total) * scaledTotal : 0;
             const h2 = total > 0 ? (item.pet2 / total) * scaledTotal : 0;
             const hasPet1 = h1 > 0;
