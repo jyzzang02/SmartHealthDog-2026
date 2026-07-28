@@ -1,36 +1,66 @@
 package com.smarthealthdog.backend.utils;
 
+import java.time.Duration;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.presigner.S3Presigner;
+import software.amazon.awssdk.services.s3.presigner.model.GetObjectPresignRequest;
+
 @Component
-@Profile({"dev", "test"})
+@Profile("dev")
 public class DevImgUtils implements ImgUtils {
 
-    @Value("${local-storage.url-prefix}")
-    private String localStorageUrlPrefix;
+    private final S3Presigner s3Presigner;
 
-    @Value("${local-storage.ai-url-prefix}")
-    private String aiModelServiceUrlPrefix;
+    public DevImgUtils(S3Presigner s3Presigner) {
+        this.s3Presigner = s3Presigner;
+    }
+
+    @Value("${cloud.aws.s3.bucket}")
+    private String bucket;
 
     /**
-     * 이미지 키로부터 이미지 URL을 생성합니다.
-     * @param key 이미지 키
-     * @return 이미지 URL
+     * dev 환경에서도 S3Uploader가 이미지를 OVH S3에 저장하므로,
+     * 프론트에는 /uploads/... 로컬 주소가 아니라
+     * S3 접근 가능한 presigned URL을 내려준다.
      */
     @Override
     public String getImgUrl(String key) {
-        return localStorageUrlPrefix + "/uploads/" + key;
+        return createPresignedUrl(key);
     }
 
     /**
-     * AI 워커가 이미지를 접근할 수 있는 URL을 생성합니다.
-     * @param key 이미지 키
-     * @return 이미지 URL
+     * AI Worker용 이미지 URL도 presigned URL을 반환한다.
      */
     @Override
     public String getImgUrlForAIWorker(String key) {
-        return aiModelServiceUrlPrefix + "/uploads/" + key;
+        return createPresignedUrl(key);
+    }
+
+    /**
+     * S3 key를 1시간 동안 접근 가능한 presigned URL로 변환한다.
+     */
+    private String createPresignedUrl(String key) {
+        if (key == null || key.isBlank()) {
+            return null;
+        }
+
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
+                .bucket(bucket)
+                .key(key)
+                .build();
+
+        GetObjectPresignRequest presignRequest = GetObjectPresignRequest.builder()
+                .signatureDuration(Duration.ofHours(1))
+                .getObjectRequest(getObjectRequest)
+                .build();
+
+        return s3Presigner.presignGetObject(presignRequest)
+                .url()
+                .toString();
     }
 }

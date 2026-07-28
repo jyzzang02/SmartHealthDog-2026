@@ -441,13 +441,18 @@ public class SubmissionService {
         Submission submission = getSubmissionById(submissionId);
 
         // 현재 상태가 PROCESSING, COMPLETED, DELETED인 경우 상태 업데이트 불가
-        if (
-            submission.getStatus() == SubmissionStatus.PROCESSING ||
+// 이미 같은 상태면 그냥 성공
+	if (submission.getStatus() == statusUpdateRequest.getStatus()) {
+           return;
+	}
+
+// COMPLETED, DELETED는 다른 상태로 변경 불가
+	if (
             submission.getStatus() == SubmissionStatus.COMPLETED ||
-            submission.getStatus() == SubmissionStatus.DELETED
-        ) {
-            throw new InvalidRequestDataException(ErrorCode.INVALID_INPUT);
-        }
+           submission.getStatus() == SubmissionStatus.DELETED
+	) {
+           throw new InvalidRequestDataException(ErrorCode.INVALID_INPUT);
+	}
 
         submission.setStatus(statusUpdateRequest.getStatus());
         if (statusUpdateRequest.getStatus() == SubmissionStatus.FAILED) {
