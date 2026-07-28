@@ -1,55 +1,123 @@
-HELP.md
-.gradle
+# =========================
+# Environment / Secrets
+# =========================
+.env
+.env.*
+!.env.example
+
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+*.crt
+
+secrets/
+credentials/
+app-env-backup*/
+
+# Local server env backup / references
+server_env_backup_local/
+backend_env_backup_*/
+*_env_backup_*/
+*_backup_*/
+
+server_app_env_reference.txt
+server_compose_reference.yml
+server_bashrc_reference.txt
+printenv_current_session.txt
+
+*_env.txt
+*_inspect.json
+
+# Archive / DB dump files
+*.tar
+*.tar.gz
+*.zip
+*.7z
+*.sql
+*.dump
+*.backup
+
+# =========================
+# Gradle / Java / Spring Boot
+# =========================
+.gradle/
 build/
+out/
+bin/
+
+*.class
+*.jar
+*.war
+*.ear
+
 !gradle/wrapper/gradle-wrapper.jar
+
+# Allow nested source build folders if needed
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### STS ###
-.apt_generated
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+*.log.*
+hs_err_pid*
+replay_pid*
+
+# =========================
+# IntelliJ IDEA
+# =========================
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# =========================
+# Eclipse / STS
+# =========================
+.apt_generated/
 .classpath
 .factorypath
 .project
-.settings
+.settings/
 .springBeans
-.sts4-cache
-bin/
-uploads/
-database/
-localstack/
-redis/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
+.sts4-cache/
 
-### IntelliJ IDEA ###
-.idea
-*.iws
-*.iml
-*.ipr
-out/
-!**/src/main/**/out/
-!**/src/test/**/out/
-
-### NetBeans ###
-/nbproject/private/
-/nbbuild/
-/dist/
-/nbdist/
-/.nb-gradle/
-
-### VS Code ###
+# =========================
+# VS Code
+# =========================
 .vscode/
 
-### auto-generated files ###
-src/main/resources/schema.sql
+# =========================
+# Docker / Local Volumes
+# =========================
+data/
+database/
+postgres/
+postgres-data/
+pgdata/
+redis/
+localstack/
+uploads/
+static/uploads/
 
-### static files ###
-app-env-backup-*.txt
-docker-compose-dev.yml.save
+docker/data/
+docker/postgres/
+docker/redis/
 
+# =========================
+# OS Files
+# =========================
+.DS_Store
+Thumbs.db
+desktop.ini
 
-app-env-backup-*.txt
-*.env
-.env
-.env.*
-src/main/resources/static/
+# =========================
+# Test / Coverage
+# =========================
+coverage/
+target/
+reports/

@@ -22,6 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Service
 public class AuthService {
+
     private final EmailVerificationService emailVerificationService;
     private final RefreshTokenService refreshTokenService;
     private final RefreshTokenCleanupService refreshTokenCleanupService;
@@ -31,151 +32,345 @@ public class AuthService {
 
     /**
      * 로그인 시 액세스 토큰과 리프레시 토큰 생성
-     * @param userId
-     * @return
+     *
+     * @param userId 사용자 ID
+     * @return 액세스 토큰과 리프레시 토큰
      */
     @Transactional
     public LoginResponse generateTokens(Long userId) {
         User user = userService.getUserById(userId)
-            .orElseThrow(() -> new ResourceNotFoundException(ErrorCode.RESOURCE_NOT_FOUND));
+            .orElseThrow(() ->
+                new ResourceNotFoundException(
+                    ErrorCode.RESOURCE_NOT_FOUND
+                )
+            );
 
-        // 만료된 리프레시 토큰 삭제
-        refreshTokenCleanupService.deleteUserRefreshTokensIfExpired(user);
+        refreshTokenCleanupService
+            .deleteUserRefreshTokensIfExpired(user);
 
-        String refreshToken = refreshTokenService.generateRefreshToken(user);
-        String accessToken = refreshTokenService.generateAccessToken(refreshToken);
-        String accessExpiration = refreshTokenService.getExpirationFromTokenInISOString(accessToken);
+        String refreshToken =
+            refreshTokenService.generateRefreshToken(user);
 
-        // 유저의 리프레시 토큰 개수가 최대 개수를 초과하는지 확인하고, 초과하는 경우 오래된 토큰부터 삭제
-        refreshTokenCleanupService.enforceMaxRefreshTokenCount(user);
+        String accessToken =
+            refreshTokenService.generateAccessToken(
+                refreshToken
+            );
 
-        return new LoginResponse(accessToken, refreshToken, accessExpiration);
+        String accessExpiration =
+            refreshTokenService
+                .getExpirationFromTokenInISOString(
+                    accessToken
+                );
+
+        refreshTokenCleanupService
+            .enforceMaxRefreshTokenCount(user);
+
+        return new LoginResponse(
+            accessToken,
+            refreshToken,
+            accessExpiration
+        );
     }
 
     /**
      * 로그아웃 시 리프레시 토큰 무효화
-     * @param refreshToken
-     * @return
+     *
+     * @param refreshToken 리프레시 토큰
      */
     @Transactional
-    public void invalidateRefreshToken(String refreshToken) {
-        if (refreshToken == null || refreshToken.isEmpty()) {
-            throw new BadCredentialsException(ErrorCode.INVALID_JWT);
+    public void invalidateRefreshToken(
+        String refreshToken
+    ) {
+        if (
+            refreshToken == null ||
+            refreshToken.isEmpty()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.INVALID_JWT
+            );
         }
 
-        // 리프레시 토큰이 유효한지 확인
-        refreshTokenService.validateRefreshToken(refreshToken);
+        refreshTokenService.validateRefreshToken(
+            refreshToken
+        );
 
-        User user = refreshTokenService.getUserFromToken(refreshToken);
+        User user =
+            refreshTokenService.getUserFromToken(
+                refreshToken
+            );
+
         if (user == null) {
-            throw new BadCredentialsException(ErrorCode.INVALID_JWT);
+            throw new BadCredentialsException(
+                ErrorCode.INVALID_JWT
+            );
         }
 
-        // 만료된 리프레시 토큰 삭제
-        refreshTokenCleanupService.deleteUserRefreshTokensIfExpired(user);
+        refreshTokenCleanupService
+            .deleteUserRefreshTokensIfExpired(user);
 
-        // 해당 리프레시 토큰 삭제
-        UUID tokenId = refreshTokenService.getTokenIdFromToken(refreshToken);
-        refreshTokenCleanupService.deleteRefreshTokensById(tokenId);
+        UUID tokenId =
+            refreshTokenService.getTokenIdFromToken(
+                refreshToken
+            );
+
+        refreshTokenCleanupService
+            .deleteRefreshTokensById(tokenId);
     }
 
     /**
-     * 리프레시 토큰을 사용하여 새로운 액세스 토큰과 리프레시 토큰 생성
-     * @param refreshToken
-     * @return
-     * @throws BadCredentialsException 토큰이 유효하지 않을 경우 발생
+     * 리프레시 토큰으로 새로운 토큰 생성
+     *
+     * @param refreshToken 기존 리프레시 토큰
+     * @return 새로운 토큰 응답
      */
     @Transactional
-    public LoginResponse refreshAccessToken(String refreshToken) {
-        if (refreshToken == null || refreshToken.isEmpty()) {
-            throw new BadCredentialsException(ErrorCode.LOGIN_FAILURE);
+    public LoginResponse refreshAccessToken(
+        String refreshToken
+    ) {
+        if (
+            refreshToken == null ||
+            refreshToken.isEmpty()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.LOGIN_FAILURE
+            );
         }
 
-        // 리프레시 토큰이 유효한지 확인
-        refreshTokenService.validateRefreshToken(refreshToken);
+        refreshTokenService.validateRefreshToken(
+            refreshToken
+        );
 
-        User user = refreshTokenService.getUserFromToken(refreshToken);
+        User user =
+            refreshTokenService.getUserFromToken(
+                refreshToken
+            );
+
         if (user == null) {
-            throw new BadCredentialsException(ErrorCode.LOGIN_FAILURE);
+            throw new BadCredentialsException(
+                ErrorCode.LOGIN_FAILURE
+            );
         }
 
-        // 만료된 리프레시 토큰 삭제
-        refreshTokenCleanupService.deleteUserRefreshTokensIfExpired(user);
+        refreshTokenCleanupService
+            .deleteUserRefreshTokensIfExpired(user);
 
-        String newRefreshToken = refreshTokenService.rotateRefreshToken(refreshToken);
-        String accessToken = refreshTokenService.generateAccessToken(newRefreshToken);
-        String accessExpiration = refreshTokenService.getExpirationFromTokenInISOString(accessToken);
+        String newRefreshToken =
+            refreshTokenService.rotateRefreshToken(
+                refreshToken
+            );
 
-        refreshTokenCleanupService.enforceMaxRefreshTokenCount(user);
+        String accessToken =
+            refreshTokenService.generateAccessToken(
+                newRefreshToken
+            );
 
-        return new LoginResponse(accessToken, newRefreshToken, accessExpiration);
+        String accessExpiration =
+            refreshTokenService
+                .getExpirationFromTokenInISOString(
+                    accessToken
+                );
+
+        refreshTokenCleanupService
+            .enforceMaxRefreshTokenCount(user);
+
+        return new LoginResponse(
+            accessToken,
+            newRefreshToken,
+            accessExpiration
+        );
     }
 
     /**
-     * 유저 회원가입
-     * @param request
-     * @return 생성된 유저 객체
+     * 일반 사용자 회원가입
      */
     @Transactional
-    public void registerUser(UserCreateRequest request, MultipartFile profilePicture) {
-        emailVerificationService.verifyEmailToken(request.email(), request.emailVerificationToken());
+    public void registerUser(
+        UserCreateRequest request,
+        MultipartFile profilePicture
+    ) {
+        emailVerificationService.verifyEmailToken(
+            request.email(),
+            request.emailVerificationToken()
+        );
+
         User user = userService.createUser(
             request.nickname(),
             request.email(),
             request.password()
         );
 
-        if (profilePicture != null && !profilePicture.isEmpty()) {
-            userService.setUserProfilePicture(user, profilePicture);
+        if (
+            profilePicture != null &&
+            !profilePicture.isEmpty()
+        ) {
+            userService.setUserProfilePicture(
+                user,
+                profilePicture
+            );
         }
     }
 
     /**
-     * 카카오 소셜 로그인으로 유저 회원가입
+     * 카카오 액세스 토큰으로 사용자를 조회하거나 생성합니다.
+     *
      * @param accessToken 카카오 액세스 토큰
-     * @return 생성된 유저 객체
+     * @return 조회 또는 생성된 사용자
      */
     @Transactional
-    public User registerUserViaKakaoInfo(String accessToken) {
+    public User registerUserViaKakaoInfo(
+        String accessToken
+    ) {
         JsonNode kakaoInfo;
+
         try {
-            kakaoInfo = oAuthClient.getKakaoUserInfo(accessToken);
+            kakaoInfo =
+                oAuthClient.getKakaoUserInfo(
+                    accessToken
+                );
         } catch (Exception e) {
-            throw new BadCredentialsException(ErrorCode.SOCIAL_LOGIN_FAILURE);
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
         }
 
-        if (kakaoInfo == null || kakaoInfo.isEmpty()) {
-            throw new BadCredentialsException(ErrorCode.SOCIAL_LOGIN_FAILURE);
+        if (
+            kakaoInfo == null ||
+            kakaoInfo.isEmpty()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
         }
 
         if (!kakaoInfo.has("id")) {
-            throw new BadCredentialsException(ErrorCode.SOCIAL_LOGIN_FAILURE);
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
         }
 
-        String id = kakaoInfo.get("id").asText();
-        if (id == null || id.isEmpty()) {
-            throw new BadCredentialsException(ErrorCode.SOCIAL_LOGIN_FAILURE);
+        String kakaoUserId =
+            kakaoInfo.get("id").asText();
+
+        if (
+            kakaoUserId == null ||
+            kakaoUserId.isBlank()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
         }
 
-        SocialLoginUser existingSocialLoginUser = socialLoginUserService.getKakaoSocialLoginUser(id);
+        SocialLoginUser existingSocialLoginUser =
+            socialLoginUserService
+                .getKakaoSocialLoginUser(
+                    kakaoUserId
+                );
+
         if (existingSocialLoginUser != null) {
-            User existingUser = existingSocialLoginUser.getUser();
-            return userService.updateUserWithKakaoUserInfo(existingUser, existingSocialLoginUser, kakaoInfo);
+            User existingUser =
+                existingSocialLoginUser.getUser();
+
+            return userService
+                .updateUserWithKakaoUserInfo(
+                    existingUser,
+                    existingSocialLoginUser,
+                    kakaoInfo
+                );
         }
 
-        return userService.createUserWithKakaoUserInfo(kakaoInfo);
+        return userService
+            .createUserWithKakaoUserInfo(
+                kakaoInfo
+            );
+    }
+
+    /**
+     * 기존 카카오 액세스 토큰 직접 전달 방식입니다.
+     *
+     * 기존 클라이언트와의 호환성을 위해 유지합니다.
+     */
+    @Transactional
+    public LoginResponse loginUserViaKakaoInfo(
+        String accessToken
+    ) {
+        if (
+            accessToken == null ||
+            accessToken.isBlank()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.INVALID_SOCIAL_ACCESS_TOKEN
+            );
+        }
+
+        User user =
+            registerUserViaKakaoInfo(
+                accessToken
+            );
+
+        return generateTokens(
+            user.getId()
+        );
+    }
+
+    /**
+     * 카카오 인가 코드 로그인 방식입니다.
+     *
+     * 1. 인가 코드를 카카오 액세스 토큰으로 교환
+     * 2. 카카오 사용자 정보 조회
+     * 3. 회원 생성 또는 기존 회원 조회
+     * 4. 우리 서버 JWT 발급
+     *
+     * @param authorizationCode 카카오 인가 코드
+     * @return 우리 서버 로그인 토큰
+     */
+    @Transactional
+    public LoginResponse loginUserViaKakaoAuthorizationCode(
+        String authorizationCode
+    ) {
+        if (
+            authorizationCode == null ||
+            authorizationCode.isBlank()
+        ) {
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
+        }
+
+        String kakaoAccessToken;
+
+        try {
+            kakaoAccessToken =
+                oAuthClient.getKakaoAccessToken(
+                    authorizationCode
+                );
+        } catch (Exception e) {
+            throw new BadCredentialsException(
+                ErrorCode.SOCIAL_LOGIN_FAILURE
+            );
+        }
+
+        return loginUserViaKakaoInfo(
+            kakaoAccessToken
+        );
     }
 
     /**
      * 이메일 인증 토큰 전송
-     * @param email
      */
     @Transactional
-    public void sendEmailVerification(String email) {
-        userService.getUserByEmail(email).ifPresent(_ -> {
-            throw new ForbiddenException(ErrorCode.EMAIL_VERIFICATION_FAIL_COUNT_EXCEEDED);
-        });
+    public void sendEmailVerification(
+        String email
+    ) {
+        userService
+            .getUserByEmail(email)
+            .ifPresent(existingUser -> {
+                throw new ForbiddenException(
+                    ErrorCode
+                        .EMAIL_VERIFICATION_FAIL_COUNT_EXCEEDED
+                );
+            });
 
-        emailVerificationService.sendEmailVerification(email);
+        emailVerificationService
+            .sendEmailVerification(email);
     }
 }
