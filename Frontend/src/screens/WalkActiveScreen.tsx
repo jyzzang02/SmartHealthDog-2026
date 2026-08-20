@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,15 +11,31 @@ import {
   Platform,
   PermissionsAndroid,
   Alert,
+  AppState,
 } from 'react-native';
+import type { AppStateStatus } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
-import Geolocation, { GeoPosition } from 'react-native-geolocation-service';
+import Geolocation from 'react-native-geolocation-service';
+import type { GeoPosition } from 'react-native-geolocation-service';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
-import { createPetWalk, WalkCoordinate } from '../api/walks';
+import { createPetWalk } from '../api/walks';
+import type { WalkCoordinate } from '../api/walks';
+import {
+  clearActiveWalkSession,
+  loadActiveWalkSession,
+  saveActiveWalkSession,
+} from '../storage/walkSessionStorage';
+import type { ActiveWalkSession, WalkLocation } from '../storage/walkSessionStorage';
+import {
+  createWalkTimer,
+  getElapsedSeconds,
+  pauseWalkTimer,
+  resumeWalkTimer,
+} from '../utils/walkTimer';
 
 type RouteProps = RouteProp<RootStackParamList, 'WalkActive'>;
 type NavigationProps = NativeStackNavigationProp<RootStackParamList>;
@@ -71,7 +87,9 @@ export default function WalkActiveScreen() {
   const insets = useSafeAreaInsets();
 
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [startedAtMs, setStartedAtMs] = useState(() => Date.now());
   const [isPaused, setIsPaused] = useState(false);
+  const [isSessionReady, setIsSessionReady] = useState(false);
   const [showConfirmModal, setShowConfirmModal] = useState(false);
   const [showResultModal, setShowResultModal] = useState(false);
   const [distanceKm, setDistanceKm] = useState(0);
@@ -81,7 +99,7 @@ export default function WalkActiveScreen() {
   const [currentCoord, setCurrentCoord] = useState<{ lat: number; lng: number } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const startDateRef = useRef<Date>(new Date());
+  const timerStateRef = useRef(createWalkTimer(startedAtMs));
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const badgeAnim = useRef(new Animated.Value(0.6)).current;
   const watchIdRef = useRef<number | null>(null);
@@ -89,9 +107,16 @@ export default function WalkActiveScreen() {
   const pauseTrackingRef = useRef(false);
   const hasInitialCoordRef = useRef(false);
   const pathCoordinatesRef = useRef<WalkCoordinate[]>([]);
+  const initialCoordRef = useRef<WalkLocation | null>(null);
+  const currentCoordRef = useRef<WalkLocation | null>(null);
+  const distanceKmRef = useRef(0);
+  const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const lastPersistedAtRef = useRef(0);
+  const isFinishingRef = useRef(false);
+  const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const webViewRef = useRef<WebView>(null);
 
-  const startDate = startDateRef.current;
+  const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
   const startTimeText = useMemo(() => formatClock(startDate), [startDate]);
   const startPeriod = useMemo(() => formatPeriod(startTimeText), [startTimeText]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
@@ -100,15 +125,97 @@ export default function WalkActiveScreen() {
   const dateLabel = useMemo(() => formatDateLabel(startDate), [startDate]);
   const displayPetName = petName?.trim() || '이름 없음';
 
+  const queueSessionSave = useCallback((force = false) => {
+    if (isFinishingRef.current) return;
+    const now = Date.now();
+    if (!force && now - lastPersistedAtRef.current < 5000) return;
+    lastPersistedAtRef.current = now;
+
+    const snapshot: ActiveWalkSession = {
+      version: 1,
+      petId,
+      timer: { ...timerStateRef.current },
+      distanceKm: distanceKmRef.current,
+      pathCoordinates: pathCoordinatesRef.current.map((point) => [...point] as WalkCoordinate),
+      initialCoord: initialCoordRef.current ? { ...initialCoordRef.current } : null,
+      currentCoord: currentCoordRef.current ? { ...currentCoordRef.current } : null,
+      lastCoord: lastCoordRef.current ? { ...lastCoordRef.current } : null,
+      updatedAtMs: now,
+    };
+
+    persistQueueRef.current = persistQueueRef.current
+      .catch(() => undefined)
+      .then(() => saveActiveWalkSession(snapshot))
+      .catch(() => undefined);
+  }, [petId]);
+
+  const syncElapsedTime = useCallback(() => {
+    const seconds = getElapsedSeconds(timerStateRef.current, Date.now());
+    setElapsedSeconds(seconds);
+    return seconds;
+  }, []);
+
   useEffect(() => {
+    let isMounted = true;
+
+    const restoreSession = async () => {
+      const savedSession = await loadActiveWalkSession(petId);
+      if (!isMounted) return;
+
+      if (savedSession) {
+        timerStateRef.current = savedSession.timer;
+        setStartedAtMs(savedSession.timer.startedAtMs);
+        setElapsedSeconds(getElapsedSeconds(savedSession.timer, Date.now()));
+        setIsPaused(savedSession.timer.isPaused);
+        pauseTrackingRef.current = savedSession.timer.isPaused;
+
+        distanceKmRef.current = savedSession.distanceKm;
+        setDistanceKm(savedSession.distanceKm);
+        pathCoordinatesRef.current = savedSession.pathCoordinates.slice();
+        initialCoordRef.current = savedSession.initialCoord;
+        currentCoordRef.current = savedSession.currentCoord;
+        lastCoordRef.current = savedSession.lastCoord;
+        hasInitialCoordRef.current = savedSession.initialCoord !== null;
+        setInitialCoord(savedSession.initialCoord);
+        setCurrentCoord(savedSession.currentCoord);
+      } else {
+        const now = Date.now();
+        const timer = createWalkTimer(now);
+        timerStateRef.current = timer;
+        setStartedAtMs(now);
+        await saveActiveWalkSession({
+          version: 1,
+          petId,
+          timer,
+          distanceKm: 0,
+          pathCoordinates: [],
+          initialCoord: null,
+          currentCoord: null,
+          lastCoord: null,
+          updatedAtMs: now,
+        }).catch(() => undefined);
+      }
+
+      if (isMounted) setIsSessionReady(true);
+    };
+
+    restoreSession();
+    return () => {
+      isMounted = false;
+    };
+  }, [petId]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
     if (intervalRef.current) clearInterval(intervalRef.current);
+    syncElapsedTime();
     if (!isPaused) {
-      intervalRef.current = setInterval(() => setElapsedSeconds((prev) => prev + 1), 1000);
+      intervalRef.current = setInterval(syncElapsedTime, 1000);
     }
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [isPaused]);
+  }, [isPaused, isSessionReady, syncElapsedTime]);
 
   useEffect(() => {
     const loop = Animated.loop(
@@ -121,7 +228,44 @@ export default function WalkActiveScreen() {
     return () => loop.stop();
   }, [badgeAnim]);
 
+  const recordLocation = useCallback((pos: GeoPosition) => {
+    const { latitude, longitude } = pos.coords;
+    const current = { lat: latitude, lng: longitude };
+
+    if (!hasInitialCoordRef.current) {
+      hasInitialCoordRef.current = true;
+      initialCoordRef.current = current;
+      setInitialCoord(current);
+    }
+    currentCoordRef.current = current;
+    setCurrentCoord(current);
+
+    if (pauseTrackingRef.current) {
+      lastCoordRef.current = current;
+      queueSessionSave();
+      return;
+    }
+
+    pathCoordinatesRef.current.push([latitude, longitude]);
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: 'LOCATION_UPDATE',
+        coord: current,
+        path: pathCoordinatesRef.current,
+      })
+    );
+
+    const previous = lastCoordRef.current;
+    if (previous) {
+      distanceKmRef.current += haversine(previous, current);
+      setDistanceKm(distanceKmRef.current);
+    }
+    lastCoordRef.current = current;
+    queueSessionSave();
+  }, [queueSessionSave]);
+
   useEffect(() => {
+    if (!isSessionReady) return;
     let isActive = true;
 
     const requestPermission = async () => {
@@ -144,33 +288,7 @@ export default function WalkActiveScreen() {
 
       watchIdRef.current = Geolocation.watchPosition(
         (pos: GeoPosition) => {
-          if (!isActive) return;
-          const { latitude, longitude } = pos.coords;
-          const current = { lat: latitude, lng: longitude };
-
-          if (!hasInitialCoordRef.current) {
-            hasInitialCoordRef.current = true;
-            setInitialCoord(current);
-          }
-          setCurrentCoord(current);
-
-          if (pauseTrackingRef.current) {
-            lastCoordRef.current = current;
-            return;
-          }
-
-          pathCoordinatesRef.current.push([latitude, longitude]);
-          webViewRef.current?.postMessage(
-            JSON.stringify({
-              type: 'LOCATION_UPDATE',
-              coord: current,
-              path: pathCoordinatesRef.current,
-            })
-          );
-          if (lastCoordRef.current) {
-            setDistanceKm((prev) => prev + haversine(lastCoordRef.current!, current));
-          }
-          lastCoordRef.current = current;
+          if (isActive) recordLocation(pos);
         },
         () => {},
         { enableHighAccuracy: true, distanceFilter: 1, interval: 2000, fastestInterval: 1000 }
@@ -186,26 +304,60 @@ export default function WalkActiveScreen() {
         watchIdRef.current = null;
       }
     };
-  }, []);
+  }, [isSessionReady, recordLocation]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+
+      if (nextState === 'active' && previousState !== 'active') {
+        syncElapsedTime();
+        Geolocation.getCurrentPosition(recordLocation, () => {}, {
+          enableHighAccuracy: true,
+          timeout: 15000,
+          maximumAge: 5000,
+        });
+      } else if (nextState === 'background' || nextState === 'inactive') {
+        syncElapsedTime();
+        queueSessionSave(true);
+      }
+
+      appStateRef.current = nextState;
+    });
+
+    return () => subscription.remove();
+  }, [isSessionReady, queueSessionSave, recordLocation, syncElapsedTime]);
 
   const handlePauseToggle = () => {
-    setIsPaused((prev) => {
-      const next = !prev;
-      pauseTrackingRef.current = next;
-      return next;
-    });
+    const now = Date.now();
+    timerStateRef.current = isPaused
+      ? resumeWalkTimer(timerStateRef.current, now)
+      : pauseWalkTimer(timerStateRef.current, now);
+    pauseTrackingRef.current = timerStateRef.current.isPaused;
+    setIsPaused(timerStateRef.current.isPaused);
+    setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
+    queueSessionSave(true);
   };
 
   const handleStop = () => {
+    const now = Date.now();
+    timerStateRef.current = pauseWalkTimer(timerStateRef.current, now);
+    setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
     setIsPaused(true);
     pauseTrackingRef.current = true;
+    queueSessionSave(true);
     setShowConfirmModal(true);
   };
 
   const handleConfirmNo = () => {
+    const now = Date.now();
+    timerStateRef.current = resumeWalkTimer(timerStateRef.current, now);
     setShowConfirmModal(false);
     setIsPaused(false);
     pauseTrackingRef.current = false;
+    queueSessionSave(true);
   };
 
   const handleConfirmYes = () => {
@@ -217,12 +369,16 @@ export default function WalkActiveScreen() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      const finalElapsedSeconds = getElapsedSeconds(timerStateRef.current, Date.now());
       await createPetWalk(petId, {
         startTime: startDate.toISOString(),
-        endTime: new Date(startDate.getTime() + elapsedSeconds * 1000).toISOString(),
-        distanceKm: Number(distanceKm.toFixed(3)),
+        endTime: new Date(startDate.getTime() + finalElapsedSeconds * 1000).toISOString(),
+        distanceKm: Number(distanceKmRef.current.toFixed(3)),
         pathCoordinates: pathCoordinatesRef.current,
       });
+      isFinishingRef.current = true;
+      await persistQueueRef.current.catch(() => undefined);
+      await clearActiveWalkSession().catch(() => undefined);
       navigation.goBack();
     } catch (error) {
       const message = error instanceof Error ? error.message : '산책 기록 저장에 실패했습니다.';
