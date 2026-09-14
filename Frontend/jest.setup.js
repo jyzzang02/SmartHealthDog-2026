@@ -12,3 +12,17 @@ jest.mock('react-native-geolocation-service', () => ({
   clearWatch: jest.fn(),
   stopObserving: jest.fn(),
 }));
+
+jest.mock('react-native-vision-camera', () => {
+  const React = require('react');
+
+  return {
+    Camera: React.forwardRef(() => null),
+    useCameraDevice: jest.fn(() => undefined),
+    useCameraFormat: jest.fn(() => undefined),
+    useCameraPermission: jest.fn(() => ({
+      hasPermission: false,
+      requestPermission: jest.fn(async () => false),
+    })),
+  };
+});

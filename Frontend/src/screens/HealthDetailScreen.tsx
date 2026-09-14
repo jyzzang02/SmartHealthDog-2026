@@ -77,12 +77,15 @@ const HealthDetailScreen = () => {
   const [pet, setPet] = useState<PetListItem | null>(null);
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
   const [previous, setPrevious] = useState<HealthSummary | undefined>(undefined);
+  const [history, setHistory] = useState<HealthSummary[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('검진 기록');
 
   useFocusEffect(
     useCallback(() => {
-      setSummary(healthStore.get(petId));
-      setPrevious(healthStore.getPrevious(petId));
+      const records = healthStore.getHistory(petId);
+      setHistory(records);
+      setSummary(records[0]);
+      setPrevious(records[1]);
       let mounted = true;
       getMyPets()
         .then((pets) => {
@@ -111,15 +114,10 @@ const HealthDetailScreen = () => {
     : '등록된 건강검진 정보가 없습니다.';
   const recentStatusColor = summary ? CONDITION_COLORS[summary.overallCondition].text : '#7B7C7D';
 
-  const noteLine = summary
-    ? [summary.hospitalName, summary.notes].filter(Boolean).join(' · ') || '추가 메모 없음'
-    : '';
-  const resultValue = summary
-    ? summary.healthTags.length > 0
-      ? summary.healthTags.join(', ')
-      : '특이사항 없음'
-    : '';
-  const resultColor = summary ? CONDITION_COLORS[summary.overallCondition].text : '#7B7C7D';
+  const getNoteLine = (record: HealthSummary) =>
+    [record.hospitalName, record.notes].filter(Boolean).join(' · ') || '추가 메모 없음';
+  const getResultValue = (record: HealthSummary) =>
+    record.healthTags.length > 0 ? record.healthTags.join(', ') : '특이사항 없음';
 
   return (
     <View style={styles.screen}>
@@ -197,22 +195,28 @@ const HealthDetailScreen = () => {
         {/* 탭별 콘텐츠 */}
         <View style={styles.recordListContainer}>
           {activeTab === '검진 기록' && (
-            summary && summary.examTypes.length > 0 ? (
-              summary.examTypes.map((examType, idx) => (
-                <View key={examType + idx} style={styles.examCard}>
+            history.length > 0 ? (
+              history.map((record, index) => (
+                <View key={`${record.checkupDate}-${index}`} style={styles.examCard}>
                   <View style={styles.examCardTopRow}>
-                    <View style={styles.examTagChip}>
-                      <Text style={styles.examTagChipText}>{examType}</Text>
+                    <View style={styles.examTagList}>
+                      {record.examTypes.map((examType, examTypeIndex) => (
+                        <View key={`${examType}-${examTypeIndex}`} style={styles.examTagChip}>
+                          <Text style={styles.examTagChipText}>{examType}</Text>
+                        </View>
+                      ))}
                     </View>
-                    <Text style={styles.examDate}>{summary.checkupDate}</Text>
+                    <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
-                  <Text style={styles.examNoteLine}>{noteLine}</Text>
+                  <Text style={styles.examNoteLine}>{getNoteLine(record)}</Text>
                   <View style={styles.examResultBox}>
                     <Text style={styles.examResultLabel}>검진 결과</Text>
-                    <Text style={[styles.examResultValue, { color: resultColor }]}>{resultValue}</Text>
+                    <Text style={[styles.examResultValue, { color: CONDITION_COLORS[record.overallCondition].text }]}>
+                      {getResultValue(record)}
+                    </Text>
                   </View>
                   <View style={styles.examBottomNoteWrap}>
-                    <Text style={styles.examBottomNoteText}>{summary.recommendation}</Text>
+                    <Text style={styles.examBottomNoteText}>{record.recommendation}</Text>
                   </View>
                 </View>
               ))
@@ -435,6 +439,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   examCardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  examTagList: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginRight: 12 },
   examTagChip: { backgroundColor: '#EEF7FD', borderRadius: 24, paddingHorizontal: 12, paddingVertical: 6 },
   examTagChipText: { fontSize: 14, color: '#0081D5', fontWeight: '600' },
   examDate: { fontSize: 14, color: '#7B7C7D' },

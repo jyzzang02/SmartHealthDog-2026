@@ -17,7 +17,7 @@ import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getMyThisWeekWalks, getPetWalks, WalkRecordDto } from '../api/walks';
 import { resolveImageUri } from '../utils/imageUri';
-import { filterToLatestWeek } from '../utils/walkWeek';
+import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
 
 const WALK_SHEET_HEIGHT = 420;
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -258,18 +258,18 @@ export default function WalkScreen() {
   };
 
   const weeklyData = useMemo(() => {
-    const latestWeekRecords = filterToLatestWeek(
+    const currentWeekRecords = filterToCurrentSeoulWeek(
       walkRecords,
       (record) => record.startedAt
     );
-    const primaryPetId = latestWeekRecords.find((record) => record.petId)?.petId;
+    const primaryPetId = currentWeekRecords.find((record) => record.petId)?.petId;
     const totals: Record<string, { pet1: number; pet2: number }> = {};
 
     DAYS.forEach((day) => {
       totals[day] = { pet1: 0, pet2: 0 };
     });
 
-    latestWeekRecords.forEach((record) => {
+    currentWeekRecords.forEach((record) => {
       const day = getDayLabel(record.date);
       const key = record.petId === primaryPetId ? 'pet1' : 'pet2';
       totals[day][key] += record.distanceKm;

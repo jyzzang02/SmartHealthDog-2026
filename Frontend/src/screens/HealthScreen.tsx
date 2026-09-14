@@ -9,6 +9,8 @@ import {
 } from 'react-native';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../App';
 
 import SymptomSearchBox from '../components/SymptomSearchBox';
 import DiagnosisCard from '../components/DiagnosisCard';
@@ -37,7 +39,7 @@ const SORT_OPTIONS = ['거리순', '별점순', '이름순'];
 
 const HealthScreen: React.FC = () => {
 
-  const navigation = useNavigation<any>();  // ★ navigation 사용
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedDistrict, setSelectedDistrict] = useState('');
@@ -46,22 +48,36 @@ const HealthScreen: React.FC = () => {
   const [showRegionModal, setShowRegionModal] = useState(false);
   const [showDistrictModal, setShowDistrictModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [showPetModal, setShowPetModal] = useState(false);
 
   const [petList, setPetList] = useState<PetListItem[]>([]);
+  const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
 
   useFocusEffect(
     useCallback(() => {
       let mounted = true;
       getMyPets()
-        .then((pets) => { if (mounted) setPetList(pets); })
-        .catch(() => { if (mounted) setPetList([]); });
+        .then((pets) => {
+          if (!mounted) return;
+          setPetList(pets);
+          setSelectedPetId((previousPetId) =>
+            pets.some((pet) => pet.id === previousPetId)
+              ? previousPetId
+              : pets[0]?.id ?? null
+          );
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setPetList([]);
+          setSelectedPetId(null);
+        });
       setHealthData(healthStore.getAll());
       return () => { mounted = false; };
     }, [])
   );
 
-  const currentPet = petList[0];
+  const currentPet = petList.find((pet) => pet.id === selectedPetId);
   const currentSummary = currentPet ? healthData[currentPet.id] : undefined;
   const hasHealthData = Boolean(currentSummary);
 
@@ -110,7 +126,19 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       {currentPet && (
         <View style={styles.healthInfoCard}>
-          <Text style={styles.healthInfoTitle}>보건 정보</Text>
+          <View style={styles.healthInfoHeaderRow}>
+            <Text style={styles.healthInfoTitle}>보건 정보</Text>
+            {petList.length > 1 && (
+              <TouchableOpacity
+                style={styles.petSelectButton}
+                activeOpacity={0.8}
+                onPress={() => setShowPetModal(true)}
+              >
+                <Text style={styles.petSelectButtonText}>{currentPet.name}</Text>
+                <Text style={styles.petSelectChevron}>⌄</Text>
+              </TouchableOpacity>
+            )}
+          </View>
           <View style={styles.healthInfoRow}>
             <View style={styles.healthInfoTextBox}>
               {hasHealthData ? (
@@ -171,6 +199,27 @@ const HealthScreen: React.FC = () => {
         </View>
 
       </View>
+
+      <Modal visible={showPetModal} transparent animationType="fade" onRequestClose={() => setShowPetModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowPetModal(false)}>
+          <View style={styles.modalContent}>
+            <ScrollView>
+              {petList.map((pet) => (
+                <TouchableOpacity
+                  key={pet.id}
+                  style={styles.modalItem}
+                  onPress={() => {
+                    setSelectedPetId(pet.id);
+                    setShowPetModal(false);
+                  }}
+                >
+                  <Text style={styles.modalItemText}>{pet.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ▼ 아래 모달들은 그대로 유지 ▼ */}
 
@@ -284,7 +333,30 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#000',
     lineHeight: 22,
+  },
+
+  healthInfoHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     marginBottom: 8,
+  },
+
+  petSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  petSelectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0081D5',
+  },
+
+  petSelectChevron: {
+    fontSize: 16,
+    color: '#0081D5',
   },
 
   healthInfoRow: {

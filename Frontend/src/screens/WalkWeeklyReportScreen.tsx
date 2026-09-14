@@ -11,7 +11,7 @@ import {
   WalkRecordDto,
 } from '../api/walks';
 import { resolveImageUri } from '../utils/imageUri';
-import { filterToLatestWeek } from '../utils/walkWeek';
+import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -76,7 +76,7 @@ export default function WalkWeeklyReportScreen() {
         thisWeekWalks = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
       }
 
-      thisWeekWalks = filterToLatestWeek(
+      thisWeekWalks = filterToCurrentSeoulWeek(
         thisWeekWalks,
         (walk) => walk.start_time ?? walk.startTime
       );
