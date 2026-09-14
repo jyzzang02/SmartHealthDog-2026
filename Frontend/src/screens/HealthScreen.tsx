@@ -1,19 +1,24 @@
-import React, { useState } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
+import React, { useState, useCallback } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
   ScrollView,
   TouchableOpacity,
   Modal
 } from 'react-native';
 
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../App';
 
 import SymptomSearchBox from '../components/SymptomSearchBox';
 import DiagnosisCard from '../components/DiagnosisCard';
 import DropdownButton from '../components/DropdownButton';
 import HospitalCard from '../components/HospitalCard';
+import { getMyPets, PetListItem } from '../api/pets';
+import { healthStore } from '../store/healthStore';
+import type { HealthSummary } from '../types/health';
 
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
@@ -34,7 +39,7 @@ const SORT_OPTIONS = ['거리순', '별점순', '이름순'];
 
 const HealthScreen: React.FC = () => {
 
-  const navigation = useNavigation<any>();  // ★ navigation 사용
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
   const [selectedRegion, setSelectedRegion] = useState('');
   const [selectedDistrict, setSelectedDistrict] = useState('');
@@ -43,7 +48,38 @@ const HealthScreen: React.FC = () => {
   const [showRegionModal, setShowRegionModal] = useState(false);
   const [showDistrictModal, setShowDistrictModal] = useState(false);
   const [showSortModal, setShowSortModal] = useState(false);
+  const [showPetModal, setShowPetModal] = useState(false);
 
+  const [petList, setPetList] = useState<PetListItem[]>([]);
+  const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
+  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+
+  useFocusEffect(
+    useCallback(() => {
+      let mounted = true;
+      getMyPets()
+        .then((pets) => {
+          if (!mounted) return;
+          setPetList(pets);
+          setSelectedPetId((previousPetId) =>
+            pets.some((pet) => pet.id === previousPetId)
+              ? previousPetId
+              : pets[0]?.id ?? null
+          );
+        })
+        .catch(() => {
+          if (!mounted) return;
+          setPetList([]);
+          setSelectedPetId(null);
+        });
+      setHealthData(healthStore.getAll());
+      return () => { mounted = false; };
+    }, [])
+  );
+
+  const currentPet = petList.find((pet) => pet.id === selectedPetId);
+  const currentSummary = currentPet ? healthData[currentPet.id] : undefined;
+  const hasHealthData = Boolean(currentSummary);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} >
@@ -86,6 +122,55 @@ const HealthScreen: React.FC = () => {
       </View>
 
       {/* ============================ */}
+      {/* 보건 정보 */}
+      {/* ============================ */}
+      {currentPet && (
+        <View style={styles.healthInfoCard}>
+          <View style={styles.healthInfoHeaderRow}>
+            <Text style={styles.healthInfoTitle}>보건 정보</Text>
+            {petList.length > 1 && (
+              <TouchableOpacity
+                style={styles.petSelectButton}
+                activeOpacity={0.8}
+                onPress={() => setShowPetModal(true)}
+              >
+                <Text style={styles.petSelectButtonText}>{currentPet.name}</Text>
+                <Text style={styles.petSelectChevron}>⌄</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+          <View style={styles.healthInfoRow}>
+            <View style={styles.healthInfoTextBox}>
+              {hasHealthData ? (
+                <Text style={styles.healthInfoDesc}>
+                  반려동물의 건강 정보를 확인해보세요.{'\n'}최근 검진 결과를 살펴보세요.
+                </Text>
+              ) : (
+                <Text style={styles.healthInfoDesc}>
+                  등록된 건강검진 정보가 없습니다.{'\n'}건강검진 정보를 등록해보세요.
+                </Text>
+              )}
+            </View>
+            <TouchableOpacity
+              style={styles.healthInfoBtn}
+              activeOpacity={0.8}
+              onPress={() => {
+                if (hasHealthData) {
+                  navigation.navigate('HealthDetail', { petId: currentPet.id, petName: currentPet.name });
+                } else {
+                  navigation.navigate('HealthCheckInput', { petId: currentPet.id, petName: currentPet.name });
+                }
+              }}
+            >
+              <Text style={styles.healthInfoBtnText}>
+                {hasHealthData ? '건강 상세' : '등록하기'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* ============================ */}
       {/* 동물병원 검색 */}
       {/* ============================ */}
       <View style={styles.whiteSection}>
@@ -114,6 +199,27 @@ const HealthScreen: React.FC = () => {
         </View>
 
       </View>
+
+      <Modal visible={showPetModal} transparent animationType="fade" onRequestClose={() => setShowPetModal(false)}>
+        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowPetModal(false)}>
+          <View style={styles.modalContent}>
+            <ScrollView>
+              {petList.map((pet) => (
+                <TouchableOpacity
+                  key={pet.id}
+                  style={styles.modalItem}
+                  onPress={() => {
+                    setSelectedPetId(pet.id);
+                    setShowPetModal(false);
+                  }}
+                >
+                  <Text style={styles.modalItemText}>{pet.name}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </TouchableOpacity>
+      </Modal>
 
       {/* ▼ 아래 모달들은 그대로 유지 ▼ */}
 
@@ -205,6 +311,84 @@ const styles = StyleSheet.create({
   subtitle: { color: '#000', fontSize: 32, fontWeight: '600', lineHeight: 40, marginTop: 2 },
 
   cardRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 32, justifyContent: 'space-between' },
+
+  healthInfoCard: {
+    backgroundColor: '#FFFFFF',
+    marginHorizontal: 20,
+    marginTop: 32,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(0,0,0,0.05)',
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
+  },
+
+  healthInfoTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#000',
+    lineHeight: 22,
+  },
+
+  healthInfoHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+
+  petSelectButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+
+  petSelectButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0081D5',
+  },
+
+  petSelectChevron: {
+    fontSize: 16,
+    color: '#0081D5',
+  },
+
+  healthInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+
+  healthInfoTextBox: { flex: 1, paddingRight: 12 },
+
+  healthInfoDesc: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7B7C7D',
+    lineHeight: 22,
+  },
+
+  healthInfoBtn: {
+    backgroundColor: '#EEF7FD',
+    borderRadius: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
+  },
+
+  healthInfoBtnText: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#0081D5',
+  },
 
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center',

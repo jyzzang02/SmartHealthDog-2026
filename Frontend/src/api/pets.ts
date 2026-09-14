@@ -53,16 +53,24 @@ export interface UpdatePetRequestFull {
 
 export type UpdatePetRequestPartial = Partial<UpdatePetRequestFull>;
 
+export interface PetImageUpload {
+  uri: string;
+  type?: string;
+  fileName?: string;
+}
+
 export interface UpdatePetPayloadFull {
   id: number;
   request: UpdatePetRequestFull;
   profilePictureUri?: string | null;
+  profilePicture?: PetImageUpload | null;
 }
 
 export interface UpdatePetPayloadPartial {
   id: number;
   request: UpdatePetRequestPartial;
   profilePictureUri?: string | null;
+  profilePicture?: PetImageUpload | null;
 }
 
 export interface CreatePetRequest {
@@ -78,6 +86,7 @@ export interface CreatePetRequest {
 export interface CreatePetPayload {
   request: CreatePetRequest;
   profilePictureUri?: string | null;
+  profilePicture?: PetImageUpload | null;
 }
 
 const parseJsonSafe = async (response: Response) => {
@@ -184,11 +193,14 @@ const buildPetFormData = (
     } as any
   );
 
-  if (payload.profilePictureUri) {
+  const selectedImage = payload.profilePicture;
+  const imageUri = selectedImage?.uri || payload.profilePictureUri;
+
+  if (imageUri) {
     formData.append('profilePicture', {
-      uri: payload.profilePictureUri,
-      type: getMimeTypeFromUri(payload.profilePictureUri) || 'image/jpeg',
-      name: normalizeFileName(payload.profilePictureUri) || 'pet.jpg',
+      uri: imageUri,
+      type: selectedImage?.type || getMimeTypeFromUri(imageUri),
+      name: selectedImage?.fileName || normalizeFileName(imageUri),
     } as any);
   }
 

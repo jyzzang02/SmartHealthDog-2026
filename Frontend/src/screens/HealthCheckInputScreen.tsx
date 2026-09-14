@@ -70,6 +70,13 @@ const calcRecommendation = (condition: OverallCondition): string => {
 const initPhysicalResults = (): Record<string, PhysicalResult> =>
   Object.fromEntries(PHYSICAL_ITEMS.map(item => [item, '미실시' as PhysicalResult]));
 
+const parseNumber = (value: string): number | undefined => {
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const n = Number(trimmed);
+  return Number.isFinite(n) ? n : undefined;
+};
+
 /* ─── 컴포넌트 ─── */
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckInput'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckInput'>;
@@ -86,6 +93,9 @@ const HealthCheckInputScreen = () => {
     initPhysicalResults
   );
   const [notes, setNotes] = useState('');
+  const [weight, setWeight] = useState('');
+  const [heartRate, setHeartRate] = useState('');
+  const [temperature, setTemperature] = useState('');
 
   /* ─── 핸들러 ─── */
   const toggleExamType = (type: string) => {
@@ -114,6 +124,9 @@ const HealthCheckInputScreen = () => {
       overallCondition,
       healthTags,
       recommendation: calcRecommendation(overallCondition),
+      weight: parseNumber(weight),
+      heartRate: parseNumber(heartRate),
+      temperature: parseNumber(temperature),
     };
 
     navigation.navigate('HealthCheckResult', { petId, petName, summary });
@@ -200,6 +213,53 @@ const HealthCheckInputScreen = () => {
                 </TouchableOpacity>
               );
             })}
+          </View>
+        </View>
+
+        {/* ── 측정 수치 ── */}
+        <Text style={[styles.sectionTitle, { marginTop: 28 }]}>측정 수치 (선택)</Text>
+        <View style={styles.vitalsRow}>
+          <View style={styles.vitalsBox}>
+            <Text style={styles.vitalsLabel}>체중</Text>
+            <View style={styles.vitalsField}>
+              <TextInput
+                style={styles.vitalsInput}
+                value={weight}
+                onChangeText={setWeight}
+                placeholder="0.0"
+                placeholderTextColor="#aaa"
+                keyboardType="decimal-pad"
+              />
+              <Text style={styles.vitalsUnit}>kg</Text>
+            </View>
+          </View>
+          <View style={styles.vitalsBox}>
+            <Text style={styles.vitalsLabel}>심박수</Text>
+            <View style={styles.vitalsField}>
+              <TextInput
+                style={styles.vitalsInput}
+                value={heartRate}
+                onChangeText={setHeartRate}
+                placeholder="0"
+                placeholderTextColor="#aaa"
+                keyboardType="number-pad"
+              />
+              <Text style={styles.vitalsUnit}>bpm</Text>
+            </View>
+          </View>
+          <View style={styles.vitalsBox}>
+            <Text style={styles.vitalsLabel}>체온</Text>
+            <View style={styles.vitalsField}>
+              <TextInput
+                style={styles.vitalsInput}
+                value={temperature}
+                onChangeText={setTemperature}
+                placeholder="0.0"
+                placeholderTextColor="#aaa"
+                keyboardType="decimal-pad"
+              />
+              <Text style={styles.vitalsUnit}>°C</Text>
+            </View>
           </View>
         </View>
 
@@ -370,6 +430,39 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     tintColor: '#aaa',
+  },
+
+  /* 측정 수치 */
+  vitalsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  vitalsBox: {
+    flex: 1,
+  },
+  vitalsLabel: {
+    fontSize: 13,
+    color: '#7B7C7D',
+    marginBottom: 6,
+  },
+  vitalsField: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E0E0E0',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  vitalsInput: {
+    flex: 1,
+    fontSize: 15,
+    color: '#040505',
+  },
+  vitalsUnit: {
+    fontSize: 13,
+    color: '#7B7C7D',
+    marginLeft: 4,
   },
 
   /* 검진 종류 */

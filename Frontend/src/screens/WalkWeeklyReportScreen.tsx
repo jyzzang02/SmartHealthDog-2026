@@ -4,8 +4,14 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getMyThisWeekWalks, getPetWalks, getWeeklyWalkComparison } from '../api/walks';
+import {
+  getMyThisWeekWalks,
+  getPetWalks,
+  getWeeklyWalkComparison,
+  WalkRecordDto,
+} from '../api/walks';
 import { resolveImageUri } from '../utils/imageUri';
+import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
 
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 
@@ -52,7 +58,7 @@ export default function WalkWeeklyReportScreen() {
         dailyMap[pet.id] = Object.fromEntries(DAYS.map((d) => [d, 0]));
       });
 
-      let thisWeekWalks = [];
+      let thisWeekWalks: WalkRecordDto[] = [];
       try {
         thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
       } catch {
@@ -69,6 +75,11 @@ export default function WalkWeeklyReportScreen() {
         );
         thisWeekWalks = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []));
       }
+
+      thisWeekWalks = filterToCurrentSeoulWeek(
+        thisWeekWalks,
+        (walk) => walk.start_time ?? walk.startTime
+      );
 
       const enrichedPets = petList.map((pet) => {
         if (pet.profilePicture && pet.name) return pet;
