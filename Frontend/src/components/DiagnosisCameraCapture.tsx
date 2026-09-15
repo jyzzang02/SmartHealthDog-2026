@@ -4,6 +4,7 @@ import {
   Alert,
   Image,
   Modal,
+  NativeModules,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -21,6 +22,16 @@ import {
   useCameraPermission,
 } from 'react-native-vision-camera';
 import { launchImageLibrary } from 'react-native-image-picker';
+import {
+  GestureHandlerRootView,
+  PanGestureHandler,
+  PinchGestureHandler,
+  State,
+  type PanGestureHandlerGestureEvent,
+  type PanGestureHandlerStateChangeEvent,
+  type PinchGestureHandlerGestureEvent,
+  type PinchGestureHandlerStateChangeEvent,
+} from 'react-native-gesture-handler';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getPetSubmissions } from '../api/diagnosis';
 
@@ -29,6 +40,24 @@ type CapturedDiagnosisImage = {
   type?: string;
   fileName?: string;
   fileSize?: number;
+};
+
+type GalleryDiagnosisImage = CapturedDiagnosisImage & {
+  fileName: string;
+  mimeType: string;
+  fileSize?: number;
+  width: number;
+  height: number;
+};
+
+type DiagnosisImageCropperModule = {
+  cropImage: (
+    uri: string,
+    cropX: number,
+    cropY: number,
+    cropWidth: number,
+    cropHeight: number
+  ) => Promise<string>;
 };
 
 type CreateSubmissionResponse = {
@@ -47,6 +76,12 @@ type DiagnosisCameraCaptureProps = {
 };
 
 const SNAPSHOT_QUALITY = 75;
+const GALLERY_GUIDE_SIZE = 300;
+const MIN_GALLERY_SCALE = 1;
+const MAX_GALLERY_SCALE = 3;
+
+const diagnosisImageCropper =
+  NativeModules.DiagnosisImageCropper as DiagnosisImageCropperModule | undefined;
 
 const isValidPetId = (petId: number | null | undefined) =>
   typeof petId === 'number' && Number.isFinite(petId) && petId > 0;
@@ -54,6 +89,18 @@ const isValidPetId = (petId: number | null | undefined) =>
 const getFileNameFromPath = (path: string, fallback: string) => {
   const fileName = path.split('/').pop();
   return fileName && fileName.includes('.') ? fileName : fallback;
+};
+
+const getImageDimensions = (uri: string, width?: number, height?: number) => {
+  if (width && height && width > 0 && height > 0) {
+    return Promise.resolve({ width, height });
+  }
+
+  return new Promise<{ width: number; height: number }>((resolve, reject) => {
+    Image.getSize(uri, (imageWidth, imageHeight) => {
+      resolve({ width: imageWidth, height: imageHeight });
+    }, reject);
+  });
 };
 
 const toFileUri = (path: string) =>
@@ -82,7 +129,7 @@ const matchesDiagnosisType = (submission: any, type: 'eye' | 'urine') => {
 
 const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   type,
-  title,
+  title: _title,
   resultRouteName,
   requestDiagnosis,
 }) => {
@@ -100,9 +147,16 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
   const [isGuideVisible, setGuideVisible] = useState(true);
+  const [galleryImage, setGalleryImage] = useState<GalleryDiagnosisImage | null>(null);
+  const [galleryAlignment, setGalleryAlignment] = useState({ x: 0, y: 0, scale: 1 });
   const [hasGuideStarted, setGuideStarted] = useState(false);
   const [isPetPickerVisible, setPetPickerVisible] = useState(false);
   const device = useCameraDevice(cameraPosition);
+  const galleryAlignmentRef = useRef(galleryAlignment);
+  const galleryPanStartRef = useRef({ x: 0, y: 0 });
+  const galleryPinchStartScaleRef = useRef(1);
+  const galleryPanHandlerRef = useRef(null);
+  const galleryPinchHandlerRef = useRef(null);
   const format = useCameraFormat(device, [
     { videoResolution: { width: 1280, height: 720 } },
     { photoResolution: { width: 1280, height: 720 } },
@@ -113,6 +167,26 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     () => pets.find((pet) => pet.id === selectedPetId) || null,
     [pets, selectedPetId]
   );
+
+  const galleryImageLayout = useMemo(() => {
+    if (!galleryImage) return null;
+
+    const baseScale = Math.max(
+      GALLERY_GUIDE_SIZE / galleryImage.width,
+      GALLERY_GUIDE_SIZE / galleryImage.height
+    );
+    const renderedScale = baseScale * galleryAlignment.scale;
+    const width = galleryImage.width * renderedScale;
+    const height = galleryImage.height * renderedScale;
+
+    return {
+      width,
+      height,
+      left: (GALLERY_GUIDE_SIZE - width) / 2 + galleryAlignment.x,
+      top: (GALLERY_GUIDE_SIZE - height) / 2 + galleryAlignment.y,
+      renderedScale,
+    };
+  }, [galleryAlignment, galleryImage]);
 
   const resolveLatestSubmissionId = useCallback(
     async (petId: number, created: CreateSubmissionResponse | null) => {
@@ -168,6 +242,64 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
         '카메라 권한을 허용하면 소변키트 촬영 가이드가 표시됩니다.',
     };
   }, [type]);
+
+  const updateGalleryAlignment = useCallback((nextAlignment: {
+    x: number;
+    y: number;
+    scale: number;
+  }) => {
+    galleryAlignmentRef.current = nextAlignment;
+    setGalleryAlignment(nextAlignment);
+  }, []);
+
+  const handleGalleryPanStateChange = useCallback(
+    (event: PanGestureHandlerStateChangeEvent) => {
+      if (event.nativeEvent.state !== State.BEGAN) return;
+
+      const current = galleryAlignmentRef.current;
+      galleryPanStartRef.current = { x: current.x, y: current.y };
+    },
+    []
+  );
+
+  const handleGalleryPanGesture = useCallback(
+    (event: PanGestureHandlerGestureEvent) => {
+      if (event.nativeEvent.numberOfPointers > 1) return;
+
+      const start = galleryPanStartRef.current;
+      updateGalleryAlignment({
+        ...galleryAlignmentRef.current,
+        x: start.x + event.nativeEvent.translationX,
+        y: start.y + event.nativeEvent.translationY,
+      });
+    },
+    [updateGalleryAlignment]
+  );
+
+  const handleGalleryPinchStateChange = useCallback(
+    (event: PinchGestureHandlerStateChangeEvent) => {
+      if (event.nativeEvent.state === State.BEGAN) {
+        galleryPinchStartScaleRef.current = galleryAlignmentRef.current.scale;
+      }
+    },
+    []
+  );
+
+  const handleGalleryPinchGesture = useCallback(
+    (event: PinchGestureHandlerGestureEvent) => {
+      updateGalleryAlignment({
+        ...galleryAlignmentRef.current,
+        scale: Math.max(
+          MIN_GALLERY_SCALE,
+          Math.min(
+            MAX_GALLERY_SCALE,
+            galleryPinchStartScaleRef.current * event.nativeEvent.scale
+          )
+        ),
+      });
+    },
+    [updateGalleryAlignment]
+  );
 
   useEffect(() => {
     return () => {
@@ -410,6 +542,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     navigation,
     requestDiagnosis,
     resultRouteName,
+    resolveLatestSubmissionId,
     selectedPetId,
     type,
   ]);
@@ -421,7 +554,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     }
   }, [requestPermission]);
 
-  const handlePickFromGallery = useCallback(async () => {
+  const handleUploadFromGallery = useCallback(async (image: GalleryDiagnosisImage) => {
     if (isUploading) return;
 
     if (pets.length === 0) {
@@ -437,35 +570,24 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     setIsUploading(true);
 
     try {
-      const response = await launchImageLibrary({
-        mediaType: 'photo',
-        quality: 0.8,
-        selectionLimit: 1,
-      });
-      const asset = response.assets?.[0];
-
-      if (response.didCancel || !asset?.uri) {
-        return;
-      }
-
       const petId = selectedPetId as number;
-      const fileName = asset.fileName || getFileNameFromPath(asset.uri, `${type}.jpg`);
-      const mimeType = asset.type || 'image/jpeg';
+      const fileName = image.fileName;
+      const mimeType = image.mimeType;
 
       console.log('[diagnosis] gallery:upload:start', {
         type,
         petId,
-        uri: asset.uri,
+        uri: image.uri,
         fileName,
         mimeType,
-        fileSize: asset.fileSize,
+        fileSize: image.fileSize,
       });
 
       const created = await requestDiagnosis(petId, {
-        uri: asset.uri,
+        uri: image.uri,
         type: mimeType,
         fileName,
-        fileSize: asset.fileSize,
+        fileSize: image.fileSize,
       });
       const submissionId = await resolveLatestSubmissionId(petId, created);
 
@@ -500,14 +622,114 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     promptPetSelection,
     requestDiagnosis,
     resultRouteName,
+    resolveLatestSubmissionId,
     selectedPetId,
     type,
   ]);
 
+  const handlePickFromGallery = useCallback(() => {
+    if (isUploading) return;
+
+    if (pets.length === 0) {
+      Alert.alert('안내', '진단할 반려동물을 먼저 등록해 주세요.');
+      return;
+    }
+
+    if (!selectedPetId) {
+      promptPetSelection();
+      return;
+    }
+
+    const selectImage = async () => {
+      try {
+        const response = await launchImageLibrary({
+          mediaType: 'photo',
+          quality: 1,
+          selectionLimit: 1,
+        });
+        const asset = response.assets?.[0];
+
+        if (response.didCancel || !asset?.uri) return;
+
+        const dimensions = await getImageDimensions(asset.uri, asset.width, asset.height);
+        if (!isMountedRef.current) return;
+
+        setGalleryAlignment({ x: 0, y: 0, scale: 1 });
+        galleryAlignmentRef.current = { x: 0, y: 0, scale: 1 };
+        setGalleryImage({
+          uri: asset.uri,
+          fileName: asset.fileName || getFileNameFromPath(asset.uri, `${type}.jpg`),
+          mimeType: asset.type || 'image/jpeg',
+          fileSize: asset.fileSize,
+          width: dimensions.width,
+          height: dimensions.height,
+        });
+      } catch (error) {
+        console.log('[diagnosis] gallery:select:error', error);
+        Alert.alert('오류', '사진을 불러오지 못했습니다. 다시 선택해 주세요.');
+      }
+    };
+
+    selectImage();
+  }, [isUploading, pets.length, promptPetSelection, selectedPetId, type]);
+
+  const handleConfirmGalleryAlignment = useCallback(async () => {
+    if (!galleryImage || isUploading) return;
+
+    if (!diagnosisImageCropper) {
+      Alert.alert('오류', '사진 정렬 기능을 준비하지 못했습니다. 앱을 다시 설치해 주세요.');
+      return;
+    }
+
+    if (!galleryImageLayout) return;
+
+    const cropWidth = GALLERY_GUIDE_SIZE / galleryImageLayout.renderedScale;
+    const cropHeight = GALLERY_GUIDE_SIZE / galleryImageLayout.renderedScale;
+    const cropX = Math.max(
+      0,
+      Math.min(galleryImage.width - cropWidth, -galleryImageLayout.left / galleryImageLayout.renderedScale)
+    );
+    const cropY = Math.max(
+      0,
+      Math.min(galleryImage.height - cropHeight, -galleryImageLayout.top / galleryImageLayout.renderedScale)
+    );
+
+    try {
+      setIsUploading(true);
+      const croppedUri = await diagnosisImageCropper.cropImage(
+        galleryImage.uri,
+        cropX,
+        cropY,
+        cropWidth,
+        cropHeight
+      );
+      if (!isMountedRef.current) return;
+
+      setGalleryImage(null);
+      await handleUploadFromGallery({
+        ...galleryImage,
+        uri: croppedUri,
+        fileName: `diagnosis-${type}.jpg`,
+        mimeType: 'image/jpeg',
+      });
+    } catch (error) {
+      console.log('[diagnosis] gallery:crop:error', error);
+      Alert.alert('오류', '사진을 정렬하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+      if (isMountedRef.current) {
+        setIsUploading(false);
+      }
+    }
+  }, [galleryImage, galleryImageLayout, handleUploadFromGallery, isUploading, type]);
+
   const canInteract = !isLoading && !isUploading;
   const canUseFlash = Boolean(device?.hasFlash);
   const isCameraActive =
-    isFocused && hasPermission && !isPetPickerVisible && !isGuideVisible;
+    isFocused &&
+    hasPermission &&
+    !isPetPickerVisible &&
+    !isGuideVisible &&
+    !galleryImage;
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -673,6 +895,80 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
             </TouchableOpacity>
           </View>
         </View>
+      </Modal>
+
+      <Modal
+        visible={Boolean(galleryImage)}
+        animationType="slide"
+        onRequestClose={() => !isUploading && setGalleryImage(null)}
+      >
+        <GestureHandlerRootView style={styles.galleryGestureRoot}>
+          <SafeAreaView style={styles.galleryAlignerSafeArea}>
+          <View style={styles.galleryAlignerHeader}>
+            <TouchableOpacity
+              style={styles.galleryAlignerCloseButton}
+              onPress={() => setGalleryImage(null)}
+              disabled={isUploading}
+            >
+              <Text style={styles.galleryAlignerCloseText}>취소</Text>
+            </TouchableOpacity>
+            <Text style={styles.galleryAlignerTitle}>사진 위치 맞추기</Text>
+            <View style={styles.galleryAlignerHeaderSpacer} />
+          </View>
+
+          <Text style={styles.galleryAlignerDescription}>
+            한 손가락으로 움직이고, 두 손가락으로 확대·축소해 가이드에 맞춰주세요.
+          </Text>
+
+          <PinchGestureHandler
+            ref={galleryPinchHandlerRef}
+            simultaneousHandlers={galleryPanHandlerRef}
+            onGestureEvent={handleGalleryPinchGesture}
+            onHandlerStateChange={handleGalleryPinchStateChange}
+          >
+            <PanGestureHandler
+              ref={galleryPanHandlerRef}
+              simultaneousHandlers={galleryPinchHandlerRef}
+              onGestureEvent={handleGalleryPanGesture}
+              onHandlerStateChange={handleGalleryPanStateChange}
+            >
+              <View style={styles.galleryGuideFrame}>
+                {galleryImage && galleryImageLayout && (
+                  <Image
+                    source={{ uri: galleryImage.uri }}
+                    style={[
+                      styles.galleryGuideImage,
+                      {
+                        width: galleryImageLayout.width,
+                        height: galleryImageLayout.height,
+                        left: galleryImageLayout.left,
+                        top: galleryImageLayout.top,
+                      },
+                    ]}
+                  />
+                )}
+                <View pointerEvents="none" style={styles.galleryGuideOverlay}>
+                  {type === 'eye' ? (
+                    <View style={styles.eyeGuideOuter}>
+                      <View style={styles.eyeGuideInner} />
+                    </View>
+                  ) : (
+                    <View style={styles.urineGuideBox} />
+                  )}
+                </View>
+              </View>
+            </PanGestureHandler>
+          </PinchGestureHandler>
+
+          <TouchableOpacity
+            style={styles.galleryConfirmButton}
+            onPress={handleConfirmGalleryAlignment}
+            disabled={isUploading}
+          >
+            <Text style={styles.galleryConfirmButtonText}>이 위치로 분석하기</Text>
+          </TouchableOpacity>
+          </SafeAreaView>
+        </GestureHandlerRootView>
       </Modal>
 
       <Modal
@@ -992,6 +1288,77 @@ const styles = StyleSheet.create({
   guideStartText: {
     color: '#FFFFFF',
     fontSize: 15,
+    fontWeight: '800',
+  },
+  galleryGestureRoot: {
+    flex: 1,
+  },
+  galleryAlignerSafeArea: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  galleryAlignerHeader: {
+    height: 58,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#E8EAED',
+  },
+  galleryAlignerCloseButton: {
+    minWidth: 48,
+    paddingVertical: 10,
+  },
+  galleryAlignerCloseText: {
+    color: '#60646A',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  galleryAlignerTitle: {
+    color: '#1F2024',
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  galleryAlignerHeaderSpacer: {
+    width: 48,
+  },
+  galleryAlignerDescription: {
+    color: '#60646A',
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 30,
+  },
+  galleryGuideFrame: {
+    width: GALLERY_GUIDE_SIZE,
+    height: GALLERY_GUIDE_SIZE,
+    alignSelf: 'center',
+    marginTop: 28,
+    overflow: 'hidden',
+    backgroundColor: '#111111',
+  },
+  galleryGuideImage: {
+    position: 'absolute',
+  },
+  galleryGuideOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.16)',
+  },
+  galleryConfirmButton: {
+    height: 54,
+    marginHorizontal: 28,
+    marginTop: 28,
+    borderRadius: 12,
+    backgroundColor: '#0081D5',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  galleryConfirmButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
     fontWeight: '800',
   },
   petPickerOverlay: {
