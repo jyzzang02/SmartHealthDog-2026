@@ -12,6 +12,7 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { PhysicalResult, HealthSummary, OverallCondition } from '../types/health';
 
@@ -84,6 +85,7 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckInput'>;
 const HealthCheckInputScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
+  const insets = useSafeAreaInsets();
   const { petId, petName } = route.params;
 
   const [checkupDate, setCheckupDate] = useState(todayString());
@@ -332,7 +334,7 @@ const HealthCheckInputScreen = () => {
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={styles.bottomBtns}>
+      <View style={[styles.bottomBtns, { paddingBottom: Math.max(insets.bottom, 16) }]}>
         <TouchableOpacity
           style={styles.cancelBtn}
           onPress={() => navigation.goBack()}

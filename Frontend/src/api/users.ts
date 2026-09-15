@@ -4,6 +4,7 @@ import {
   storeAuthTokens,
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
+import { getResponseErrorMessage } from './responseError';
 import { resolveImageUri } from '../utils/imageUri';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
@@ -35,14 +36,6 @@ const parseJsonSafe = async (response: Response) => {
     return await response.json();
   } catch {
     return null;
-  }
-};
-
-const readErrorBody = async (response: Response) => {
-  try {
-    return await response.text();
-  } catch {
-    return '';
   }
 };
 
@@ -136,13 +129,10 @@ export const getMyProfile = async (): Promise<UserProfile> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `프로필 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `프로필 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
     throw new Error(message);
   }
 
@@ -176,13 +166,10 @@ export const updateMyProfile = async (
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `프로필 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `프로필 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
     throw new Error(message);
   }
 

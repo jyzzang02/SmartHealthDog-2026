@@ -185,6 +185,24 @@ export const refreshAuthToken = async (
   return response.json();
 };
 
+export const loginWithKakaoCode = async (code: string): Promise<AuthTokens> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/login/social/kakao/code`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    const { message, codes } = await parseErrorResponse(response);
+    throw new ApiError(message, response.status, codes);
+  }
+
+  return (await response.json()) as AuthTokens;
+};
+
 export const logout = async (refreshToken: string): Promise<void> => {
   const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: 'POST',
@@ -203,5 +221,3 @@ export const logout = async (refreshToken: string): Promise<void> => {
 export const isApiError = (error: unknown): error is ApiError => {
   return error instanceof ApiError;
 };
-
-console.log('[login] URL =', `${API_BASE_URL}/api/auth/login`);

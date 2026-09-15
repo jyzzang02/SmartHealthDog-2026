@@ -251,16 +251,18 @@ const MyPageScreen = () => {
 
       {petCards.length === 1 && (
         <>
-          <PetProfileCard
-            {...petCards[0]}
-            onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
-            onPressHistory={() =>
-              navigation.navigate("DiagnosisHistory", {
-                petId: petCards[0].id,
-                petName: petCards[0].name,
-              })
-            }
-          />
+          <View style={styles.singlePetCardWrap}>
+            <PetProfileCard
+              {...petCards[0]}
+              onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+              onPressHistory={() =>
+                navigation.navigate("DiagnosisHistory", {
+                  petId: petCards[0].id,
+                  petName: petCards[0].name,
+                })
+              }
+            />
+          </View>
           {!healthData[petCards[0].id] && (
             <TouchableOpacity
               style={styles.healthInputBtn}
@@ -496,6 +498,10 @@ const styles = StyleSheet.create({
   },
   petCarouselWrap: {
     minHeight: 360,
+  },
+  singlePetCardWrap: {
+    width: CARD_WIDTH,
+    alignSelf: "center",
   },
   dot: {
     width: 8,

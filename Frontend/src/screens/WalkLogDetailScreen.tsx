@@ -14,7 +14,7 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import { RootStackParamList } from '../../App';
-import { deleteWalk, endPetWalk, getWalkDetail, WalkCoordinate, WalkRecordDto } from '../api/walks';
+import { deleteWalk, getWalkDetail, WalkCoordinate, WalkRecordDto } from '../api/walks';
 
 type WalkLogDetailRouteProp = RouteProp<RootStackParamList, 'WalkLogDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -97,7 +97,6 @@ export default function WalkLogDetailScreen() {
   const [walkDetail, setWalkDetail] = useState<WalkRecordDto | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!record.id) return;
@@ -135,9 +134,6 @@ export default function WalkLogDetailScreen() {
       durationClock: typeof durationSec === 'number' ? formatDurationClock(durationSec) : record.duration,
     };
   }, [record, walkDetail]);
-
-  const hasEnded = Boolean(walkDetail?.end_time ?? walkDetail?.endTime ?? record.endTime);
-  const canEndWalk = Boolean(record.petId) && Boolean(record.id) && !hasEnded;
 
   const pathPoints = useMemo(() => {
     const detailPath = walkDetail?.path_coordinates ?? walkDetail?.pathCoordinates;
@@ -230,30 +226,6 @@ export default function WalkLogDetailScreen() {
     ]);
   };
 
-  const handleEndWalk = async () => {
-    const walkId = record.id;
-    if (isEnding) return;
-    if (!walkId) {
-      Alert.alert('오류', '산책 기록 ID가 없어 종료할 수 없습니다.');
-      return;
-    }
-    if (!canEndWalk) {
-      Alert.alert('안내', '이미 종료된 산책이거나 종료할 수 없습니다.');
-      return;
-    }
-    setIsEnding(true);
-    try {
-      const endedWalk = await endPetWalk(record.petId, walkId);
-      setWalkDetail(endedWalk);
-      Alert.alert('완료', '산책 종료 처리가 완료되었습니다.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '산책 종료 처리에 실패했습니다.';
-      Alert.alert('오류', message);
-    } finally {
-      setIsEnding(false);
-    }
-  };
-
   const startPeriod = useMemo(() => getPeriodLabel(resolved.startTime), [resolved.startTime]);
   const endPeriod = useMemo(() => getPeriodLabel(resolved.endTime), [resolved.endTime]);
   const headerTitle = `${resolved.date} 산책 일지`;
@@ -334,11 +306,6 @@ export default function WalkLogDetailScreen() {
             </Text>
             <Text style={styles.durationClock}>{resolved.durationClock}</Text>
           </View>
-          {canEndWalk && (
-            <TouchableOpacity style={styles.endWalkButton} onPress={handleEndWalk} disabled={isEnding}>
-              <Text style={styles.endWalkButtonText}>{isEnding ? '종료 처리 중' : '산책 종료 처리'}</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </View>
     </View>
@@ -451,20 +418,5 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     marginTop: 8,
-  },
-  endWalkButton: {
-    width: 180,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#0081D5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
-    marginBottom: 24,
-  },
-  endWalkButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
-    fontWeight: '700',
   },
 });

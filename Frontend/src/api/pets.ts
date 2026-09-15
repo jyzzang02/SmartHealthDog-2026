@@ -5,6 +5,7 @@ import {
   storeAuthTokens,
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
+import { getResponseErrorMessage } from './responseError';
 import { resolveImageUri } from '../utils/imageUri';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
@@ -94,14 +95,6 @@ const parseJsonSafe = async (response: Response) => {
     return await response.json();
   } catch {
     return null;
-  }
-};
-
-const readErrorBody = async (response: Response) => {
-  try {
-    return await response.text();
-  } catch {
-    return '';
   }
 };
 
@@ -257,13 +250,10 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -316,13 +306,10 @@ export const getPetDetail = async (id: number): Promise<PetListItem> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -341,13 +328,10 @@ export const createPet = async (
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 등록에 실패했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 등록에 실패했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -369,13 +353,10 @@ export const updatePetFull = async (
   );
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -397,13 +378,10 @@ export const updatePetPartial = async (
   );
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -424,13 +402,10 @@ export const deletePet = async (id: number): Promise<void> => {
   }
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -485,13 +460,14 @@ export const requestUrineDiagnosis = async (
     return idFromLocation ? { submissionId: idFromLocation } : null;
   }
 
-  const errorText = await readErrorBody(response);
+  const message = await getResponseErrorMessage(
+    response,
+    `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
+  );
   console.log('[diagnosis] upload:urine:error', {
     status: response.status,
     statusText: response.statusText,
-    message: errorText,
+    message,
   });
-  throw new Error(
-    errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
-  );
+  throw new Error(message);
 };

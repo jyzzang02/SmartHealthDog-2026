@@ -177,19 +177,6 @@ export const createPetWalk = async (petId: number, payload: CreateWalkRequest): 
   }
 };
 
-export const endPetWalk = async (petId: number, walkId: number): Promise<WalkRecordDto> => {
-  const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${petId}/walks/${walkId}/end`, {
-    method: 'PATCH',
-  });
-
-  if (!response.ok) {
-    await throwHttpError(response, '산책 종료 처리에 실패했습니다.');
-  }
-
-  const data = await parseJsonSafe(response);
-  return (data?.walk || data) as WalkRecordDto;
-};
-
 export const getPetWalks = async (
   petId: number,
   params?: {
