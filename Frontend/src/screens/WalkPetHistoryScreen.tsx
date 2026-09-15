@@ -11,7 +11,7 @@ import {
 import { RouteProp, useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
-import { getPetWalks, WalkRecordDto } from '../api/walks';
+import { getPetWalks, isCompletedWalkRecord, WalkRecordDto } from '../api/walks';
 
 type RouteProps = RouteProp<RootStackParamList, 'WalkPetHistory'>;
 type NavigationProps = NativeStackNavigationProp<RootStackParamList>;
@@ -45,7 +45,7 @@ const normalizeWalk = (item: WalkRecordDto, routeParams: RouteProps['params']) =
   const durationSec = item.duration ?? 0;
 
   return {
-    id: (item as any).id ?? item.walk_id ?? item.walkId,
+    id: item.id ?? item.walk_id ?? item.walkId,
     petId: routeParams.petId,
     petName: routeParams.petName,
     petImage: routeParams.petImage,
@@ -55,7 +55,7 @@ const normalizeWalk = (item: WalkRecordDto, routeParams: RouteProps['params']) =
     distanceKm,
     durationSec,
     startTime: formatClock(startIso),
-    endTime: formatClock(endIso),
+    endTime: formatClock(endIso ?? undefined),
     pathCoordinates: item.path_coordinates ?? item.pathCoordinates ?? [],
   };
 };
@@ -78,7 +78,11 @@ export default function WalkPetHistoryScreen() {
         limit: 100,
         offset: 0,
       });
-      setRecords((response.items || []).map((item) => normalizeWalk(item, route.params)));
+      setRecords(
+        (response.items || [])
+          .filter(isCompletedWalkRecord)
+          .map((item) => normalizeWalk(item, route.params))
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : '산책 기록을 불러오지 못했습니다.';
       setErrorMessage(message);

@@ -138,7 +138,15 @@ const HealthCheckInputScreen = () => {
   return (
     <View style={styles.screen}>
       {/* NavBar */}
-      <View style={styles.navBar}>
+      <View
+        style={[
+          styles.navBar,
+          {
+            height: 56 + insets.top,
+            paddingTop: insets.top,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
           <Image
             source={require('../assets/icon_navBack.png')}
@@ -334,7 +342,12 @@ const HealthCheckInputScreen = () => {
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={[styles.bottomBtns, { paddingBottom: Math.max(insets.bottom, 16) }]}>
+      <View
+        style={[
+          styles.bottomBtns,
+          { paddingBottom: Math.max(insets.bottom, 16) + 12 },
+        ]}
+      >
         <TouchableOpacity
           style={styles.cancelBtn}
           onPress={() => navigation.goBack()}

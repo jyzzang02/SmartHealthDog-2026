@@ -10,6 +10,7 @@ const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 export type WalkCoordinate = [number, number];
 
 export interface WalkRecordDto {
+  id?: number;
   walk_id?: number;
   walkId?: number;
   pet_id?: number;
@@ -22,9 +23,9 @@ export interface WalkRecordDto {
   };
   start_time?: string;
   startTime?: string;
-  end_time?: string;
-  endTime?: string;
-  duration?: number;
+  end_time?: string | null;
+  endTime?: string | null;
+  duration?: number | null;
   distance?: number;
   path_coordinates?: WalkCoordinate[];
   pathCoordinates?: WalkCoordinate[];
@@ -45,11 +46,19 @@ export interface PetWalkListResponse {
   };
 }
 
-export interface CreateWalkRequest {
+export const isCompletedWalkRecord = (walk: WalkRecordDto): boolean => {
+  const endTime = walk.end_time ?? walk.endTime;
+  return typeof endTime === 'string' && endTime.trim().length > 0;
+};
+
+export interface StartWalkRequest {
   startTime: string;
-  endTime: string;
-  distanceKm: number;
-  pathCoordinates?: WalkCoordinate[];
+}
+
+export interface EndWalkRequest {
+  end_time: string;
+  distance: number;
+  path_coordinates: WalkCoordinate[];
 }
 
 export interface WeeklyComparisonResponse {
@@ -163,7 +172,65 @@ const throwHttpError = async (response: Response, fallback: string) => {
   throw new Error(message);
 };
 
-export const createPetWalk = async (petId: number, payload: CreateWalkRequest): Promise<void> => {
+const extractWalkId = (data: any, location: string | null): number | null => {
+  const rawId =
+    data?.walkId ??
+    data?.walk_id ??
+    data?.id ??
+    data?.walk?.walkId ??
+    data?.walk?.walk_id ??
+    data?.walk?.id;
+  const numericId = Number(rawId);
+
+  if (Number.isFinite(numericId) && numericId > 0) {
+    return numericId;
+  }
+
+  const matched = location?.match(/\/walks\/(\d+)(?:\/|$)/i);
+  const locationId = Number(matched?.[1]);
+  return Number.isFinite(locationId) && locationId > 0 ? locationId : null;
+};
+
+export const findActivePetWalkId = async (
+  petId: number,
+  startedAt?: string
+): Promise<number | null> => {
+  const response = await getPetWalks(petId, {
+    sortBy: 'date_desc',
+    limit: 20,
+    offset: 0,
+  });
+  const activeWalks = (response.items || []).filter((walk) => {
+    const endTime = walk.end_time ?? walk.endTime;
+    return endTime == null;
+  });
+
+  if (activeWalks.length === 0) {
+    return null;
+  }
+
+  const targetStartedAt = startedAt ? Date.parse(startedAt) : Number.NaN;
+  const sorted = [...activeWalks].sort((a, b) => {
+    if (Number.isNaN(targetStartedAt)) return 0;
+    const aStartedAt = Date.parse(a.start_time ?? a.startTime ?? '');
+    const bStartedAt = Date.parse(b.start_time ?? b.startTime ?? '');
+    const aDifference = Number.isNaN(aStartedAt)
+      ? Number.POSITIVE_INFINITY
+      : Math.abs(aStartedAt - targetStartedAt);
+    const bDifference = Number.isNaN(bStartedAt)
+      ? Number.POSITIVE_INFINITY
+      : Math.abs(bStartedAt - targetStartedAt);
+    return aDifference - bDifference;
+  });
+  const walkId = sorted[0]?.id ?? sorted[0]?.walk_id ?? sorted[0]?.walkId;
+  const numericId = Number(walkId);
+  return Number.isFinite(numericId) && numericId > 0 ? numericId : null;
+};
+
+export const startPetWalk = async (
+  petId: number,
+  payload: StartWalkRequest
+): Promise<number> => {
   const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${petId}/walks`, {
     method: 'POST',
     headers: {
@@ -172,9 +239,46 @@ export const createPetWalk = async (petId: number, payload: CreateWalkRequest): 
     body: JSON.stringify(payload),
   });
 
-  if (response.status !== 201) {
-    await throwHttpError(response, '산책 기록 생성에 실패했습니다.');
+  if (!response.ok) {
+    await throwHttpError(response, '산책 시작에 실패했습니다.');
   }
+
+  const data = await parseJsonSafe(response);
+  const walkId = extractWalkId(data, response.headers.get('Location'));
+  if (walkId) {
+    return walkId;
+  }
+
+  const fallbackWalkId = await findActivePetWalkId(petId, payload.startTime);
+  if (!fallbackWalkId) {
+    throw new Error('시작된 산책 기록 ID를 확인하지 못했습니다.');
+  }
+
+  return fallbackWalkId;
+};
+
+export const endPetWalk = async (
+  petId: number,
+  walkId: number,
+  payload: EndWalkRequest
+): Promise<WalkRecordDto> => {
+  const response = await authorizedFetch(
+    `${API_BASE_URL}/api/pets/${petId}/walks/${walkId}/end`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    }
+  );
+
+  if (!response.ok) {
+    await throwHttpError(response, '산책 종료에 실패했습니다.');
+  }
+
+  const data = await parseJsonSafe(response);
+  return (data?.walk || data || {}) as WalkRecordDto;
 };
 
 export const getPetWalks = async (

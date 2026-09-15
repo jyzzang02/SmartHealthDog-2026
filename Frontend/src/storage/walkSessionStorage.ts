@@ -10,6 +10,7 @@ export interface WalkLocation {
 export interface ActiveWalkSession {
   version: 1;
   petId: number;
+  walkId?: number | null;
   timer: WalkTimerState;
   distanceKm: number;
   pathCoordinates: WalkCoordinate[];
@@ -56,6 +57,11 @@ const parseSession = (value: unknown): ActiveWalkSession | null => {
   if (
     session.version !== 1 ||
     !isFiniteNumber(session.petId) ||
+    !(
+      session.walkId === undefined ||
+      session.walkId === null ||
+      isFiniteNumber(session.walkId)
+    ) ||
     !isTimer(session.timer) ||
     !isFiniteNumber(session.distanceKm) ||
     !Array.isArray(session.pathCoordinates) ||

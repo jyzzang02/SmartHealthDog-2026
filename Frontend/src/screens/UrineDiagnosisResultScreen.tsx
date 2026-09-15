@@ -1,6 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   BackHandler,
   Image,
@@ -20,6 +19,7 @@ import {
   getPetSubmissions,
   SubmissionSummary,
 } from '../api/diagnosis';
+import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
 
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROCESSING = 'PROCESSING';
@@ -80,7 +80,11 @@ const getSubmissionId = (submission: SubmissionSummary): string => {
   return submission.id ?? submission.submissionId ?? '';
 };
 
-const getSubmissionTime = (submission: SubmissionSummary): number => {
+const getSubmissionTime = (submission?: SubmissionSummary | null): number => {
+  if (!submission) {
+    return 0;
+  }
+
   const value =
     submission.submittedAt ??
     submission.submitted_at ??
@@ -321,14 +325,6 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => clearTimeout(timer);
   }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
 
-  const resultText = useMemo(() => {
-    if (!result) {
-      return '';
-    }
-
-    return JSON.stringify(result, null, 2);
-  }, [result]);
-
   // 결과 데이터 파싱 - 소변 검사 결과
   const parsedResults = useMemo(() => {
     if (!result || typeof result !== 'object') {
@@ -354,21 +350,13 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const renderAnalyzingScreen = () => {
     return (
-      <View style={styles.analyzingContainer}>
-        <Text style={styles.analyzingTitle}>결과 분석중..</Text>
-
-        <View style={styles.progressWrapper}>
-          <View style={styles.progressBase} />
-          <View style={styles.progressArc} />
-          <Image source={dogImage} style={styles.dogImage} />
-        </View>
-
-        <Text style={styles.waitText}>대기시간이 너무 길까요?</Text>
-
-        <TouchableOpacity style={styles.homeButton} onPress={goHome}>
-          <Text style={styles.homeButtonText}>홈으로</Text>
-        </TouchableOpacity>
-      </View>
+      <DiagnosisAnalysisProgress
+        imageSource={dogImage}
+        startedAtMs={getSubmissionTime(submission) || undefined}
+        status={status}
+        onRefresh={loadResult}
+        onGoHome={goHome}
+      />
     );
   };
 
@@ -452,21 +440,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   };
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0081D5" />
-          <Text style={styles.loadingText}>진단 상태를 확인 중입니다.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (isProcessingStatus(status)) {
+  if (isProcessingStatus(status) || (isLoading && !submission && !result && !message)) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -504,67 +478,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
 
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 15,
-    color: '#3C4144',
-  },
-
-  analyzingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 110,
-    backgroundColor: '#FFFFFF',
-  },
-  analyzingTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111111',
-    marginBottom: 42,
-  },
-  progressWrapper: {
-    width: 210,
-    height: 210,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 72,
-  },
-  progressBase: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 10,
-    borderColor: '#C8E3FF',
-  },
-  progressArc: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 10,
-    borderTopColor: '#118AF5',
-    borderRightColor: '#118AF5',
-    borderBottomColor: 'transparent',
-    borderLeftColor: 'transparent',
-    transform: [{ rotate: '38deg' }],
-  },
-  dogImage: {
-    width: 105,
-    height: 105,
-    resizeMode: 'contain',
-  },
-  waitText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111111',
-    marginBottom: 28,
-  },
   homeButton: {
     width: 150,
     height: 48,

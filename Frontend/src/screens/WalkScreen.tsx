@@ -15,7 +15,12 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getMyThisWeekWalks, getPetWalks, WalkRecordDto } from '../api/walks';
+import {
+  getMyThisWeekWalks,
+  getPetWalks,
+  isCompletedWalkRecord,
+  WalkRecordDto,
+} from '../api/walks';
 import { resolveImageUri } from '../utils/imageUri';
 import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
 
@@ -40,7 +45,7 @@ const normalizeWalk = (
   const itemPetIdRaw = item.pet_id ?? item.petId ?? item.pet?.id ?? petOverride?.id ?? 0;
   const itemPetId = Number(itemPetIdRaw) || 0;
   const pet = petOverride ?? petList.find((p) => p.id === itemPetId);
-  const walkId = (item as any).id ?? item.walk_id ?? item.walkId;
+  const walkId = item.id ?? item.walk_id ?? item.walkId;
   const startTimeIso = item.start_time ?? item.startTime ?? '';
   const endTimeIso = item.end_time ?? item.endTime ?? '';
   const durationSec = item.duration ?? 0;
@@ -138,7 +143,9 @@ export default function WalkScreen() {
       try {
         const thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
         walkSource = thisWeekWalks;
-        merged = thisWeekWalks.map((item) => normalizeWalk(item, petList));
+        merged = thisWeekWalks
+          .filter(isCompletedWalkRecord)
+          .map((item) => normalizeWalk(item, petList));
       } catch {
         const settled = await Promise.allSettled(
           petList.map(async (pet) => {
@@ -155,7 +162,9 @@ export default function WalkScreen() {
         walkSource = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value.items : [])) as WalkRecordDto[];
         merged = settled.flatMap((result) =>
           result.status === 'fulfilled'
-            ? result.value.items.map((item) => normalizeWalk(item, petList, result.value.pet))
+            ? result.value.items
+                .filter(isCompletedWalkRecord)
+                .map((item) => normalizeWalk(item, petList, result.value.pet))
             : []
         );
       }

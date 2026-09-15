@@ -1,4 +1,5 @@
 import {
+  completeWalkTimer,
   createWalkTimer,
   getElapsedSeconds,
   pauseWalkTimer,
@@ -24,5 +25,17 @@ describe('walkTimer', () => {
 
     const resumed = resumeWalkTimer(paused, startedAt + 70_000);
     expect(getElapsedSeconds(resumed, startedAt + 75_000)).toBe(15);
+  });
+
+  it('freezes the completion timestamp and elapsed time at the stop moment', () => {
+    const startedAt = Date.parse('2026-09-15T13:57:00.000Z');
+    const completed = completeWalkTimer(
+      createWalkTimer(startedAt),
+      startedAt + 65_000
+    );
+
+    expect(completed.elapsedSeconds).toBe(65);
+    expect(completed.endedAtMs).toBe(startedAt + 65_000);
+    expect(getElapsedSeconds(completed.timer, startedAt + 5 * 60_000)).toBe(65);
   });
 });

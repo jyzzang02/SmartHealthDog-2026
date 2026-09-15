@@ -5,6 +5,12 @@ export interface WalkTimerState {
   isPaused: boolean;
 }
 
+export interface CompletedWalkTimer {
+  timer: WalkTimerState;
+  elapsedSeconds: number;
+  endedAtMs: number;
+}
+
 export const createWalkTimer = (startedAtMs: number): WalkTimerState => ({
   startedAtMs,
   accumulatedActiveMs: 0,
@@ -48,5 +54,19 @@ export const resumeWalkTimer = (
     ...timer,
     activeSinceMs: nowMs,
     isPaused: false,
+  };
+};
+
+export const completeWalkTimer = (
+  timer: WalkTimerState,
+  nowMs: number
+): CompletedWalkTimer => {
+  const completedTimer = pauseWalkTimer(timer, nowMs);
+  const elapsedSeconds = getElapsedSeconds(completedTimer, nowMs);
+
+  return {
+    timer: completedTimer,
+    elapsedSeconds,
+    endedAtMs: completedTimer.startedAtMs + elapsedSeconds * 1000,
   };
 };

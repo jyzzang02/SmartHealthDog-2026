@@ -123,7 +123,7 @@ export default function WalkLogDetailScreen() {
 
     const date = formatDateFromIso(startIso) || record.date;
     const startTime = formatClockFromIso(startIso) || record.startTime || '00:00';
-    const endTime = formatClockFromIso(endIso) || record.endTime || addDurationToTime(startTime, record.duration);
+    const endTime = formatClockFromIso(endIso ?? undefined) || record.endTime || addDurationToTime(startTime, record.duration);
 
     return {
       date,

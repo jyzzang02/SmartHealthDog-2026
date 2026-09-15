@@ -364,5 +364,5 @@ const styles = StyleSheet.create({
   deleteText: { color: "#EF5F5F", fontSize: 16, fontWeight: "500" },
   saveText: { color: "#fff", fontSize: 16, fontWeight: "500" },
   errorText: { fontSize: 12, color: "#EF5F5F", marginTop: 8 },
-  bottomSpacer: { height: 60 },
+  bottomSpacer: { height: 100 },
 });
