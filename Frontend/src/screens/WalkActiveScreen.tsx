@@ -12,6 +12,8 @@ import {
   PermissionsAndroid,
   Alert,
   AppState,
+  DeviceEventEmitter,
+  NativeModules,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -40,6 +42,21 @@ import {
 
 type RouteProps = RouteProp<RootStackParamList, 'WalkActive'>;
 type NavigationProps = NativeStackNavigationProp<RootStackParamList>;
+
+type CompassHeadingModule = {
+  start: () => void;
+  stop: () => void;
+};
+
+const compassHeadingModule = NativeModules.SmartHealthDogCompass as
+  | CompassHeadingModule
+  | undefined;
+
+const normalizeHeading = (value: unknown): number | null => {
+  const heading = Number(value);
+  if (!Number.isFinite(heading) || heading < 0) return null;
+  return heading % 360;
+};
 
 interface CompletedWalkSnapshot {
   startTime: string;
@@ -75,6 +92,9 @@ const formatClock = (date: Date) => {
 
 const formatDurationMinutes = (seconds: number) => `${Math.round(seconds / 60)}분`;
 const toRad = (deg: number) => (deg * Math.PI) / 180;
+const MAX_LOCATION_ACCURACY_METERS = 25;
+const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
+const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
 
 const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const R = 6371;
@@ -126,6 +146,8 @@ export default function WalkActiveScreen() {
   const isFinishingRef = useRef(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const webViewRef = useRef<WebView>(null);
+  const headingRef = useRef<number | null>(null);
+  const lastAcceptedLocationAtMsRef = useRef<number | null>(null);
 
   const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
@@ -208,6 +230,7 @@ export default function WalkActiveScreen() {
           initialCoordRef.current = savedSession.initialCoord;
           currentCoordRef.current = savedSession.currentCoord;
           lastCoordRef.current = savedSession.lastCoord;
+          lastAcceptedLocationAtMsRef.current = savedSession.updatedAtMs;
           hasInitialCoordRef.current = savedSession.initialCoord !== null;
           setInitialCoord(savedSession.initialCoord);
           setCurrentCoord(savedSession.currentCoord);
@@ -282,9 +305,92 @@ export default function WalkActiveScreen() {
     return () => loop.stop();
   }, [badgeAnim]);
 
-  const recordLocation = useCallback((pos: GeoPosition) => {
-    const { latitude, longitude } = pos.coords;
+  useEffect(() => {
+    if (!isSessionReady || Platform.OS !== 'android' || !compassHeadingModule) return;
+
+    const subscription = DeviceEventEmitter.addListener(
+      'smartHealthDogCompassHeading',
+      (event: { heading?: unknown }) => {
+        const heading = normalizeHeading(event?.heading);
+        if (heading === null) return;
+
+        headingRef.current = heading;
+        webViewRef.current?.postMessage(
+          JSON.stringify({ type: 'HEADING_UPDATE', heading })
+        );
+      }
+    );
+
+    compassHeadingModule.start();
+    return () => {
+      subscription.remove();
+      compassHeadingModule.stop();
+    };
+  }, [isSessionReady]);
+
+  const showInitialLocationPreview = useCallback((pos: GeoPosition) => {
+    const { accuracy, latitude, longitude } = pos.coords;
+    if (typeof accuracy === 'number' && accuracy > 150) return;
+
     const current = { lat: latitude, lng: longitude };
+    const gpsHeading = normalizeHeading(pos.coords.heading);
+    if (headingRef.current === null && gpsHeading !== null) {
+      headingRef.current = gpsHeading;
+    }
+
+    if (!hasInitialCoordRef.current) {
+      hasInitialCoordRef.current = true;
+      initialCoordRef.current = current;
+      setInitialCoord(current);
+    }
+
+    currentCoordRef.current = current;
+    setCurrentCoord(current);
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: 'LOCATION_UPDATE',
+        coord: current,
+        path: [],
+        heading: headingRef.current,
+        forceCenter: true,
+      })
+    );
+  }, []);
+
+  const recordLocation = useCallback((pos: GeoPosition) => {
+    const { accuracy, latitude, longitude } = pos.coords;
+    if (typeof accuracy === 'number' && accuracy > MAX_LOCATION_ACCURACY_METERS) {
+      return;
+    }
+
+    const current = { lat: latitude, lng: longitude };
+    const recordedAtMs = Number.isFinite(pos.timestamp) ? pos.timestamp : Date.now();
+    const previous = lastCoordRef.current;
+
+    if (previous) {
+      const movedDistanceKm = haversine(previous, current);
+      if (movedDistanceKm < MIN_ROUTE_POINT_DISTANCE_KM) {
+        return;
+      }
+
+      const previousRecordedAtMs = lastAcceptedLocationAtMsRef.current;
+      if (previousRecordedAtMs !== null) {
+        const secondsSincePreviousPoint = Math.max(
+          (recordedAtMs - previousRecordedAtMs) / 1000,
+          1
+        );
+        const speedMetersPerSecond = (movedDistanceKm * 1000) / secondsSincePreviousPoint;
+        if (speedMetersPerSecond > MAX_WALK_SPEED_METERS_PER_SECOND) {
+          return;
+        }
+      }
+    }
+
+    lastAcceptedLocationAtMsRef.current = recordedAtMs;
+    const gpsHeading = normalizeHeading(pos.coords.heading);
+    if (headingRef.current === null && gpsHeading !== null) {
+      headingRef.current = gpsHeading;
+    }
 
     if (!hasInitialCoordRef.current) {
       hasInitialCoordRef.current = true;
@@ -306,10 +412,11 @@ export default function WalkActiveScreen() {
         type: 'LOCATION_UPDATE',
         coord: current,
         path: pathCoordinatesRef.current,
+        heading: headingRef.current,
+        forceCenter: previous === null,
       })
     );
 
-    const previous = lastCoordRef.current;
     if (previous) {
       distanceKmRef.current += haversine(previous, current);
       setDistanceKm(distanceKmRef.current);
@@ -340,12 +447,23 @@ export default function WalkActiveScreen() {
       const ok = await requestPermission();
       if (!ok || !isActive) return;
 
+      Geolocation.getCurrentPosition(showInitialLocationPreview, () => {}, {
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 60_000,
+      });
+      Geolocation.getCurrentPosition(recordLocation, () => {}, {
+        enableHighAccuracy: true,
+        timeout: 15_000,
+        maximumAge: 5_000,
+      });
+
       watchIdRef.current = Geolocation.watchPosition(
         (pos: GeoPosition) => {
           if (isActive) recordLocation(pos);
         },
         () => {},
-        { enableHighAccuracy: true, distanceFilter: 1, interval: 2000, fastestInterval: 1000 }
+        { enableHighAccuracy: true, distanceFilter: 5, interval: 2000, fastestInterval: 1000 }
       );
     };
 
@@ -358,7 +476,7 @@ export default function WalkActiveScreen() {
         watchIdRef.current = null;
       }
     };
-  }, [isSessionReady, recordLocation]);
+  }, [isSessionReady, recordLocation, showInitialLocationPreview]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -486,23 +604,43 @@ export default function WalkActiveScreen() {
           <style>
             html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
             .current-marker {
-              width: 22px;
-              height: 22px;
-              border-radius: 50%;
-              background: #0081D5;
-              border: 4px solid #FFFFFF;
-              box-shadow: 0 2px 10px rgba(0, 129, 213, 0.55);
+              --heading: 0deg;
+              width: 46px;
+              height: 46px;
               position: relative;
             }
-            .current-marker:after {
-              content: '';
+            .marker-accuracy {
               position: absolute;
-              left: -10px;
-              top: -10px;
-              width: 34px;
-              height: 34px;
+              inset: 2px;
               border-radius: 50%;
+              background: rgba(0, 129, 213, 0.16);
               border: 2px solid rgba(0, 129, 213, 0.35);
+            }
+            .direction-arrow {
+              position: absolute;
+              left: 7px;
+              top: 2px;
+              width: 32px;
+              height: 42px;
+              transform: rotate(var(--heading));
+              transform-origin: 50% 50%;
+              filter: drop-shadow(0 2px 3px rgba(0, 67, 126, 0.35));
+            }
+            .direction-arrow path {
+              fill: #0081D5;
+              stroke: #FFFFFF;
+              stroke-width: 2;
+              stroke-linejoin: round;
+            }
+            .marker-dot {
+              position: absolute;
+              left: 16px;
+              top: 16px;
+              width: 14px;
+              height: 14px;
+              border-radius: 50%;
+              background: #FFFFFF;
+              box-shadow: 0 1px 3px rgba(0, 67, 126, 0.3);
             }
           </style>
           <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false"></script>
@@ -513,6 +651,7 @@ export default function WalkActiveScreen() {
             (function() {
               var map;
               var marker;
+              var markerElement;
               var polyline;
               var hasCentered = false;
 
@@ -522,11 +661,19 @@ export default function WalkActiveScreen() {
 
               function ensureMarker(position) {
                 if (!marker) {
+                  markerElement = document.createElement('div');
+                  markerElement.className = 'current-marker';
+                  markerElement.innerHTML =
+                    '<div class="marker-accuracy"></div>' +
+                    '<svg class="direction-arrow" viewBox="0 0 32 42" aria-hidden="true">' +
+                    '<path d="M16 1 L29 34 L16 29 L3 34 Z"></path>' +
+                    '</svg>' +
+                    '<div class="marker-dot"></div>';
                   marker = new kakao.maps.CustomOverlay({
                     position: position,
                     yAnchor: 0.5,
                     xAnchor: 0.5,
-                    content: '<div class="current-marker"></div>'
+                    content: markerElement
                   });
                   marker.setMap(map);
                   return;
@@ -534,10 +681,16 @@ export default function WalkActiveScreen() {
                 marker.setPosition(position);
               }
 
+              function updateHeading(heading) {
+                if (!markerElement || typeof heading !== 'number' || !isFinite(heading)) return;
+                markerElement.style.setProperty('--heading', (heading % 360) + 'deg');
+              }
+
               function updateLocation(payload) {
                 if (!map || !payload || !payload.coord) return;
                 var position = toLatLng(payload.coord);
                 ensureMarker(position);
+                updateHeading(payload.heading);
 
                 var linePath = (payload.path || []).map(function(point) {
                   return new kakao.maps.LatLng(point[0], point[1]);
@@ -556,7 +709,7 @@ export default function WalkActiveScreen() {
                   polyline.setPath(linePath);
                 }
 
-                if (!hasCentered || linePath.length % 5 === 0) {
+                if (payload.forceCenter || !hasCentered || linePath.length % 5 === 0) {
                   map.setCenter(position);
                   hasCentered = true;
                 }
@@ -567,13 +720,26 @@ export default function WalkActiveScreen() {
                   center: new kakao.maps.LatLng(${center.lat}, ${center.lng}),
                   level: 4
                 });
+                map.setDraggable(true);
+                map.setZoomable(true);
               });
 
+              function handleMessage(payload) {
+                if (!payload) return;
+                if (payload.type === 'HEADING_UPDATE') {
+                  updateHeading(payload.heading);
+                  return;
+                }
+                if (payload.type === 'LOCATION_UPDATE') {
+                  updateLocation(payload);
+                }
+              }
+
               document.addEventListener('message', function(event) {
-                try { updateLocation(JSON.parse(event.data)); } catch (e) {}
+                try { handleMessage(JSON.parse(event.data)); } catch (e) {}
               });
               window.addEventListener('message', function(event) {
-                try { updateLocation(JSON.parse(event.data)); } catch (e) {}
+                try { handleMessage(JSON.parse(event.data)); } catch (e) {}
               });
             })();
           </script>
@@ -588,6 +754,7 @@ export default function WalkActiveScreen() {
         type: 'LOCATION_UPDATE',
         coord: currentCoord,
         path: pathCoordinatesRef.current,
+        heading: headingRef.current,
       })
     );
   };
