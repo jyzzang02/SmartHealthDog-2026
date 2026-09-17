@@ -18,6 +18,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               add(CompassHeadingPackage())
               add(DiagnosisImageCropperPackage())
+              add(WalkLocationTrackingPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

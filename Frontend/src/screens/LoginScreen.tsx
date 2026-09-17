@@ -250,26 +250,33 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
               <Text style={styles.kakaoCloseButtonText}>닫기</Text>
             </TouchableOpacity>
           </View>
-          {kakaoAuthorizeUrl && (
-            <WebView
-              source={{ uri: kakaoAuthorizeUrl }}
-              onShouldStartLoadWithRequest={({ url }) => {
-                if (!isKakaoCallbackUrl(url)) return true;
+          <KeyboardAvoidingView
+            style={styles.kakaoWebViewContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            {kakaoAuthorizeUrl && (
+              <WebView
+                style={styles.kakaoWebView}
+                source={{ uri: kakaoAuthorizeUrl }}
+                nestedScrollEnabled
+                onShouldStartLoadWithRequest={({ url }) => {
+                  if (!isKakaoCallbackUrl(url)) return true;
 
-                handleKakaoNavigation(url).catch(() => {
-                  setIsKakaoLoginVisible(false);
-                  Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
-                });
-                return false;
-              }}
-              onError={() => {
-                if (!hasHandledKakaoCallback.current) {
-                  setIsKakaoLoginVisible(false);
-                  Alert.alert('카카오 로그인 실패', '로그인 화면을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
-                }
-              }}
-            />
-          )}
+                  handleKakaoNavigation(url).catch(() => {
+                    setIsKakaoLoginVisible(false);
+                    Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+                  });
+                  return false;
+                }}
+                onError={() => {
+                  if (!hasHandledKakaoCallback.current) {
+                    setIsKakaoLoginVisible(false);
+                    Alert.alert('카카오 로그인 실패', '로그인 화면을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+                  }
+                }}
+              />
+            )}
+          </KeyboardAvoidingView>
           {isKakaoSubmitting && (
             <View style={styles.kakaoLoadingOverlay}>
               <ActivityIndicator size="large" color="#0081D5" />
@@ -430,6 +437,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomWidth: 1,
     borderBottomColor: '#EAECEE',
+  },
+  kakaoWebViewContainer: {
+    flex: 1,
+  },
+  kakaoWebView: {
+    flex: 1,
   },
   kakaoCloseButton: {
     paddingVertical: 8,

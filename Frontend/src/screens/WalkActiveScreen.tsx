@@ -48,8 +48,27 @@ type CompassHeadingModule = {
   stop: () => void;
 };
 
+type BackgroundWalkLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: number;
+};
+
+type WalkLocationTrackingModule = {
+  start: () => Promise<void>;
+  stop: () => Promise<void>;
+  clearLocations: () => Promise<void>;
+  getLocations: () => Promise<BackgroundWalkLocation[]>;
+  isIgnoringBatteryOptimizations: () => Promise<boolean>;
+  requestIgnoreBatteryOptimizations: () => Promise<void>;
+};
+
 const compassHeadingModule = NativeModules.SmartHealthDogCompass as
   | CompassHeadingModule
+  | undefined;
+const walkLocationTrackingModule = NativeModules.WalkLocationTracking as
+  | WalkLocationTrackingModule
   | undefined;
 
 const normalizeHeading = (value: unknown): number | null => {
@@ -95,6 +114,7 @@ const toRad = (deg: number) => (deg * Math.PI) / 180;
 const MAX_LOCATION_ACCURACY_METERS = 25;
 const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
 const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
+const MAX_ROUTE_POINT_GAP_MS = 30_000;
 
 const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
   const R = 6371;
@@ -148,6 +168,8 @@ export default function WalkActiveScreen() {
   const webViewRef = useRef<WebView>(null);
   const headingRef = useRef<number | null>(null);
   const lastAcceptedLocationAtMsRef = useRef<number | null>(null);
+  const shouldResetBackgroundLocationsRef = useRef(false);
+  const isStoppingRef = useRef(false);
 
   const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
@@ -210,6 +232,7 @@ export default function WalkActiveScreen() {
         if (!isMounted) return;
 
         if (savedSession) {
+          shouldResetBackgroundLocationsRef.current = false;
           const startedAt = new Date(savedSession.timer.startedAtMs).toISOString();
           const walkId =
             savedSession.walkId ??
@@ -241,6 +264,7 @@ export default function WalkActiveScreen() {
             updatedAtMs: Date.now(),
           });
         } else {
+          shouldResetBackgroundLocationsRef.current = true;
           const now = Date.now();
           const timer = createWalkTimer(now);
           const walkId = await startPetWalk(petId, {
@@ -375,6 +399,15 @@ export default function WalkActiveScreen() {
 
       const previousRecordedAtMs = lastAcceptedLocationAtMsRef.current;
       if (previousRecordedAtMs !== null) {
+        if (recordedAtMs - previousRecordedAtMs > MAX_ROUTE_POINT_GAP_MS) {
+          lastAcceptedLocationAtMsRef.current = recordedAtMs;
+          lastCoordRef.current = current;
+          currentCoordRef.current = current;
+          setCurrentCoord(current);
+          queueSessionSave(true);
+          return;
+        }
+
         const secondsSincePreviousPoint = Math.max(
           (recordedAtMs - previousRecordedAtMs) / 1000,
           1
@@ -425,6 +458,35 @@ export default function WalkActiveScreen() {
     queueSessionSave();
   }, [queueSessionSave]);
 
+  const mergeBackgroundLocations = useCallback(async () => {
+    if (Platform.OS !== 'android' || !walkLocationTrackingModule) return;
+
+    try {
+      const locations = await walkLocationTrackingModule.getLocations();
+      locations
+        .filter(
+          (location) =>
+            Number.isFinite(location.latitude) &&
+            Number.isFinite(location.longitude) &&
+            Number.isFinite(location.timestamp)
+        )
+        .sort((a, b) => a.timestamp - b.timestamp)
+        .forEach((location) => {
+          recordLocation({
+            coords: {
+              latitude: location.latitude,
+              longitude: location.longitude,
+              accuracy: location.accuracy,
+              heading: -1,
+            },
+            timestamp: location.timestamp,
+          } as GeoPosition);
+        });
+    } catch {
+      // The foreground service is supplemental; foreground tracking remains available.
+    }
+  }, [recordLocation]);
+
   useEffect(() => {
     if (!isSessionReady) return;
     let isActive = true;
@@ -438,7 +500,18 @@ export default function WalkActiveScreen() {
           buttonNegative: '취소',
           buttonPositive: '확인',
         });
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) return false;
+
+        if (
+          Number(Platform.Version) >= 33 &&
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        ) {
+          await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+          );
+        }
+
+        return true;
       }
       return true;
     };
@@ -446,6 +519,38 @@ export default function WalkActiveScreen() {
     const startWatch = async () => {
       const ok = await requestPermission();
       if (!ok || !isActive) return;
+
+      if (Platform.OS === 'android' && walkLocationTrackingModule) {
+        try {
+          if (shouldResetBackgroundLocationsRef.current) {
+            await walkLocationTrackingModule.clearLocations();
+          }
+          await walkLocationTrackingModule.start();
+
+          if (shouldResetBackgroundLocationsRef.current) {
+            const isBatteryExempt =
+              await walkLocationTrackingModule.isIgnoringBatteryOptimizations();
+            if (!isBatteryExempt && isActive) {
+              Alert.alert(
+                '배터리 설정 안내',
+                '화면을 끈 상태에서도 산책 경로를 정확히 기록하려면 배터리 사용량을 제한 없음으로 설정해 주세요.',
+                [
+                  { text: '나중에', style: 'cancel' },
+                  {
+                    text: '설정하기',
+                    onPress: () =>
+                      walkLocationTrackingModule
+                        ?.requestIgnoreBatteryOptimizations()
+                        .catch(() => undefined),
+                  },
+                ]
+              );
+            }
+          }
+        } catch {
+          // Keep the existing JS location watcher available if native tracking cannot start.
+        }
+      }
 
       Geolocation.getCurrentPosition(showInitialLocationPreview, () => {}, {
         enableHighAccuracy: false,
@@ -486,6 +591,7 @@ export default function WalkActiveScreen() {
 
       if (nextState === 'active' && previousState !== 'active') {
         syncElapsedTime();
+        mergeBackgroundLocations();
         Geolocation.getCurrentPosition(recordLocation, () => {}, {
           enableHighAccuracy: true,
           timeout: 15000,
@@ -500,7 +606,7 @@ export default function WalkActiveScreen() {
     });
 
     return () => subscription.remove();
-  }, [isSessionReady, queueSessionSave, recordLocation, syncElapsedTime]);
+  }, [isSessionReady, mergeBackgroundLocations, queueSessionSave, recordLocation, syncElapsedTime]);
 
   const handlePauseToggle = () => {
     if (!isSessionReady) return;
@@ -512,10 +618,22 @@ export default function WalkActiveScreen() {
     setIsPaused(timerStateRef.current.isPaused);
     setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
     queueSessionSave(true);
+
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      const operation = timerStateRef.current.isPaused
+        ? walkLocationTrackingModule.stop()
+        : walkLocationTrackingModule.start();
+      operation.catch(() => undefined);
+    }
   };
 
-  const handleStop = () => {
-    if (!isSessionReady) return;
+  const handleStop = async () => {
+    if (!isSessionReady || isStoppingRef.current) return;
+    isStoppingRef.current = true;
+    await mergeBackgroundLocations();
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      await walkLocationTrackingModule.stop().catch(() => undefined);
+    }
     const now = Date.now();
     const snapshot = createCompletedWalkSnapshot(now);
     setCompletedWalk(snapshot);
@@ -524,6 +642,7 @@ export default function WalkActiveScreen() {
     pauseTrackingRef.current = true;
     queueSessionSave(true);
     setShowConfirmModal(true);
+    isStoppingRef.current = false;
   };
 
   const handleConfirmNo = () => {
@@ -535,6 +654,9 @@ export default function WalkActiveScreen() {
     setIsPaused(false);
     pauseTrackingRef.current = false;
     queueSessionSave(true);
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      walkLocationTrackingModule.start().catch(() => undefined);
+    }
   };
 
   const handleConfirmYes = () => {
@@ -565,6 +687,7 @@ export default function WalkActiveScreen() {
       isFinishingRef.current = true;
       await persistQueueRef.current.catch(() => undefined);
       await clearActiveWalkSession().catch(() => undefined);
+      await walkLocationTrackingModule?.clearLocations().catch(() => undefined);
       navigation.goBack();
     } catch (error) {
       const message = error instanceof Error ? error.message : '산책 기록 저장에 실패했습니다.';
