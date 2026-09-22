@@ -15,6 +15,11 @@ import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import { RootStackParamList } from '../../App';
 import { deleteWalk, getWalkDetail, WalkCoordinate, WalkRecordDto } from '../api/walks';
+import {
+  clearWalkRouteSegmentStartIndices,
+  loadWalkRouteSegmentStartIndices,
+} from '../storage/walkSessionStorage';
+import { splitPathBySegmentStartIndices } from '../utils/walkLocation';
 
 type WalkLogDetailRouteProp = RouteProp<RootStackParamList, 'WalkLogDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -95,6 +100,7 @@ export default function WalkLogDetailScreen() {
   const { record } = route.params;
   const pulseAnim = useRef(new Animated.Value(0.6)).current;
   const [walkDetail, setWalkDetail] = useState<WalkRecordDto | null>(null);
+  const [pathSegmentStartIndices, setPathSegmentStartIndices] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
 
@@ -114,6 +120,21 @@ export default function WalkLogDetailScreen() {
   useEffect(() => {
     loadDetail();
   }, [loadDetail]);
+
+  useEffect(() => {
+    let isMounted = true;
+    setPathSegmentStartIndices([]);
+    if (!record.id) return () => {
+      isMounted = false;
+    };
+
+    loadWalkRouteSegmentStartIndices(record.id).then((indices) => {
+      if (isMounted) setPathSegmentStartIndices(indices);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [record.id]);
 
   const resolved = useMemo(() => {
     const startIso = walkDetail?.start_time ?? walkDetail?.startTime;
@@ -140,10 +161,15 @@ export default function WalkLogDetailScreen() {
     return normalizePathCoordinates(detailPath?.length ? detailPath : record.pathCoordinates);
   }, [record.pathCoordinates, walkDetail]);
 
+  const pathSegments = useMemo(
+    () => splitPathBySegmentStartIndices(pathPoints, pathSegmentStartIndices),
+    [pathPoints, pathSegmentStartIndices],
+  );
+
   const kakaoMapHtml = useMemo(() => {
     const fallbackCenter = { lat: 37.5665, lng: 126.9780 };
     const center = pathPoints[0] ?? fallbackCenter;
-    const serializedPath = JSON.stringify(pathPoints);
+    const serializedPathSegments = JSON.stringify(pathSegments);
 
     return `<!DOCTYPE html>
       <html>
@@ -159,7 +185,9 @@ export default function WalkLogDetailScreen() {
           <div id="map"></div>
           <script>
             (function() {
-              var path = ${serializedPath};
+              var pathSegments = ${serializedPathSegments};
+              var path = [].concat.apply([], pathSegments);
+
               kakao.maps.load(function() {
                 var map = new kakao.maps.Map(document.getElementById('map'), {
                   center: new kakao.maps.LatLng(${center.lat}, ${center.lng}),
@@ -170,24 +198,28 @@ export default function WalkLogDetailScreen() {
 
                 if (path.length > 0) {
                   var bounds = new kakao.maps.LatLngBounds();
-                  var linePath = path.map(function(point) {
+                  var allPositions = path.map(function(point) {
                     var latLng = new kakao.maps.LatLng(point.lat, point.lng);
                     bounds.extend(latLng);
                     return latLng;
                   });
 
-                  new kakao.maps.Polyline({
-                    map: map,
-                    path: linePath,
-                    strokeWeight: 5,
-                    strokeColor: '#0081D5',
-                    strokeOpacity: 0.9,
-                    strokeStyle: 'solid'
+                  pathSegments.forEach(function(segment) {
+                    new kakao.maps.Polyline({
+                      map: map,
+                      path: segment.map(function(point) {
+                        return new kakao.maps.LatLng(point.lat, point.lng);
+                      }),
+                      strokeWeight: 5,
+                      strokeColor: '#0081D5',
+                      strokeOpacity: 0.9,
+                      strokeStyle: 'solid'
+                    });
                   });
 
-                  new kakao.maps.Marker({ map: map, position: linePath[0] });
-                  if (linePath.length > 1) {
-                    new kakao.maps.Marker({ map: map, position: linePath[linePath.length - 1] });
+                  new kakao.maps.Marker({ map: map, position: allPositions[0] });
+                  if (allPositions.length > 1) {
+                    new kakao.maps.Marker({ map: map, position: allPositions[allPositions.length - 1] });
                     map.setBounds(bounds);
                   }
                 }
@@ -196,7 +228,7 @@ export default function WalkLogDetailScreen() {
           </script>
         </body>
       </html>`;
-  }, [pathPoints]);
+  }, [pathPoints, pathSegments]);
 
   const handleDelete = () => {
     const walkId = record.id;
@@ -214,6 +246,7 @@ export default function WalkLogDetailScreen() {
           setIsDeleting(true);
           try {
             await deleteWalk(walkId);
+            await clearWalkRouteSegmentStartIndices(walkId).catch(() => undefined);
             navigation.goBack();
           } catch (error) {
             const message = error instanceof Error ? error.message : '산책 기록을 삭제하지 못했습니다.';

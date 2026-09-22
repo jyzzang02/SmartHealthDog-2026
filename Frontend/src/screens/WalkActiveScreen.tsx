@@ -16,7 +16,12 @@ import {
   NativeModules,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import {
+  useNavigation,
+  usePreventRemove,
+  useRoute,
+  RouteProp,
+} from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
@@ -30,6 +35,7 @@ import {
   clearActiveWalkSession,
   loadActiveWalkSession,
   saveActiveWalkSession,
+  saveWalkRouteSegmentStartIndices,
 } from '../storage/walkSessionStorage';
 import type { ActiveWalkSession, WalkLocation } from '../storage/walkSessionStorage';
 import {
@@ -39,6 +45,10 @@ import {
   pauseWalkTimer,
   resumeWalkTimer,
 } from '../utils/walkTimer';
+import {
+  evaluateWalkLocationTransition,
+  splitPathBySegmentStartIndices,
+} from '../utils/walkLocation';
 
 type RouteProps = RouteProp<RootStackParamList, 'WalkActive'>;
 type NavigationProps = NativeStackNavigationProp<RootStackParamList>;
@@ -83,6 +93,7 @@ interface CompletedWalkSnapshot {
   elapsedSeconds: number;
   distanceKm: number;
   pathCoordinates: WalkCoordinate[];
+  pathSegmentStartIndices: number[];
 }
 
 const formatTime = (seconds: number) => {
@@ -110,24 +121,10 @@ const formatClock = (date: Date) => {
 };
 
 const formatDurationMinutes = (seconds: number) => `${Math.round(seconds / 60)}분`;
-const toRad = (deg: number) => (deg * Math.PI) / 180;
 const MAX_LOCATION_ACCURACY_METERS = 25;
 const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
 const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
-const MAX_ROUTE_POINT_GAP_MS = 30_000;
-
-const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-  const R = 6371;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLng / 2);
-  const h = sinDLat * sinDLat + sinDLng * sinDLng * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-  return R * c;
-};
+const MAX_DISTANCE_ACCUMULATION_GAP_MS = 5 * 60_000;
 
 export default function WalkActiveScreen() {
   const navigation = useNavigation<NavigationProps>();
@@ -148,6 +145,7 @@ export default function WalkActiveScreen() {
   const [currentCoord, setCurrentCoord] = useState<{ lat: number; lng: number } | null>(null);
   const [completedWalk, setCompletedWalk] = useState<CompletedWalkSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [canLeaveScreen, setCanLeaveScreen] = useState(false);
 
   const timerStateRef = useRef(createWalkTimer(startedAtMs));
   const walkIdRef = useRef<number | null>(null);
@@ -158,6 +156,8 @@ export default function WalkActiveScreen() {
   const pauseTrackingRef = useRef(false);
   const hasInitialCoordRef = useRef(false);
   const pathCoordinatesRef = useRef<WalkCoordinate[]>([]);
+  const pathSegmentStartIndicesRef = useRef<number[]>([]);
+  const shouldStartNewPathSegmentRef = useRef(false);
   const initialCoordRef = useRef<WalkLocation | null>(null);
   const currentCoordRef = useRef<WalkLocation | null>(null);
   const distanceKmRef = useRef(0);
@@ -168,6 +168,10 @@ export default function WalkActiveScreen() {
   const webViewRef = useRef<WebView>(null);
   const headingRef = useRef<number | null>(null);
   const lastAcceptedLocationAtMsRef = useRef<number | null>(null);
+  const lastProcessedLocationAtMsRef = useRef<number | null>(null);
+  const shouldBufferForegroundLocationsRef = useRef(true);
+  const pendingForegroundLocationsRef = useRef<GeoPosition[]>([]);
+  const backgroundMergePromiseRef = useRef<Promise<void> | null>(null);
   const shouldResetBackgroundLocationsRef = useRef(false);
   const isStoppingRef = useRef(false);
 
@@ -189,6 +193,7 @@ export default function WalkActiveScreen() {
       pathCoordinates: pathCoordinatesRef.current.map(
         (point) => [...point] as WalkCoordinate
       ),
+      pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
     };
   }, []);
 
@@ -205,9 +210,12 @@ export default function WalkActiveScreen() {
       timer: { ...timerStateRef.current },
       distanceKm: distanceKmRef.current,
       pathCoordinates: pathCoordinatesRef.current.map((point) => [...point] as WalkCoordinate),
+      pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
       initialCoord: initialCoordRef.current ? { ...initialCoordRef.current } : null,
       currentCoord: currentCoordRef.current ? { ...currentCoordRef.current } : null,
       lastCoord: lastCoordRef.current ? { ...lastCoordRef.current } : null,
+      lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
+      lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
       updatedAtMs: now,
     };
 
@@ -250,10 +258,22 @@ export default function WalkActiveScreen() {
           distanceKmRef.current = savedSession.distanceKm;
           setDistanceKm(savedSession.distanceKm);
           pathCoordinatesRef.current = savedSession.pathCoordinates.slice();
+          pathSegmentStartIndicesRef.current = (
+            savedSession.pathSegmentStartIndices ?? []
+          ).filter(
+            (index) => index > 0 && index < savedSession.pathCoordinates.length,
+          );
+          shouldStartNewPathSegmentRef.current = savedSession.timer.isPaused;
           initialCoordRef.current = savedSession.initialCoord;
           currentCoordRef.current = savedSession.currentCoord;
           lastCoordRef.current = savedSession.lastCoord;
-          lastAcceptedLocationAtMsRef.current = savedSession.updatedAtMs;
+          const restoredLocationAtMs =
+            savedSession.lastProcessedLocationAtMs ??
+            savedSession.lastAcceptedLocationAtMs ??
+            savedSession.updatedAtMs;
+          lastAcceptedLocationAtMsRef.current =
+            savedSession.lastAcceptedLocationAtMs ?? restoredLocationAtMs;
+          lastProcessedLocationAtMsRef.current = restoredLocationAtMs;
           hasInitialCoordRef.current = savedSession.initialCoord !== null;
           setInitialCoord(savedSession.initialCoord);
           setCurrentCoord(savedSession.currentCoord);
@@ -261,6 +281,8 @@ export default function WalkActiveScreen() {
           await saveActiveWalkSession({
             ...savedSession,
             walkId,
+            lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
+            lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
             updatedAtMs: Date.now(),
           });
         } else {
@@ -282,9 +304,12 @@ export default function WalkActiveScreen() {
             timer,
             distanceKm: 0,
             pathCoordinates: [],
+            pathSegmentStartIndices: [],
             initialCoord: null,
             currentCoord: null,
             lastCoord: null,
+            lastAcceptedLocationAtMs: null,
+            lastProcessedLocationAtMs: null,
             updatedAtMs: now,
           });
         }
@@ -355,6 +380,13 @@ export default function WalkActiveScreen() {
   const showInitialLocationPreview = useCallback((pos: GeoPosition) => {
     const { accuracy, latitude, longitude } = pos.coords;
     if (typeof accuracy === 'number' && accuracy > 150) return;
+    if (
+      Number.isFinite(pos.timestamp) &&
+      lastProcessedLocationAtMsRef.current !== null &&
+      pos.timestamp <= lastProcessedLocationAtMsRef.current
+    ) {
+      return;
+    }
 
     const current = { lat: latitude, lng: longitude };
     const gpsHeading = normalizeHeading(pos.coords.heading);
@@ -374,7 +406,10 @@ export default function WalkActiveScreen() {
       JSON.stringify({
         type: 'LOCATION_UPDATE',
         coord: current,
-        path: [],
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
         heading: headingRef.current,
         forceCenter: true,
       })
@@ -383,40 +418,41 @@ export default function WalkActiveScreen() {
 
   const recordLocation = useCallback((pos: GeoPosition) => {
     const { accuracy, latitude, longitude } = pos.coords;
-    if (typeof accuracy === 'number' && accuracy > MAX_LOCATION_ACCURACY_METERS) {
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      (typeof accuracy === 'number' && accuracy > MAX_LOCATION_ACCURACY_METERS)
+    ) {
       return;
     }
 
     const current = { lat: latitude, lng: longitude };
     const recordedAtMs = Number.isFinite(pos.timestamp) ? pos.timestamp : Date.now();
+    const lastProcessedAtMs = lastProcessedLocationAtMsRef.current;
+    if (lastProcessedAtMs !== null && recordedAtMs <= lastProcessedAtMs) {
+      return;
+    }
+    lastProcessedLocationAtMsRef.current = recordedAtMs;
+
     const previous = lastCoordRef.current;
+    const decision = evaluateWalkLocationTransition({
+      previous: previous
+        ? { latitude: previous.lat, longitude: previous.lng }
+        : null,
+      previousAtMs: lastAcceptedLocationAtMsRef.current,
+      current: { latitude, longitude },
+      currentAtMs: recordedAtMs,
+      minDistanceKm: MIN_ROUTE_POINT_DISTANCE_KM,
+      maxSpeedMetersPerSecond: MAX_WALK_SPEED_METERS_PER_SECOND,
+      maxGapMs: MAX_DISTANCE_ACCUMULATION_GAP_MS,
+    });
 
-    if (previous) {
-      const movedDistanceKm = haversine(previous, current);
-      if (movedDistanceKm < MIN_ROUTE_POINT_DISTANCE_KM) {
-        return;
-      }
-
-      const previousRecordedAtMs = lastAcceptedLocationAtMsRef.current;
-      if (previousRecordedAtMs !== null) {
-        if (recordedAtMs - previousRecordedAtMs > MAX_ROUTE_POINT_GAP_MS) {
-          lastAcceptedLocationAtMsRef.current = recordedAtMs;
-          lastCoordRef.current = current;
-          currentCoordRef.current = current;
-          setCurrentCoord(current);
-          queueSessionSave(true);
-          return;
-        }
-
-        const secondsSincePreviousPoint = Math.max(
-          (recordedAtMs - previousRecordedAtMs) / 1000,
-          1
-        );
-        const speedMetersPerSecond = (movedDistanceKm * 1000) / secondsSincePreviousPoint;
-        if (speedMetersPerSecond > MAX_WALK_SPEED_METERS_PER_SECOND) {
-          return;
-        }
-      }
+    if (decision.type === 'reject') {
+      return;
+    }
+    if (decision.type === 'stationary') {
+      lastAcceptedLocationAtMsRef.current = recordedAtMs;
+      return;
     }
 
     lastAcceptedLocationAtMsRef.current = recordedAtMs;
@@ -435,56 +471,117 @@ export default function WalkActiveScreen() {
 
     if (pauseTrackingRef.current) {
       lastCoordRef.current = current;
+      shouldStartNewPathSegmentRef.current = true;
       queueSessionSave();
       return;
     }
 
+    if (
+      pathCoordinatesRef.current.length > 0 &&
+      (decision.type === 'baseline' || shouldStartNewPathSegmentRef.current)
+    ) {
+      const segmentStartIndex = pathCoordinatesRef.current.length;
+      const previousSegmentStart =
+        pathSegmentStartIndicesRef.current[
+          pathSegmentStartIndicesRef.current.length - 1
+        ];
+      if (previousSegmentStart !== segmentStartIndex) {
+        pathSegmentStartIndicesRef.current.push(segmentStartIndex);
+      }
+    }
+    shouldStartNewPathSegmentRef.current = false;
     pathCoordinatesRef.current.push([latitude, longitude]);
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: 'LOCATION_UPDATE',
         coord: current,
-        path: pathCoordinatesRef.current,
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
         heading: headingRef.current,
         forceCenter: previous === null,
       })
     );
 
-    if (previous) {
-      distanceKmRef.current += haversine(previous, current);
+    if (decision.type === 'accumulate') {
+      distanceKmRef.current += decision.distanceKm;
       setDistanceKm(distanceKmRef.current);
     }
     lastCoordRef.current = current;
     queueSessionSave();
   }, [queueSessionSave]);
 
-  const mergeBackgroundLocations = useCallback(async () => {
-    if (Platform.OS !== 'android' || !walkLocationTrackingModule) return;
-
-    try {
-      const locations = await walkLocationTrackingModule.getLocations();
-      locations
-        .filter(
-          (location) =>
-            Number.isFinite(location.latitude) &&
-            Number.isFinite(location.longitude) &&
-            Number.isFinite(location.timestamp)
-        )
-        .sort((a, b) => a.timestamp - b.timestamp)
-        .forEach((location) => {
-          recordLocation({
-            coords: {
-              latitude: location.latitude,
-              longitude: location.longitude,
-              accuracy: location.accuracy,
-              heading: -1,
-            },
-            timestamp: location.timestamp,
-          } as GeoPosition);
-        });
-    } catch {
-      // The foreground service is supplemental; foreground tracking remains available.
+  const recordForegroundLocation = useCallback((position: GeoPosition) => {
+    if (shouldBufferForegroundLocationsRef.current) {
+      pendingForegroundLocationsRef.current.push(position);
+      return;
     }
+    recordLocation(position);
+  }, [recordLocation]);
+
+  const mergeBackgroundLocations = useCallback((): Promise<void> => {
+    if (Platform.OS !== 'android' || !walkLocationTrackingModule) {
+      if (appStateRef.current === 'active') {
+        pendingForegroundLocationsRef.current
+          .splice(0)
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .forEach(recordLocation);
+        shouldBufferForegroundLocationsRef.current = false;
+      }
+      return Promise.resolve();
+    }
+    if (backgroundMergePromiseRef.current) {
+      return backgroundMergePromiseRef.current;
+    }
+
+    const mergePromise = (async () => {
+      shouldBufferForegroundLocationsRef.current = true;
+      const nativeLocations: GeoPosition[] = [];
+      try {
+        const locations = await walkLocationTrackingModule.getLocations();
+        locations
+          .filter(
+            (location) =>
+              Number.isFinite(location.latitude) &&
+              Number.isFinite(location.longitude) &&
+              Number.isFinite(location.timestamp)
+          )
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .forEach((location) => {
+            nativeLocations.push({
+              coords: {
+                latitude: location.latitude,
+                longitude: location.longitude,
+                accuracy: location.accuracy,
+                heading: -1,
+              },
+              timestamp: location.timestamp,
+            } as GeoPosition);
+          });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      } catch {
+        // The foreground service is supplemental; foreground tracking remains available.
+      } finally {
+        const mergedLocations = [
+          ...nativeLocations,
+          ...pendingForegroundLocationsRef.current.splice(0),
+        ].sort((a, b) => a.timestamp - b.timestamp);
+        mergedLocations.forEach(recordLocation);
+        shouldBufferForegroundLocationsRef.current =
+          appStateRef.current !== 'active';
+      }
+    })();
+
+    backgroundMergePromiseRef.current = mergePromise;
+    mergePromise
+      .finally(() => {
+        if (backgroundMergePromiseRef.current === mergePromise) {
+          backgroundMergePromiseRef.current = null;
+        }
+      })
+      .catch(() => undefined);
+    return mergePromise;
   }, [recordLocation]);
 
   useEffect(() => {
@@ -520,35 +617,47 @@ export default function WalkActiveScreen() {
       const ok = await requestPermission();
       if (!ok || !isActive) return;
 
+      let nativeTrackingStarted = false;
       if (Platform.OS === 'android' && walkLocationTrackingModule) {
         try {
           if (shouldResetBackgroundLocationsRef.current) {
             await walkLocationTrackingModule.clearLocations();
           }
           await walkLocationTrackingModule.start();
+          nativeTrackingStarted = true;
+        } catch {
+          // Foreground location tracking remains available if native tracking cannot start.
+        }
+      }
 
-          if (shouldResetBackgroundLocationsRef.current) {
-            const isBatteryExempt =
-              await walkLocationTrackingModule.isIgnoringBatteryOptimizations();
-            if (!isBatteryExempt && isActive) {
-              Alert.alert(
-                '배터리 설정 안내',
-                '화면을 끈 상태에서도 산책 경로를 정확히 기록하려면 배터리 사용량을 제한 없음으로 설정해 주세요.',
-                [
-                  { text: '나중에', style: 'cancel' },
-                  {
-                    text: '설정하기',
-                    onPress: () =>
-                      walkLocationTrackingModule
-                        ?.requestIgnoreBatteryOptimizations()
-                        .catch(() => undefined),
-                  },
-                ]
-              );
-            }
+      await mergeBackgroundLocations();
+
+      if (
+        nativeTrackingStarted &&
+        walkLocationTrackingModule &&
+        shouldResetBackgroundLocationsRef.current
+      ) {
+        try {
+          const isBatteryExempt =
+            await walkLocationTrackingModule.isIgnoringBatteryOptimizations();
+          if (!isBatteryExempt && isActive) {
+            Alert.alert(
+              '배터리 설정 안내',
+              '화면을 끈 상태에서도 산책 경로를 정확히 기록하려면 배터리 사용량을 제한 없음으로 설정해 주세요.',
+              [
+                { text: '나중에', style: 'cancel' },
+                {
+                  text: '설정하기',
+                  onPress: () =>
+                    walkLocationTrackingModule
+                      ?.requestIgnoreBatteryOptimizations()
+                      .catch(() => undefined),
+                },
+              ]
+            );
           }
         } catch {
-          // Keep the existing JS location watcher available if native tracking cannot start.
+          // Battery optimization guidance is optional.
         }
       }
 
@@ -557,7 +666,7 @@ export default function WalkActiveScreen() {
         timeout: 5000,
         maximumAge: 60_000,
       });
-      Geolocation.getCurrentPosition(recordLocation, () => {}, {
+      Geolocation.getCurrentPosition(recordForegroundLocation, () => {}, {
         enableHighAccuracy: true,
         timeout: 15_000,
         maximumAge: 5_000,
@@ -565,7 +674,7 @@ export default function WalkActiveScreen() {
 
       watchIdRef.current = Geolocation.watchPosition(
         (pos: GeoPosition) => {
-          if (isActive) recordLocation(pos);
+          if (isActive) recordForegroundLocation(pos);
         },
         () => {},
         { enableHighAccuracy: true, distanceFilter: 5, interval: 2000, fastestInterval: 1000 }
@@ -581,7 +690,12 @@ export default function WalkActiveScreen() {
         watchIdRef.current = null;
       }
     };
-  }, [isSessionReady, recordLocation, showInitialLocationPreview]);
+  }, [
+    isSessionReady,
+    mergeBackgroundLocations,
+    recordForegroundLocation,
+    showInitialLocationPreview,
+  ]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -591,13 +705,18 @@ export default function WalkActiveScreen() {
 
       if (nextState === 'active' && previousState !== 'active') {
         syncElapsedTime();
-        mergeBackgroundLocations();
-        Geolocation.getCurrentPosition(recordLocation, () => {}, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 5000,
-        });
+        const resumeLocationUpdates = async () => {
+          await mergeBackgroundLocations();
+          if (appStateRef.current !== 'active') return;
+          Geolocation.getCurrentPosition(recordForegroundLocation, () => {}, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 5000,
+          });
+        };
+        resumeLocationUpdates().catch(() => undefined);
       } else if (nextState === 'background' || nextState === 'inactive') {
+        shouldBufferForegroundLocationsRef.current = true;
         syncElapsedTime();
         queueSessionSave(true);
       }
@@ -606,7 +725,13 @@ export default function WalkActiveScreen() {
     });
 
     return () => subscription.remove();
-  }, [isSessionReady, mergeBackgroundLocations, queueSessionSave, recordLocation, syncElapsedTime]);
+  }, [
+    isSessionReady,
+    mergeBackgroundLocations,
+    queueSessionSave,
+    recordForegroundLocation,
+    syncElapsedTime,
+  ]);
 
   const handlePauseToggle = () => {
     if (!isSessionReady) return;
@@ -614,6 +739,9 @@ export default function WalkActiveScreen() {
     timerStateRef.current = isPaused
       ? resumeWalkTimer(timerStateRef.current, now)
       : pauseWalkTimer(timerStateRef.current, now);
+    if (!isPaused) {
+      shouldStartNewPathSegmentRef.current = true;
+    }
     pauseTrackingRef.current = timerStateRef.current.isPaused;
     setIsPaused(timerStateRef.current.isPaused);
     setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
@@ -627,7 +755,7 @@ export default function WalkActiveScreen() {
     }
   };
 
-  const handleStop = async () => {
+  const handleStop = useCallback(async () => {
     if (!isSessionReady || isStoppingRef.current) return;
     isStoppingRef.current = true;
     await mergeBackgroundLocations();
@@ -643,7 +771,32 @@ export default function WalkActiveScreen() {
     queueSessionSave(true);
     setShowConfirmModal(true);
     isStoppingRef.current = false;
-  };
+  }, [
+    createCompletedWalkSnapshot,
+    isSessionReady,
+    mergeBackgroundLocations,
+    queueSessionSave,
+  ]);
+
+  const requestWalkExit = useCallback(() => {
+    if (
+      !isSessionReady ||
+      isStoppingRef.current ||
+      showConfirmModal ||
+      showResultModal
+    ) {
+      return;
+    }
+    handleStop();
+  }, [handleStop, isSessionReady, showConfirmModal, showResultModal]);
+
+  usePreventRemove(isSessionReady && !canLeaveScreen, requestWalkExit);
+
+  useEffect(() => {
+    if (canLeaveScreen) {
+      navigation.goBack();
+    }
+  }, [canLeaveScreen, navigation]);
 
   const handleConfirmNo = () => {
     if (!isSessionReady) return;
@@ -684,11 +837,15 @@ export default function WalkActiveScreen() {
         distance: snapshot.distanceKm,
         path_coordinates: snapshot.pathCoordinates,
       });
+      await saveWalkRouteSegmentStartIndices(
+        walkId,
+        snapshot.pathSegmentStartIndices,
+      ).catch(() => undefined);
       isFinishingRef.current = true;
       await persistQueueRef.current.catch(() => undefined);
       await clearActiveWalkSession().catch(() => undefined);
       await walkLocationTrackingModule?.clearLocations().catch(() => undefined);
-      navigation.goBack();
+      setCanLeaveScreen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : '산책 기록 저장에 실패했습니다.';
       Alert.alert('오류', message);
@@ -775,7 +932,7 @@ export default function WalkActiveScreen() {
               var map;
               var marker;
               var markerElement;
-              var polyline;
+              var polylines = [];
               var hasCentered = false;
 
               function toLatLng(coord) {
@@ -809,30 +966,43 @@ export default function WalkActiveScreen() {
                 markerElement.style.setProperty('--heading', (heading % 360) + 'deg');
               }
 
+              function updateRoute(segments) {
+                segments.forEach(function(segment, index) {
+                  var linePath = segment.map(function(point) {
+                    return new kakao.maps.LatLng(point[0], point[1]);
+                  });
+                  if (!polylines[index]) {
+                    polylines[index] = new kakao.maps.Polyline({
+                      map: map,
+                      path: linePath,
+                      strokeWeight: 5,
+                      strokeColor: '#0081D5',
+                      strokeOpacity: 0.9,
+                      strokeStyle: 'solid'
+                    });
+                  } else {
+                    polylines[index].setPath(linePath);
+                  }
+                });
+                while (polylines.length > segments.length) {
+                  polylines.pop().setMap(null);
+                }
+              }
+
               function updateLocation(payload) {
                 if (!map || !payload || !payload.coord) return;
                 var position = toLatLng(payload.coord);
                 ensureMarker(position);
                 updateHeading(payload.heading);
 
-                var linePath = (payload.path || []).map(function(point) {
-                  return new kakao.maps.LatLng(point[0], point[1]);
-                });
+                var pathSegments = payload.pathSegments ||
+                  (payload.path && payload.path.length ? [payload.path] : []);
+                var pointCount = pathSegments.reduce(function(total, segment) {
+                  return total + segment.length;
+                }, 0);
+                updateRoute(pathSegments);
 
-                if (!polyline) {
-                  polyline = new kakao.maps.Polyline({
-                    map: map,
-                    path: linePath,
-                    strokeWeight: 5,
-                    strokeColor: '#0081D5',
-                    strokeOpacity: 0.9,
-                    strokeStyle: 'solid'
-                  });
-                } else {
-                  polyline.setPath(linePath);
-                }
-
-                if (payload.forceCenter || !hasCentered || linePath.length % 5 === 0) {
+                if (payload.forceCenter || !hasCentered || pointCount % 5 === 0) {
                   map.setCenter(position);
                   hasCentered = true;
                 }
@@ -876,7 +1046,10 @@ export default function WalkActiveScreen() {
       JSON.stringify({
         type: 'LOCATION_UPDATE',
         coord: currentCoord,
-        path: pathCoordinatesRef.current,
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
         heading: headingRef.current,
       })
     );
