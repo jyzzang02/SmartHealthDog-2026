@@ -29,8 +29,14 @@ import type { GeoPosition } from 'react-native-geolocation-service';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
-import { endPetWalk, findActivePetWalkId, startPetWalk } from '../api/walks';
-import type { WalkCoordinate } from '../api/walks';
+import {
+  endPetWalk,
+  findActivePetWalkId,
+  getPetTodaySunlight,
+  startPetWalk,
+  uploadPetLightSamples,
+} from '../api/walks';
+import type { LightSample, SunlightTodayResponse, WalkCoordinate } from '../api/walks';
 import {
   clearActiveWalkSession,
   loadActiveWalkSession,
@@ -66,10 +72,12 @@ type BackgroundWalkLocation = {
 };
 
 type WalkLocationTrackingModule = {
-  start: () => Promise<void>;
+  start: (walkId: number, startedAtMs: number) => Promise<void>;
   stop: () => Promise<void>;
   clearLocations: () => Promise<void>;
   getLocations: () => Promise<BackgroundWalkLocation[]>;
+  getLightSamples: (walkId: number) => Promise<LightSample[]>;
+  acknowledgeLightSamples: (walkId: number, ids: string[]) => Promise<void>;
   isIgnoringBatteryOptimizations: () => Promise<boolean>;
   requestIgnoreBatteryOptimizations: () => Promise<void>;
 };
@@ -125,6 +133,47 @@ const MAX_LOCATION_ACCURACY_METERS = 25;
 const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
 const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
 const MAX_DISTANCE_ACCUMULATION_GAP_MS = 5 * 60_000;
+const SUNLIGHT_TARGET_LUX_MINUTES = 60_000;
+const LIGHT_BATCH_SIZE = 100;
+
+function SunlightProgressCard({
+  data,
+  isUnavailable = false,
+}: {
+  data: SunlightTodayResponse | null;
+  isUnavailable?: boolean;
+}) {
+  const targetLuxMinutes = data?.target_lux_minutes ?? SUNLIGHT_TARGET_LUX_MINUTES;
+  const achievedLuxMinutes = data?.achieved_lux_minutes ?? null;
+  const progressPercent = data && Number.isFinite(data.progress_percent)
+    ? Math.max(0, Math.min(100, data.progress_percent))
+    : achievedLuxMinutes === null || targetLuxMinutes <= 0
+      ? 0
+      : Math.max(0, Math.min(100, achievedLuxMinutes / targetLuxMinutes * 100));
+
+  return (
+    <View style={styles.sunlightCard}>
+      <View style={styles.sunlightCardHeader}>
+        <Text style={styles.sunlightCardTitle}>오늘의 일광 노출</Text>
+        <Text style={styles.sunlightCardPercent}>{achievedLuxMinutes === null ? '--' : `${progressPercent}%`}</Text>
+      </View>
+      <Text style={styles.sunlightCardAmount}>
+        <Text style={styles.sunlightCardAchieved}>{achievedLuxMinutes === null ? '--' : achievedLuxMinutes.toLocaleString()}</Text>
+        {' / ' + targetLuxMinutes.toLocaleString() + ' Lux·min'}
+      </Text>
+      <View style={styles.sunlightProgressTrack}>
+        <View style={[styles.sunlightProgressFill, { width: `${progressPercent}%` }]} />
+      </View>
+      <Text style={styles.sunlightCardNote}>
+        {isUnavailable
+          ? '오늘의 일광 정보를 불러오지 못했습니다'
+          : data
+            ? data.qualifying_minutes + '분 달성 · 측정 ' + data.sample_count + '회'
+            : '오늘의 일광 정보를 불러오는 중...'}
+      </Text>
+    </View>
+  );
+}
 
 export default function WalkActiveScreen() {
   const navigation = useNavigation<NavigationProps>();
@@ -146,6 +195,8 @@ export default function WalkActiveScreen() {
   const [completedWalk, setCompletedWalk] = useState<CompletedWalkSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [canLeaveScreen, setCanLeaveScreen] = useState(false);
+  const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
+  const [sunlightUnavailable, setSunlightUnavailable] = useState(false);
 
   const timerStateRef = useRef(createWalkTimer(startedAtMs));
   const walkIdRef = useRef<number | null>(null);
@@ -174,6 +225,7 @@ export default function WalkActiveScreen() {
   const backgroundMergePromiseRef = useRef<Promise<void> | null>(null);
   const shouldResetBackgroundLocationsRef = useRef(false);
   const isStoppingRef = useRef(false);
+  const lightUploadPromiseRef = useRef<Promise<void> | null>(null);
 
   const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
@@ -230,6 +282,74 @@ export default function WalkActiveScreen() {
     setElapsedSeconds(seconds);
     return seconds;
   }, []);
+
+  const flushLightSamples = useCallback(async () => {
+    if (Platform.OS !== 'android' || !walkLocationTrackingModule || !walkIdRef.current) return;
+    if (lightUploadPromiseRef.current) return lightUploadPromiseRef.current;
+    const walkId = walkIdRef.current;
+    const upload = (async () => {
+      const pending = await walkLocationTrackingModule.getLightSamples(walkId);
+      if (pending.length > 0) {
+        console.info('[walk-light] upload:pending', {
+          walkId,
+          count: pending.length,
+          firstLux: pending[0].lux,
+          firstMeasuredAt: pending[0].measured_at,
+        });
+        for (const sample of pending) {
+          const secondsFromWalkStart = (Date.parse(sample.measured_at) - timerStateRef.current.startedAtMs) / 1000;
+          console.info('[walk-light] upload:sample', {
+            walkId,
+            lux: sample.lux,
+            measuredAt: sample.measured_at,
+            secondsFromWalkStart,
+            inFirstWindow: secondsFromWalkStart >= 0 && secondsFromWalkStart < 600,
+          });
+        }
+      }
+      for (let index = 0; index < pending.length; index += LIGHT_BATCH_SIZE) {
+        const batch = pending.slice(index, index + LIGHT_BATCH_SIZE);
+        const response = await uploadPetLightSamples(petId, walkId, batch);
+        const result = response.result;
+        console.info('[walk-light] upload:response', { walkId, count: batch.length, result });
+        if (
+          result?.received_count !== batch.length ||
+          result.saved_count + result.duplicate_count !== batch.length
+        ) {
+          throw new Error('조도 기록 일부가 저장되지 않아 전송을 다시 시도합니다.');
+        }
+        await walkLocationTrackingModule.acknowledgeLightSamples(
+          walkId,
+          batch.map((sample) => sample.client_sample_id),
+        );
+      }
+      if (pending.length > 0 && appStateRef.current === 'active') {
+        try {
+          const sunlight = await getPetTodaySunlight(petId);
+          console.info('[walk-light] summary:after-upload', {
+            walkId,
+            sampleCount: sunlight.sample_count,
+            qualifyingMinutes: sunlight.qualifying_minutes,
+            achievedLuxMinutes: sunlight.achieved_lux_minutes,
+          });
+          setTodaySunlight(sunlight);
+          setSunlightUnavailable(false);
+        } catch (error) {
+          console.warn('[walk-light] summary:refresh-failed', error);
+          // The samples are already saved; a progress refresh can retry later.
+        }
+      }
+    })();
+    lightUploadPromiseRef.current = upload;
+    try {
+      await upload;
+    } catch (error) {
+      console.warn('[walk-light] upload:failed', { walkId, error });
+      throw error;
+    } finally {
+      lightUploadPromiseRef.current = null;
+    }
+  }, [petId]);
 
   useEffect(() => {
     let isMounted = true;
@@ -330,6 +450,41 @@ export default function WalkActiveScreen() {
       isMounted = false;
     };
   }, [navigation, petId]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+    let isMounted = true;
+    getPetTodaySunlight(petId)
+      .then((sunlight) => {
+        if (isMounted) {
+          console.info('[walk-light] summary:initial', {
+            sampleCount: sunlight.sample_count,
+            qualifyingMinutes: sunlight.qualifying_minutes,
+            achievedLuxMinutes: sunlight.achieved_lux_minutes,
+          });
+          setTodaySunlight(sunlight);
+          setSunlightUnavailable(false);
+        }
+      })
+      .catch((error) => {
+        console.warn('[walk-light] summary:initial-failed', error);
+        if (isMounted) setSunlightUnavailable(true);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isSessionReady, petId]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+    flushLightSamples().catch(() => undefined);
+    const interval = setInterval(() => {
+      if (appStateRef.current === 'active') {
+        flushLightSamples().catch(() => undefined);
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [flushLightSamples, isSessionReady]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -623,9 +778,19 @@ export default function WalkActiveScreen() {
           if (shouldResetBackgroundLocationsRef.current) {
             await walkLocationTrackingModule.clearLocations();
           }
-          await walkLocationTrackingModule.start();
-          nativeTrackingStarted = true;
-        } catch {
+          if (!pauseTrackingRef.current) {
+            await walkLocationTrackingModule.start(
+              walkIdRef.current!,
+              timerStateRef.current.startedAtMs,
+            );
+            console.info('[walk-light] service:started', {
+              walkId: walkIdRef.current,
+              startedAt: new Date(timerStateRef.current.startedAtMs).toISOString(),
+            });
+          }
+          nativeTrackingStarted = !pauseTrackingRef.current;
+        } catch (error) {
+          console.warn('[walk-light] service:start-failed', error);
           // Foreground location tracking remains available if native tracking cannot start.
         }
       }
@@ -705,6 +870,7 @@ export default function WalkActiveScreen() {
 
       if (nextState === 'active' && previousState !== 'active') {
         syncElapsedTime();
+        flushLightSamples().catch(() => undefined);
         const resumeLocationUpdates = async () => {
           await mergeBackgroundLocations();
           if (appStateRef.current !== 'active') return;
@@ -727,6 +893,7 @@ export default function WalkActiveScreen() {
     return () => subscription.remove();
   }, [
     isSessionReady,
+    flushLightSamples,
     mergeBackgroundLocations,
     queueSessionSave,
     recordForegroundLocation,
@@ -750,8 +917,13 @@ export default function WalkActiveScreen() {
     if (Platform.OS === 'android' && walkLocationTrackingModule) {
       const operation = timerStateRef.current.isPaused
         ? walkLocationTrackingModule.stop()
-        : walkLocationTrackingModule.start();
-      operation.catch(() => undefined);
+        : walkLocationTrackingModule.start(
+          walkIdRef.current!,
+          timerStateRef.current.startedAtMs,
+        );
+      operation.then(() => {
+        if (timerStateRef.current.isPaused) flushLightSamples().catch(() => undefined);
+      }).catch(() => undefined);
     }
   };
 
@@ -762,6 +934,7 @@ export default function WalkActiveScreen() {
     if (Platform.OS === 'android' && walkLocationTrackingModule) {
       await walkLocationTrackingModule.stop().catch(() => undefined);
     }
+    flushLightSamples().catch(() => undefined);
     const now = Date.now();
     const snapshot = createCompletedWalkSnapshot(now);
     setCompletedWalk(snapshot);
@@ -773,6 +946,7 @@ export default function WalkActiveScreen() {
     isStoppingRef.current = false;
   }, [
     createCompletedWalkSnapshot,
+    flushLightSamples,
     isSessionReady,
     mergeBackgroundLocations,
     queueSessionSave,
@@ -808,13 +982,38 @@ export default function WalkActiveScreen() {
     pauseTrackingRef.current = false;
     queueSessionSave(true);
     if (Platform.OS === 'android' && walkLocationTrackingModule) {
-      walkLocationTrackingModule.start().catch(() => undefined);
+      walkLocationTrackingModule.start(
+        walkIdRef.current!,
+        timerStateRef.current.startedAtMs,
+      ).catch(() => undefined);
     }
   };
 
   const handleConfirmYes = () => {
     setShowConfirmModal(false);
     setShowResultModal(true);
+    setTodaySunlight(null);
+    setSunlightUnavailable(false);
+    const refreshResult = async () => {
+      try {
+        await flushLightSamples();
+      } catch (error) {
+        console.warn('[walk-light] result:upload-failed', error);
+      }
+      try {
+        const sunlight = await getPetTodaySunlight(petId);
+        console.info('[walk-light] result:summary', {
+          sampleCount: sunlight.sample_count,
+          qualifyingMinutes: sunlight.qualifying_minutes,
+          achievedLuxMinutes: sunlight.achieved_lux_minutes,
+        });
+        setTodaySunlight(sunlight);
+      } catch (error) {
+        console.warn('[walk-light] result:summary-failed', error);
+        setSunlightUnavailable(true);
+      }
+    };
+    refreshResult().catch(() => undefined);
   };
 
   const handleResultConfirm = async () => {
@@ -832,6 +1031,9 @@ export default function WalkActiveScreen() {
 
     setIsSubmitting(true);
     try {
+      await flushLightSamples();
+      // A sample may have arrived while an earlier upload was in flight.
+      await flushLightSamples();
       await endPetWalk(petId, walkId, {
         end_time: snapshot.endTime,
         distance: snapshot.distanceKm,
@@ -1040,7 +1242,7 @@ export default function WalkActiveScreen() {
       </html>`;
   }, [initialCoord]);
 
-  const pushCurrentLocationToMap = () => {
+  const pushCurrentLocationToMap = (forceCenter = false) => {
     if (!currentCoord) return;
     webViewRef.current?.postMessage(
       JSON.stringify({
@@ -1051,6 +1253,7 @@ export default function WalkActiveScreen() {
           pathSegmentStartIndicesRef.current,
         ),
         heading: headingRef.current,
+        forceCenter,
       })
     );
   };
@@ -1058,14 +1261,14 @@ export default function WalkActiveScreen() {
   return (
     <View style={styles.container}>
       {mapLoadError ? (
-        <View style={[styles.mapBackground, styles.mapFallback]} />
+        <View style={[styles.mapBackground, styles.mapViewport, { bottom: 338 + insets.bottom }, styles.mapFallback]} />
       ) : (
         <WebView
           ref={webViewRef}
           key="walk-active-map"
           originWhitelist={['*']}
           source={{ html: kakaoHtml }}
-          style={styles.mapBackground}
+          style={[styles.mapBackground, styles.mapViewport, { bottom: 338 + insets.bottom }]}
           javaScriptEnabled
           domStorageEnabled
           cacheEnabled={false}
@@ -1086,11 +1289,24 @@ export default function WalkActiveScreen() {
         />
       )}
 
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="내 위치로 이동"
+        activeOpacity={0.8}
+        onPress={() => pushCurrentLocationToMap(true)}
+        style={[styles.recenterButton, { top: insets.top + 12 }]}
+      >
+        <View style={styles.recenterTarget}>
+          <View style={styles.recenterDot} />
+        </View>
+      </TouchableOpacity>
+
       <Animated.View style={[styles.statusBadge, { opacity: badgeAnim }]}>
         <Text style={styles.statusBadgeText}>{`${petName}와(과) 산책 중입니다`}</Text>
       </Animated.View>
 
-      <View style={[styles.bottomSheet, { height: 250 + insets.bottom, paddingBottom: 24 + insets.bottom }]}>
+      <View style={[styles.bottomSheet, { height: 338 + insets.bottom, paddingBottom: 8 + insets.bottom }]}>
+        <SunlightProgressCard data={todaySunlight} isUnavailable={sunlightUnavailable} />
         <View style={styles.metricsRow}>
           <View style={styles.metricBox}><Text style={styles.metricValue}>{distanceText}</Text><Text style={styles.metricLabel}>거리(km)</Text></View>
           <View style={styles.metricDivider} />
@@ -1125,6 +1341,9 @@ export default function WalkActiveScreen() {
                 <Text style={styles.resultInfoText}>{resultDistanceText}km, {resultDuration}</Text>
               </View>
             </View>
+            <View style={styles.resultSunlightSection}>
+              <SunlightProgressCard data={todaySunlight} isUnavailable={sunlightUnavailable} />
+            </View>
             <View style={styles.resultButtonContainer}><CustomButton text={isSubmitting ? '저장 중...' : '확인'} onPress={handleResultConfirm} width={230} disabled={isSubmitting} /></View>
           </View>
         </View>
@@ -1134,13 +1353,25 @@ export default function WalkActiveScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#E5E7EB' }, mapBackground: { flex: 1, backgroundColor: '#DCE2EA' }, mapFallback: { backgroundColor: '#E9ECEF' },
+  sunlightCard: { borderWidth: 1, borderColor: '#EAECEE', borderRadius: 16, padding: 14, backgroundColor: '#FFF', marginBottom: 18 },
+  sunlightCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sunlightCardTitle: { color: '#3C4144', fontSize: 14, fontWeight: '600' },
+  sunlightCardPercent: { color: '#7B7C7D', fontSize: 13, fontWeight: '600' },
+  sunlightCardAmount: { color: '#7B7C7D', fontSize: 13, marginTop: 10 },
+  sunlightCardAchieved: { color: '#F4B844', fontWeight: '700' },
+  sunlightProgressTrack: { height: 8, borderRadius: 4, backgroundColor: '#F2F4F7', marginTop: 12, overflow: 'hidden' },
+  sunlightProgressFill: { height: 8, backgroundColor: '#FFC94D' },
+  sunlightCardNote: { color: '#7B7C7D', fontSize: 12, marginTop: 10 },
+  resultSunlightSection: { marginTop: 16 },
+  container: { flex: 1, backgroundColor: '#E5E7EB' }, mapBackground: { backgroundColor: '#DCE2EA' }, mapViewport: { position: 'absolute', top: 0, left: 0, right: 0 }, mapFallback: { backgroundColor: '#E9ECEF' },
+  recenterButton: { position: 'absolute', right: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
+  recenterTarget: { width: 22, height: 22, borderWidth: 2, borderColor: '#0081D5', borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, recenterDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0081D5' },
   statusBadge: { position: 'absolute', top: 70, alignSelf: 'center', width: 180, height: 32, borderRadius: 12, backgroundColor: '#7B7C7D', alignItems: 'center', justifyContent: 'center' },
   statusBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '500' },
-  bottomSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#FFF', paddingTop: 34, paddingHorizontal: 24 },
+  bottomSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#FFF', paddingTop: 24, paddingHorizontal: 24 },
   metricsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 12 },
   metricBox: { flex: 1, alignItems: 'center' }, metricValue: { color: '#3C4144', fontSize: 32, fontWeight: '500' }, metricValuePaused: { color: '#EF5F5F' }, metricLabel: { marginTop: 8, color: '#7B7C7D', fontSize: 14, fontWeight: '500' }, metricDivider: { width: 1, height: 56, backgroundColor: '#EAECEE', marginHorizontal: 12 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 18, gap: 28 }, controlButton: { width: 82, height: 82, resizeMode: 'contain' },
+  buttonRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 14, gap: 28 }, controlButton: { width: 72, height: 72, resizeMode: 'contain' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   confirmModal: { width: 290, paddingVertical: 30, paddingHorizontal: 30, borderRadius: 16, backgroundColor: '#FFF', alignItems: 'center' }, confirmText: { color: '#000', fontSize: 20, fontWeight: '700', textAlign: 'center' }, confirmButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 24 },
   confirmNoButton: { width: 110, height: 55, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#E1E1E1' }, confirmNoText: { fontSize: 18, fontWeight: '600', color: '#7B7C7D' },

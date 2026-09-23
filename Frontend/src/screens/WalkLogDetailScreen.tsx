@@ -14,7 +14,14 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import { RootStackParamList } from '../../App';
-import { deleteWalk, getWalkDetail, WalkCoordinate, WalkRecordDto } from '../api/walks';
+import {
+  deleteWalk,
+  getPetTodaySunlight,
+  getWalkDetail,
+  SunlightTodayResponse,
+  WalkCoordinate,
+  WalkRecordDto,
+} from '../api/walks';
 import {
   clearWalkRouteSegmentStartIndices,
   loadWalkRouteSegmentStartIndices,
@@ -103,6 +110,8 @@ export default function WalkLogDetailScreen() {
   const [pathSegmentStartIndices, setPathSegmentStartIndices] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
+  const [isSunlightLoading, setIsSunlightLoading] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!record.id) return;
@@ -135,6 +144,39 @@ export default function WalkLogDetailScreen() {
       isMounted = false;
     };
   }, [record.id]);
+
+  const petId = record.petId;
+  const walkDate = formatDateFromIso(walkDetail?.start_time ?? walkDetail?.startTime) || record.date;
+  const now = new Date();
+  const todayDate = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+  const showTodaySunlight = !!petId && walkDate !== '' && walkDate === todayDate;
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!showTodaySunlight || !petId) {
+      setTodaySunlight(null);
+      setIsSunlightLoading(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setIsSunlightLoading(true);
+    getPetTodaySunlight(petId)
+      .then((summary) => {
+        if (isMounted) setTodaySunlight(summary);
+      })
+      .catch(() => {
+        if (isMounted) setTodaySunlight(null);
+      })
+      .finally(() => {
+        if (isMounted) setIsSunlightLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [petId, showTodaySunlight]);
 
   const resolved = useMemo(() => {
     const startIso = walkDetail?.start_time ?? walkDetail?.startTime;
@@ -340,6 +382,36 @@ export default function WalkLogDetailScreen() {
             <Text style={styles.durationClock}>{resolved.durationClock}</Text>
           </View>
         </View>
+
+        {showTodaySunlight && (
+          <View style={[styles.section, styles.sunlightSection]}>
+            <Text style={styles.subtitle}>오늘의 누적 일광 노출</Text>
+            {isSunlightLoading ? (
+              <ActivityIndicator style={styles.sunlightLoading} color="#0081D5" />
+            ) : todaySunlight ? (
+              <View style={styles.sunlightCard}>
+                <View style={styles.sunlightSummaryRow}>
+                  <Text style={styles.sunlightAmount}>
+                    {todaySunlight.achieved_lux_minutes.toLocaleString()}
+                    <Text style={styles.sunlightTarget}> / {todaySunlight.target_lux_minutes.toLocaleString()} Lux·min</Text>
+                  </Text>
+                  <Text style={styles.sunlightPercent}>{Math.round(todaySunlight.progress_percent)}%</Text>
+                </View>
+                <View style={styles.sunlightProgressTrack}>
+                  <View style={[styles.sunlightProgressFill, {
+                    width: `${Math.max(0, Math.min(100, todaySunlight.progress_percent))}%`,
+                  }]} />
+                </View>
+                <Text style={styles.sunlightNote}>
+                  {todaySunlight.qualifying_minutes}분 달성 · 측정 {todaySunlight.sample_count}회
+                  {'\n'}오늘 산책 전체 누적값입니다.
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.sunlightUnavailable}>오늘의 조도 기록을 불러오지 못했습니다.</Text>
+            )}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -451,5 +523,62 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     marginTop: 8,
+  },
+  sunlightSection: {
+    marginTop: 16,
+    marginRight: 20,
+    marginBottom: 24,
+  },
+  sunlightLoading: {
+    marginTop: 16,
+    alignSelf: 'flex-start',
+  },
+  sunlightCard: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F5F7F9',
+  },
+  sunlightSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sunlightAmount: {
+    color: '#F4B844',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  sunlightTarget: {
+    color: '#7B7C7D',
+    fontWeight: '500',
+  },
+  sunlightPercent: {
+    color: '#7B7C7D',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sunlightProgressTrack: {
+    height: 7,
+    marginTop: 10,
+    borderRadius: 4,
+    backgroundColor: '#E4E7EB',
+    overflow: 'hidden',
+  },
+  sunlightProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#FFC94D',
+  },
+  sunlightNote: {
+    marginTop: 8,
+    color: '#7B7C7D',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  sunlightUnavailable: {
+    marginTop: 8,
+    color: '#7B7C7D',
+    fontSize: 13,
   },
 });

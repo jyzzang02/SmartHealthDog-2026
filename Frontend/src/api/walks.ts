@@ -61,6 +61,31 @@ export interface EndWalkRequest {
   path_coordinates: WalkCoordinate[];
 }
 
+export interface LightSample {
+  client_sample_id: string;
+  measured_at: string;
+  lux: number;
+}
+
+export interface LightSamplesResponse {
+  result: {
+    received_count: number;
+    saved_count: number;
+    duplicate_count: number;
+  };
+}
+
+export interface SunlightTodayResponse {
+  date: string;
+  target_lux_minutes: number;
+  achieved_lux_minutes: number;
+  qualifying_minutes: number;
+  qualified_windows: number;
+  sample_count: number;
+  progress_percent: number;
+  completed: boolean;
+}
+
 export interface WeeklyComparisonResponse {
   userId: number;
   timezone: string;
@@ -279,6 +304,59 @@ export const endPetWalk = async (
 
   const data = await parseJsonSafe(response);
   return (data?.walk || data || {}) as WalkRecordDto;
+};
+
+export const uploadPetLightSamples = async (
+  petId: number,
+  walkId: number,
+  samples: LightSample[]
+): Promise<LightSamplesResponse> => {
+  const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+  const isoInstantPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T.+(?:Z|[+-][0-9]{2}:[0-9]{2})$/;
+  if (samples.length === 0) {
+    throw new Error('전송할 조도 기록이 없습니다.');
+  }
+  if (samples.some((sample) =>
+    !uuidPattern.test(sample.client_sample_id) ||
+    !isoInstantPattern.test(sample.measured_at) ||
+    !Number.isFinite(Date.parse(sample.measured_at)) ||
+    !Number.isFinite(sample.lux) ||
+    sample.lux < 0
+  )) {
+    throw new Error('조도 기록의 UUID, 측정 시각 또는 lux 값이 올바르지 않습니다.');
+  }
+
+  const response = await authorizedFetch(
+    API_BASE_URL + '/api/pets/' + petId + '/walks/' + walkId + '/light-samples',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ samples }),
+    }
+  );
+
+  if (!response.ok) {
+    await throwHttpError(response, '조도 기록 전송에 실패했습니다.');
+  }
+
+  const data = await parseJsonSafe(response);
+  return (data || {}) as LightSamplesResponse;
+};
+
+export const getPetTodaySunlight = async (
+  petId: number
+): Promise<SunlightTodayResponse> => {
+  const response = await authorizedFetch(
+    API_BASE_URL + '/api/pets/' + petId + '/sunlight/today',
+    { method: 'GET' }
+  );
+
+  if (!response.ok) {
+    await throwHttpError(response, '오늘의 일광 노출 정보를 불러오지 못했습니다.');
+  }
+
+  const data = await parseJsonSafe(response);
+  return (data?.sunlight ?? data?.data?.sunlight ?? data?.data ?? data ?? {}) as SunlightTodayResponse;
 };
 
 export const getPetWalks = async (

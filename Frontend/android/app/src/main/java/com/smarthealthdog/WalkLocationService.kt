@@ -11,30 +11,161 @@ import android.content.pm.ServiceInfo
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.UUID
 import kotlin.math.max
 
-class WalkLocationService : Service(), LocationListener {
+class WalkLocationService : Service(), LocationListener, SensorEventListener {
   private val locationManager by lazy {
     getSystemService(Context.LOCATION_SERVICE) as LocationManager
+  }
+  private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as SensorManager }
+  private val handler = Handler(Looper.getMainLooper())
+  private var lightSensor: Sensor? = null
+  private var latestLux: Float? = null
+  private var walkId: Long = 0L
+  private var startedAtMs: Long = 0L
+  private var wakeLock: PowerManager.WakeLock? = null
+  private var loggedFirstLightEvent = false
+  private var firstLightSampleQueued = false
+  private val oneMinuteTestLux = ArrayList<Float>(2)
+  private val sampleLight = object : Runnable {
+    override fun run() {
+      val lux = latestLux
+      if (walkId > 0L && lux != null && System.currentTimeMillis() >= startedAtMs) {
+        try {
+          val saved = WalkLightStore.append(applicationContext, walkId, lux.toDouble())
+          Log.i(LIGHT_LOG_TAG, "sample:stored walkId=$walkId lux=$lux saved=$saved")
+          if (saved) {
+            oneMinuteTestLux.add(lux)
+            if (oneMinuteTestLux.size == 2) {
+              val average = oneMinuteTestLux.average()
+              Log.i(LIGHT_LOG_TAG, "test:one-minute-average walkId=$walkId avgLux=$average reaches2000=${average >= 2_000.0}")
+              oneMinuteTestLux.clear()
+            }
+          }
+        } catch (error: Exception) {
+          Log.e(LIGHT_LOG_TAG, "sample:store-failed walkId=$walkId", error)
+        }
+      } else {
+        Log.w(LIGHT_LOG_TAG, "sample:skipped walkId=$walkId freshEvent=${lux != null}")
+      }
+      latestLux = null
+      lightSensor?.let { sensor ->
+        try {
+          sensorManager.unregisterListener(this@WalkLocationService)
+          val registered = sensorManager.registerListener(
+            this@WalkLocationService, sensor, SensorManager.SENSOR_DELAY_NORMAL,
+          )
+          if (!registered) {
+            Log.w(LIGHT_LOG_TAG, "sensor:re-register-failed walkId=$walkId")
+            stopLightTracking()
+          }
+        } catch (error: Exception) {
+          Log.e(LIGHT_LOG_TAG, "sensor:re-register-error walkId=$walkId", error)
+          stopLightTracking()
+        }
+      }
+      if (lightSensor != null) handler.postDelayed(this, LIGHT_SAMPLE_INTERVAL_MS)
+    }
   }
 
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
     startForegroundNotification()
+    locationManager.removeUpdates(this)
     requestLocationUpdates()
+    stopLightTracking()
+    walkId = intent?.getLongExtra(EXTRA_WALK_ID, 0L) ?: 0L
+    startedAtMs = intent?.getLongExtra(EXTRA_STARTED_AT_MS, 0L) ?: 0L
+    Log.i(LIGHT_LOG_TAG, "service:start walkId=$walkId startedAtMs=$startedAtMs")
+    if (walkId > 0L && startedAtMs > 0L) {
+      try {
+        startLightTracking()
+      } catch (error: Exception) {
+        Log.e(LIGHT_LOG_TAG, "sensor:start-error walkId=$walkId", error)
+        stopLightTracking()
+      }
+    }
+    else Log.w(LIGHT_LOG_TAG, "sensor:not-started invalid-walk-session")
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
+    Log.i(LIGHT_LOG_TAG, "service:stop walkId=$walkId")
+    stopLightTracking()
     locationManager.removeUpdates(this)
     super.onDestroy()
+  }
+
+  override fun onSensorChanged(event: SensorEvent) {
+    if (event.sensor.type != Sensor.TYPE_LIGHT) return
+    val value = event.values.firstOrNull() ?: return
+    if (value.isFinite() && value >= 0f) {
+      latestLux = value
+      if (!loggedFirstLightEvent) {
+        loggedFirstLightEvent = true
+        Log.i(LIGHT_LOG_TAG, "sensor:first-event walkId=$walkId lux=$value")
+      }
+      if (!firstLightSampleQueued) {
+        firstLightSampleQueued = true
+        handler.removeCallbacks(sampleLight)
+        handler.post(sampleLight)
+      }
+    }
+  }
+
+  override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) = Unit
+
+  private fun startLightTracking() {
+    val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
+    if (sensor == null) {
+      Log.w(LIGHT_LOG_TAG, "sensor:unavailable walkId=$walkId")
+      return
+    }
+    lightSensor = sensor
+    latestLux = null
+    loggedFirstLightEvent = false
+    firstLightSampleQueued = false
+    oneMinuteTestLux.clear()
+    if (!sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)) {
+      Log.w(LIGHT_LOG_TAG, "sensor:register-failed walkId=$walkId")
+      lightSensor = null
+      return
+    }
+    Log.i(LIGHT_LOG_TAG, "sensor:registered walkId=$walkId name=${sensor.name}")
+    val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+    wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:WalkLight")
+      .apply { acquire() }
+    handler.postDelayed(sampleLight, LIGHT_SAMPLE_INTERVAL_MS)
+  }
+
+  private fun stopLightTracking() {
+    handler.removeCallbacks(sampleLight)
+    if (lightSensor != null) sensorManager.unregisterListener(this)
+    lightSensor = null
+    latestLux = null
+    firstLightSampleQueued = false
+    oneMinuteTestLux.clear()
+    wakeLock?.let { if (it.isHeld) it.release() }
+    wakeLock = null
   }
 
   override fun onLocationChanged(location: Location) {
@@ -113,6 +244,48 @@ class WalkLocationService : Service(), LocationListener {
     private const val LOCATION_INTERVAL_MS = 2_000L
     private const val MIN_DISTANCE_METERS = 5f
     private const val MAX_ACCURACY_METERS = 25f
+    const val EXTRA_WALK_ID = "walk_id"
+    const val EXTRA_STARTED_AT_MS = "started_at_ms"
+    private const val LIGHT_SAMPLE_INTERVAL_MS = 30_000L
+    private const val LIGHT_LOG_TAG = "WalkLight"
+  }
+}
+
+object WalkLightStore {
+  private const val PREFERENCES_NAME = "walk_light_samples"
+
+  @Synchronized
+  fun append(context: Context, walkId: Long, lux: Double): Boolean {
+    val samples = get(context, walkId)
+    val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+      timeZone = TimeZone.getTimeZone("UTC")
+    }
+    samples.put(JSONObject().apply {
+      put("client_sample_id", UUID.randomUUID().toString())
+      put("measured_at", format.format(Date()))
+      put("lux", lux)
+    })
+    return context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+      .edit().putString(walkId.toString(), samples.toString()).commit()
+  }
+
+  @Synchronized
+  fun get(context: Context, walkId: Long): JSONArray {
+    val raw = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+      .getString(walkId.toString(), "[]")
+    return try { JSONArray(raw) } catch (_: Exception) { JSONArray() }
+  }
+
+  @Synchronized
+  fun acknowledge(context: Context, walkId: Long, ids: Set<String>) {
+    val pending = get(context, walkId)
+    val remaining = JSONArray()
+    for (index in 0 until pending.length()) {
+      val sample = pending.optJSONObject(index) ?: continue
+      if (sample.optString("client_sample_id") !in ids) remaining.put(sample)
+    }
+    context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+      .edit().putString(walkId.toString(), remaining.toString()).commit()
   }
 }
 
