@@ -38,4 +38,16 @@ describe('walkTimer', () => {
     expect(completed.endedAtMs).toBe(startedAt + 65_000);
     expect(getElapsedSeconds(completed.timer, startedAt + 5 * 60_000)).toBe(65);
   });
+
+  it('keeps the real end timestamp while excluding paused time from elapsed time', () => {
+    const startedAt = Date.parse('2026-09-25T03:00:00.000Z');
+    const paused = pauseWalkTimer(createWalkTimer(startedAt), startedAt + 5 * 60_000);
+    const resumed = resumeWalkTimer(paused, startedAt + 15 * 60_000);
+    const stoppedAt = startedAt + 20 * 60_000;
+
+    const completed = completeWalkTimer(resumed, stoppedAt);
+
+    expect(completed.elapsedSeconds).toBe(10 * 60);
+    expect(completed.endedAtMs).toBe(stoppedAt);
+  });
 });

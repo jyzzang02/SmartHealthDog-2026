@@ -67,6 +67,6 @@ export const completeWalkTimer = (
   return {
     timer: completedTimer,
     elapsedSeconds,
-    endedAtMs: completedTimer.startedAtMs + elapsedSeconds * 1000,
+    endedAtMs: nowMs,
   };
 };

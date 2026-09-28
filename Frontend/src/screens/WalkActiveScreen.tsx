@@ -778,6 +778,7 @@ export default function WalkActiveScreen() {
           if (shouldResetBackgroundLocationsRef.current) {
             await walkLocationTrackingModule.clearLocations();
           }
+          if (!isActive) return;
           if (!pauseTrackingRef.current) {
             await walkLocationTrackingModule.start(
               walkIdRef.current!,
@@ -796,6 +797,7 @@ export default function WalkActiveScreen() {
       }
 
       await mergeBackgroundLocations();
+      if (!isActive) return;
 
       if (
         nativeTrackingStarted &&
@@ -826,12 +828,17 @@ export default function WalkActiveScreen() {
         }
       }
 
-      Geolocation.getCurrentPosition(showInitialLocationPreview, () => {}, {
+      if (!isActive) return;
+      Geolocation.getCurrentPosition((pos) => {
+        if (isActive) showInitialLocationPreview(pos);
+      }, () => {}, {
         enableHighAccuracy: false,
         timeout: 5000,
         maximumAge: 60_000,
       });
-      Geolocation.getCurrentPosition(recordForegroundLocation, () => {}, {
+      Geolocation.getCurrentPosition((pos) => {
+        if (isActive) recordForegroundLocation(pos);
+      }, () => {}, {
         enableHighAccuracy: true,
         timeout: 15_000,
         maximumAge: 5_000,
