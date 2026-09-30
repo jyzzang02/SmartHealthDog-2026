@@ -138,9 +138,11 @@ const LIGHT_BATCH_SIZE = 100;
 
 function SunlightProgressCard({
   data,
+  lastMeasuredLux,
   isUnavailable = false,
 }: {
   data: SunlightTodayResponse | null;
+  lastMeasuredLux: number | null;
   isUnavailable?: boolean;
 }) {
   const targetLuxMinutes = data?.target_lux_minutes ?? SUNLIGHT_TARGET_LUX_MINUTES;
@@ -164,13 +166,18 @@ function SunlightProgressCard({
       <View style={styles.sunlightProgressTrack}>
         <View style={[styles.sunlightProgressFill, { width: `${progressPercent}%` }]} />
       </View>
-      <Text style={styles.sunlightCardNote}>
-        {isUnavailable
-          ? '오늘의 일광 정보를 불러오지 못했습니다'
-          : data
-            ? data.qualifying_minutes + '분 달성 · 측정 ' + data.sample_count + '회'
-            : '오늘의 일광 정보를 불러오는 중...'}
-      </Text>
+      <View style={styles.sunlightCardFooter}>
+        <Text style={styles.sunlightCardNote}>
+          {isUnavailable
+            ? '오늘의 일광 정보를 불러오지 못했습니다'
+            : data
+              ? data.qualifying_minutes + '분 달성 · 측정 ' + data.sample_count + '회'
+              : '오늘의 일광 정보를 불러오는 중...'}
+        </Text>
+        <Text style={styles.sunlightCardLastLux}>
+          마지막 측정 {lastMeasuredLux === null ? '--' : Math.round(lastMeasuredLux).toLocaleString()} Lux
+        </Text>
+      </View>
     </View>
   );
 }
@@ -197,6 +204,7 @@ export default function WalkActiveScreen() {
   const [canLeaveScreen, setCanLeaveScreen] = useState(false);
   const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
   const [sunlightUnavailable, setSunlightUnavailable] = useState(false);
+  const [lastMeasuredLux, setLastMeasuredLux] = useState<number | null>(null);
 
   const timerStateRef = useRef(createWalkTimer(startedAtMs));
   const walkIdRef = useRef<number | null>(null);
@@ -290,6 +298,10 @@ export default function WalkActiveScreen() {
     const upload = (async () => {
       const pending = await walkLocationTrackingModule.getLightSamples(walkId);
       if (pending.length > 0) {
+        const latestSample = pending.reduce((latest, sample) =>
+          Date.parse(sample.measured_at) > Date.parse(latest.measured_at) ? sample : latest,
+        );
+        setLastMeasuredLux(latestSample.lux);
         console.info('[walk-light] upload:pending', {
           walkId,
           count: pending.length,
@@ -1313,7 +1325,7 @@ export default function WalkActiveScreen() {
       </Animated.View>
 
       <View style={[styles.bottomSheet, { height: 338 + insets.bottom, paddingBottom: 8 + insets.bottom }]}>
-        <SunlightProgressCard data={todaySunlight} isUnavailable={sunlightUnavailable} />
+        <SunlightProgressCard data={todaySunlight} lastMeasuredLux={lastMeasuredLux} isUnavailable={sunlightUnavailable} />
         <View style={styles.metricsRow}>
           <View style={styles.metricBox}><Text style={styles.metricValue}>{distanceText}</Text><Text style={styles.metricLabel}>거리(km)</Text></View>
           <View style={styles.metricDivider} />
@@ -1349,7 +1361,7 @@ export default function WalkActiveScreen() {
               </View>
             </View>
             <View style={styles.resultSunlightSection}>
-              <SunlightProgressCard data={todaySunlight} isUnavailable={sunlightUnavailable} />
+              <SunlightProgressCard data={todaySunlight} lastMeasuredLux={lastMeasuredLux} isUnavailable={sunlightUnavailable} />
             </View>
             <View style={styles.resultButtonContainer}><CustomButton text={isSubmitting ? '저장 중...' : '확인'} onPress={handleResultConfirm} width={230} disabled={isSubmitting} /></View>
           </View>
@@ -1368,7 +1380,9 @@ const styles = StyleSheet.create({
   sunlightCardAchieved: { color: '#F4B844', fontWeight: '700' },
   sunlightProgressTrack: { height: 8, borderRadius: 4, backgroundColor: '#F2F4F7', marginTop: 12, overflow: 'hidden' },
   sunlightProgressFill: { height: 8, backgroundColor: '#FFC94D' },
-  sunlightCardNote: { color: '#7B7C7D', fontSize: 12, marginTop: 10 },
+  sunlightCardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
+  sunlightCardNote: { color: '#7B7C7D', fontSize: 12, flexShrink: 1 },
+  sunlightCardLastLux: { color: '#7B7C7D', fontSize: 12, marginLeft: 8 },
   resultSunlightSection: { marginTop: 16 },
   container: { flex: 1, backgroundColor: '#E5E7EB' }, mapBackground: { backgroundColor: '#DCE2EA' }, mapViewport: { position: 'absolute', top: 0, left: 0, right: 0 }, mapFallback: { backgroundColor: '#E9ECEF' },
   recenterButton: { position: 'absolute', right: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },

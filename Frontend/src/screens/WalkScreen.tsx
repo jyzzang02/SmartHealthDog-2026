@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,6 +16,7 @@ import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
 import {
+  getPetTodaySunlight,
   getMyThisWeekWalks,
   getPetWalks,
   isCompletedWalkRecord,
@@ -114,12 +115,28 @@ const getDayLabel = (dateText: string) => {
   return DAYS[date.getDay()] ?? '일';
 };
 
+const getSeoulDateKey = (date: Date) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+
+const formatWalkDuration = (seconds: number) => {
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
+};
+
 export default function WalkScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
   const [isSunlightIntroVisible, setSunlightIntroVisible] = useState(false);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [pets, setPets] = useState<PetListItem[]>([]);
+  const [todaySunlightPercentByPet, setTodaySunlightPercentByPet] = useState<Record<number, number | null>>({});
   const [walkRecords, setWalkRecords] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const bottomSheetY = useRef(new Animated.Value(WALK_SHEET_HEIGHT)).current;
@@ -208,6 +225,54 @@ export default function WalkScreen() {
       loadWalkData();
     }, [loadWalkData, refreshTip])
   );
+
+  useEffect(() => {
+    let isCurrent = true;
+    if (pets.length === 0) {
+      setTodaySunlightPercentByPet({});
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    Promise.allSettled(
+      pets.map(async (pet) => {
+        const sunlight = await getPetTodaySunlight(pet.id);
+        const percent = Number.isFinite(sunlight.progress_percent)
+          ? sunlight.progress_percent
+          : sunlight.target_lux_minutes > 0
+            ? (sunlight.achieved_lux_minutes / sunlight.target_lux_minutes) * 100
+            : 0;
+        return [pet.id, Math.max(0, Math.min(100, percent))] as const;
+      })
+    ).then((results) => {
+      if (!isCurrent) return;
+      setTodaySunlightPercentByPet(
+        Object.fromEntries(
+          results.map((result, index) => [
+            pets[index].id,
+            result.status === 'fulfilled' ? result.value[1] : null,
+          ])
+        )
+      );
+    });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [pets]);
+
+  const todayWalkSecondsByPet = useMemo(() => {
+    const todayKey = getSeoulDateKey(new Date());
+    return walkRecords.reduce<Record<number, number>>((totals, record) => {
+      const startedAt = record.startedAt ? new Date(record.startedAt) : null;
+      if (!startedAt || !Number.isFinite(startedAt.getTime()) || getSeoulDateKey(startedAt) !== todayKey) {
+        return totals;
+      }
+      totals[record.petId] = (totals[record.petId] ?? 0) + Math.max(0, record.durationSec || 0);
+      return totals;
+    }, {});
+  }, [walkRecords]);
 
   const petOptions = useMemo(
     () =>
@@ -361,7 +426,7 @@ export default function WalkScreen() {
         <View style={styles.graphContainer}>
           {weeklyData.map((item, index) => {
             const total = item.pet1 + item.pet2;
-            const maxHeight = 110;
+            const maxHeight = 90;
             const scaledTotal =
               total > 0 && maxDailyDistance > 0
                 ? Math.max(10, (total / maxDailyDistance) * maxHeight)
@@ -406,6 +471,27 @@ export default function WalkScreen() {
             );
           })}
         </View>
+        <ScrollView
+          style={{ height: Math.min(pets.length * 28, 56) }}
+          contentContainerStyle={styles.petDailySummaryList}
+          nestedScrollEnabled
+          scrollEnabled={pets.length > 2}
+          showsVerticalScrollIndicator={pets.length > 2}
+        >
+          {pets.map((pet) => {
+            const sunlightPercent = todaySunlightPercentByPet[pet.id];
+            return (
+              <View key={pet.id} style={styles.petDailySummary}>
+                <Text style={[styles.petDailySummaryName, { color: getPetColor(pet.id) }]} numberOfLines={1}>
+                  {pet.name || '이름 없음'}
+                </Text>
+                <Text style={styles.petDailySummaryText} numberOfLines={1}>
+                  산책 시간 {formatWalkDuration(todayWalkSecondsByPet[pet.id] ?? 0)} · <Text style={styles.petDailySunlightLabel}>조도 측정량</Text> {sunlightPercent == null ? '--' : `${Math.round(sunlightPercent)}%`}
+                </Text>
+              </View>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <View style={styles.bottomSheet}>
@@ -571,6 +657,11 @@ const styles = StyleSheet.create({
   graphTitle: { color: '#000000', fontSize: 18, fontWeight: '600', alignSelf: 'flex-start' },
   graphMoreButton: { width: 56, height: 30, resizeMode: 'contain' },
   graphContainer: { width: 310, height: 135, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12, paddingBottom: 22 },
+  petDailySummaryList: { width: '100%' },
+  petDailySummary: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center' },
+  petDailySummaryName: { width: 76, fontSize: 12, fontWeight: '600' },
+  petDailySummaryText: { flex: 1, color: '#7B7C7D', fontSize: 12 },
+  petDailySunlightLabel: { color: '#F4B844' },
   barColumn: { alignItems: 'center', width: 20 },
   barWrapper: { width: 20, alignItems: 'center' },
   barSegment: { width: 20 },

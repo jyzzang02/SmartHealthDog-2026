@@ -30,6 +30,7 @@ export interface WalkRecordDto {
   path_coordinates?: WalkCoordinate[];
   pathCoordinates?: WalkCoordinate[];
   photos?: string[];
+  sunlight?: SunlightTodayResponse | null;
 }
 
 export interface PetWalkListResponse {
@@ -352,11 +353,25 @@ export const getPetTodaySunlight = async (
   );
 
   if (!response.ok) {
+    console.warn('[walk-debug] sunlight:today-error', { petId, status: response.status });
     await throwHttpError(response, '오늘의 일광 노출 정보를 불러오지 못했습니다.');
   }
 
   const data = await parseJsonSafe(response);
-  return (data?.sunlight ?? data?.data?.sunlight ?? data?.data ?? data ?? {}) as SunlightTodayResponse;
+  const sunlight = (data?.sunlight ?? data?.data?.sunlight ?? data?.data ?? data ?? {}) as SunlightTodayResponse;
+  console.log('[walk-debug] sunlight:today-response', {
+    petId,
+    date: sunlight.date,
+    targetLuxMinutes: sunlight.target_lux_minutes,
+    achievedLuxMinutes: sunlight.achieved_lux_minutes,
+    qualifyingMinutes: sunlight.qualifying_minutes,
+    qualifiedWindows: sunlight.qualified_windows,
+    sampleCount: sunlight.sample_count,
+    progressPercent: sunlight.progress_percent,
+    completed: sunlight.completed,
+    responseKeys: data && typeof data === 'object' ? Object.keys(data) : [],
+  });
+  return sunlight;
 };
 
 export const getPetWalks = async (
@@ -384,11 +399,25 @@ export const getPetWalks = async (
   });
 
   if (!response.ok) {
+    console.warn('[walk-debug] walk-list:error', { petId, status: response.status });
     await throwHttpError(response, '산책 목록을 불러오지 못했습니다.');
   }
 
   const data = await parseJsonSafe(response);
-  return (data || {}) as PetWalkListResponse;
+  const result = (data || {}) as PetWalkListResponse;
+  console.log('[walk-debug] walk-list:response', {
+    petId,
+    count: result.items?.length ?? 0,
+    walks: (result.items ?? []).map((walk) => ({
+      walkId: walk.walk_id ?? walk.walkId ?? walk.id,
+      petId: walk.pet_id ?? walk.petId,
+      startTime: walk.start_time ?? walk.startTime,
+      endTime: walk.end_time ?? walk.endTime,
+      sunlight: walk.sunlight ?? null,
+    })),
+    responseKeys: Object.keys(result),
+  });
+  return result;
 };
 
 export const getMyThisWeekWalks = async (timezone?: string): Promise<WalkRecordDto[]> => {
@@ -411,11 +440,22 @@ export const getWalkDetail = async (walkId: number): Promise<WalkRecordDto> => {
   });
 
   if (!response.ok) {
+    console.warn('[walk-debug] walk-detail:error', { walkId, status: response.status });
     await throwHttpError(response, '산책 상세를 불러오지 못했습니다.');
   }
 
   const data = await parseJsonSafe(response);
-  return (data?.walk || data) as WalkRecordDto;
+  const walk = (data?.walk || data) as WalkRecordDto;
+  console.log('[walk-debug] walk-detail:response', {
+    requestedWalkId: walkId,
+    responseWalkId: walk.walk_id ?? walk.walkId ?? walk.id,
+    petId: walk.pet_id ?? walk.petId,
+    startTime: walk.start_time ?? walk.startTime,
+    endTime: walk.end_time ?? walk.endTime,
+    sunlight: walk.sunlight ?? null,
+    responseKeys: walk && typeof walk === 'object' ? Object.keys(walk) : [],
+  });
+  return walk;
 };
 
 export const deleteWalk = async (walkId: number): Promise<void> => {
