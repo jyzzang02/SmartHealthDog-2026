@@ -14,8 +14,6 @@ import type { RootStackParamList } from '../../App';
 
 import PetQnaEntryCard from '../components/PetQnaEntryCard';
 import DiagnosisCard from '../components/DiagnosisCard';
-import DropdownButton from '../components/DropdownButton';
-import HospitalCard from '../components/HospitalCard';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
@@ -23,31 +21,10 @@ import type { HealthSummary } from '../types/health';
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
 
-const REGIONS = [
-  '서울특별시', '경기도', '인천광역시', '부산광역시', '대구광역시'
-];
-
-const DISTRICTS: { [key: string]: string[] } = {
-  '서울특별시': ['양천구', '강남구', '서초구', '구로구', '마포구'],
-  '경기도': ['성남시', '용인시', '수원시'],
-  '인천광역시': ['미추홀구', '연수구', '부평구'],
-  '부산광역시': ['해운대구', '부산진구'],
-  '대구광역시': ['수성구', '달서구']
-};
-
-const SORT_OPTIONS = ['거리순', '별점순', '이름순'];
-
 const HealthScreen: React.FC = () => {
 
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
 
-  const [selectedRegion, setSelectedRegion] = useState('');
-  const [selectedDistrict, setSelectedDistrict] = useState('');
-  const [selectedSort, setSelectedSort] = useState('거리순');
-
-  const [showRegionModal, setShowRegionModal] = useState(false);
-  const [showDistrictModal, setShowDistrictModal] = useState(false);
-  const [showSortModal, setShowSortModal] = useState(false);
   const [showPetModal, setShowPetModal] = useState(false);
 
   const [petList, setPetList] = useState<PetListItem[]>([]);
@@ -176,27 +153,8 @@ const HealthScreen: React.FC = () => {
       <View style={styles.whiteSection}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
 
-        <View style={styles.filterRow}>
-
-          <DropdownButton label={selectedRegion || '지역'} onPress={() => setShowRegionModal(true)} />
-          <DropdownButton label={selectedDistrict || '군/구'} onPress={() => selectedRegion && setShowDistrictModal(true)} disabled={!selectedRegion} />
-          <DropdownButton label={selectedSort} onPress={() => setShowSortModal(true)} />
-
-        </View>
-
-        <View style={styles.hospitalList}>
-          {[1, 2, 3, 4, 5].map((i) => (
-            <HospitalCard
-              key={i}
-              name="ABC 동물병원"
-              rating={3.4}
-              address="서울시 양천구 신목로 100 2층"
-              phone="02-1234-5678"
-              image={require('../assets/adopt_placeholder.png')}
-              onPress={() => {}}
-            />
-          ))}
-        </View>
+        {/* 지도 API 영역 (추후 연동) */}
+        <View style={styles.mapArea} />
 
       </View>
 
@@ -217,73 +175,6 @@ const HealthScreen: React.FC = () => {
                 </TouchableOpacity>
               ))}
             </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* ▼ 아래 모달들은 그대로 유지 ▼ */}
-
-      {/* 지역 선택 모달 */}
-      <Modal visible={showRegionModal} transparent animationType="fade" onRequestClose={() => setShowRegionModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowRegionModal(false)}>
-          <View style={styles.modalContent}>
-            <ScrollView>
-              {REGIONS.map((region) => (
-                <TouchableOpacity
-                  key={region}
-                  style={styles.modalItem}
-                  onPress={() => {
-                    setSelectedRegion(region);
-                    setSelectedDistrict('');
-                    setShowRegionModal(false);
-                  }}
-                >
-                  <Text style={styles.modalItemText}>{region}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* 군/구 */}
-      <Modal visible={showDistrictModal} transparent animationType="fade" onRequestClose={() => setShowDistrictModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowDistrictModal(false)}>
-          <View style={styles.modalContent}>
-            <ScrollView>
-              {selectedRegion && DISTRICTS[selectedRegion]?.map((district) => (
-                <TouchableOpacity
-                  key={district}
-                  style={styles.modalItem}
-                  onPress={() => {
-                    setSelectedDistrict(district);
-                    setShowDistrictModal(false);
-                  }}
-                >
-                  <Text style={styles.modalItemText}>{district}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* 정렬 */}
-      <Modal visible={showSortModal} transparent animationType="fade" onRequestClose={() => setShowSortModal(false)}>
-        <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={() => setShowSortModal(false)}>
-          <View style={styles.modalContent}>
-            {SORT_OPTIONS.map((sort) => (
-              <TouchableOpacity
-                key={sort}
-                style={styles.modalItem}
-                onPress={() => {
-                  setSelectedSort(sort);
-                  setShowSortModal(false);
-                }}
-              >
-                <Text style={styles.modalItemText}>{sort}</Text>
-              </TouchableOpacity>
-            ))}
           </View>
         </TouchableOpacity>
       </Modal>
@@ -408,7 +299,5 @@ const styles = StyleSheet.create({
 
   sectionTitle: { fontSize: 20, fontWeight: '700', color: '#000', marginBottom: 16 },
 
-  filterRow: { flexDirection: 'row', gap: 12 },
-
-  hospitalList: { marginTop: 12 },
+  mapArea: { height: 260 },
 });
