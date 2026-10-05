@@ -12,7 +12,7 @@ import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 
-import SymptomSearchBox from '../components/SymptomSearchBox';
+import PetQnaEntryCard from '../components/PetQnaEntryCard';
 import DiagnosisCard from '../components/DiagnosisCard';
 import DropdownButton from '../components/DropdownButton';
 import HospitalCard from '../components/HospitalCard';
@@ -94,14 +94,14 @@ const HealthScreen: React.FC = () => {
         <Text style={styles.subtitle}>스마트 진단하기</Text>
       </View>
       
-      <SymptomSearchBox />
+      <PetQnaEntryCard />
 
       {/* ============================ */}
       {/* 진단 기능 버튼 */}
       {/* ============================ */}
       <View style={styles.cardRow}>
         
-        {/* 안구질환 진단 → SymptomResult 또는 EyeScreen으로 이동 */}
+        {/* 안구질환 진단 → EyeDiagnosis로 이동 */}
         <DiagnosisCard
           title="안구질환 진단"
           description="강아지, 고양이의 안구 질환을 간단하게 진단"

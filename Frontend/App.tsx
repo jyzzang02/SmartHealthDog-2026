@@ -20,7 +20,6 @@ import PetSignup from './src/screens/PetSignup';
 import TabNavigator from './src/navigation/TabBar';
 
 import AnimalDetailScreen from './src/screens/AnimalDetailScreen';
-import SymptomResultScreen from './src/screens/SymptomResultScreen';
 import DiagnosisHistoryScreen from './src/screens/DiagnosisHistoryScreen';
 
 import EyeDiagnosisScreen from './src/screens/EyeDiagnosisScreen';
@@ -43,7 +42,10 @@ import HealthCheckInputScreen from './src/screens/HealthCheckInputScreen';
 import HealthCheckResultScreen from './src/screens/HealthCheckResultScreen';
 import HealthDetailScreen from './src/screens/HealthDetailScreen';
 import BreedDetailScreen from './src/screens/BreedDetailScreen';
+import PetQnaSelectScreen from './src/screens/PetQnaSelectScreen';
+import PetQnaListScreen from './src/screens/PetQnaListScreen';
 import type { HealthSummary } from './src/types/health';
+import type { PetSpecies } from './src/data/petQna';
 
 export type RootStackParamList = {
   AuthLoading: undefined;
@@ -69,8 +71,6 @@ export type RootStackParamList = {
   };
 
   Main: undefined;
-
-  SymptomResult: undefined;
 
   EyeDiagnosis: undefined;
   EyeCamera: undefined;
@@ -164,6 +164,11 @@ export type RootStackParamList = {
   BreedDetail: {
     breedName: string;
   };
+
+  PetQnaSelect: undefined;
+  PetQnaList: {
+    species: PetSpecies;
+  };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -213,7 +218,6 @@ function AppNavigator() {
         <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
 
         {/* Health */}
-        <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
         <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
         <Stack.Screen name="EyeCamera" component={EyeCameraScreen} />
         <Stack.Screen
@@ -251,6 +255,10 @@ function AppNavigator() {
         <Stack.Screen name="HealthCheckResult" component={HealthCheckResultScreen} />
         <Stack.Screen name="HealthDetail" component={HealthDetailScreen} />
         <Stack.Screen name="BreedDetail" component={BreedDetailScreen} />
+
+        {/* Pet Q&A */}
+        <Stack.Screen name="PetQnaSelect" component={PetQnaSelectScreen} />
+        <Stack.Screen name="PetQnaList" component={PetQnaListScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
