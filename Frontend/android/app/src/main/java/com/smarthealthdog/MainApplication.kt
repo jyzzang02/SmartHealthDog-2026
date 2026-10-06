@@ -19,6 +19,7 @@ class MainApplication : Application(), ReactApplication {
               add(CompassHeadingPackage())
               add(DiagnosisImageCropperPackage())
               add(WalkLocationTrackingPackage())
+              add(KakaoLoginWebViewPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

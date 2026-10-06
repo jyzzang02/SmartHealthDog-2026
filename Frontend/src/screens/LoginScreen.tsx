@@ -12,10 +12,15 @@ import {
   Platform,
   Image,
   Animated,
+  requireNativeComponent,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Config from 'react-native-config';
-import { WebView } from 'react-native-webview';
+import { WebView, WebViewProps } from 'react-native-webview';
+import {
+  SafeAreaProvider,
+  SafeAreaView as ModalSafeAreaView,
+} from 'react-native-safe-area-context';
 import LogoAnimation from '../components/LogoAnimation';
 import { isApiError, loginWithKakaoCode } from '../api/auth';
 import { storeAuthTokens } from '../storage/tokenStorage';
@@ -37,6 +42,13 @@ interface Props {
 }
 
 const KAKAO_AUTHORIZE_URL = 'https://kauth.kakao.com/oauth/authorize';
+const kakaoNativeConfig: WebViewProps['nativeConfig'] = Platform.OS === 'android'
+  ? {
+      component: requireNativeComponent('KakaoLoginWebView') as NonNullable<
+        WebViewProps['nativeConfig']
+      >['component'],
+    }
+  : undefined;
 // TODO: Switch to an HTTPS redirect URI and validate OAuth state before production release.
 const KAKAO_REDIRECT_URI = 'http://api.puppydoc.ovh:8080/api/auth/kakao/callback';
 
@@ -168,10 +180,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <LogoAnimation onAnimationComplete={handleAnimationComplete} />
       </Animated.View>
 
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoidingView}
-      >
+      <View style={styles.loginContent}>
         <View style={styles.content}>
           <View style={styles.logoContainer}>
             <Image
@@ -233,56 +242,62 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </Animated.View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
 
       <Modal
         visible={isKakaoLoginVisible}
         animationType="slide"
+        hardwareAccelerated
         onRequestClose={closeKakaoLogin}
       >
-        <SafeAreaView style={styles.kakaoModal}>
-          <View style={styles.kakaoModalHeader}>
-            <TouchableOpacity
-              style={styles.kakaoCloseButton}
-              onPress={closeKakaoLogin}
-              disabled={isKakaoSubmitting}
-            >
-              <Text style={styles.kakaoCloseButtonText}>닫기</Text>
-            </TouchableOpacity>
-          </View>
-          <KeyboardAvoidingView
-            style={styles.kakaoWebViewContainer}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          >
-            {kakaoAuthorizeUrl && (
-              <WebView
-                style={styles.kakaoWebView}
-                source={{ uri: kakaoAuthorizeUrl }}
-                nestedScrollEnabled
-                onShouldStartLoadWithRequest={({ url }) => {
-                  if (!isKakaoCallbackUrl(url)) return true;
-
-                  handleKakaoNavigation(url).catch(() => {
-                    setIsKakaoLoginVisible(false);
-                    Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
-                  });
-                  return false;
-                }}
-                onError={() => {
-                  if (!hasHandledKakaoCallback.current) {
-                    setIsKakaoLoginVisible(false);
-                    Alert.alert('카카오 로그인 실패', '로그인 화면을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
-                  }
-                }}
-              />
-            )}
-          </KeyboardAvoidingView>
-          {isKakaoSubmitting && (
-            <View style={styles.kakaoLoadingOverlay}>
-              <ActivityIndicator size="large" color="#0081D5" />
+        {/* Measure system-bar insets in the modal's own window. */}
+        <SafeAreaProvider>
+          <ModalSafeAreaView style={styles.kakaoModal}>
+            <View style={styles.kakaoModalHeader}>
+              <TouchableOpacity
+                style={styles.kakaoCloseButton}
+                onPress={closeKakaoLogin}
+                disabled={isKakaoSubmitting}
+              >
+                <Text style={styles.kakaoCloseButtonText}>닫기</Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </SafeAreaView>
+            <KeyboardAvoidingView
+              style={styles.kakaoWebViewContainer}
+              enabled={Platform.OS === 'ios'}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              {kakaoAuthorizeUrl && (
+                <WebView
+                  style={styles.kakaoWebView}
+                  nativeConfig={kakaoNativeConfig}
+                  source={{ uri: kakaoAuthorizeUrl }}
+                  nestedScrollEnabled
+                  onShouldStartLoadWithRequest={({ url }) => {
+                    if (!isKakaoCallbackUrl(url)) return true;
+
+                    handleKakaoNavigation(url).catch(() => {
+                      setIsKakaoLoginVisible(false);
+                      Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+                    });
+                    return false;
+                  }}
+                  onError={() => {
+                    if (!hasHandledKakaoCallback.current) {
+                      setIsKakaoLoginVisible(false);
+                      Alert.alert('카카오 로그인 실패', '로그인 화면을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+                    }
+                  }}
+                />
+              )}
+            </KeyboardAvoidingView>
+            {isKakaoSubmitting && (
+              <View style={styles.kakaoLoadingOverlay}>
+                <ActivityIndicator size="large" color="#0081D5" />
+              </View>
+            )}
+          </ModalSafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     </SafeAreaView>
   );
@@ -302,7 +317,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
     backgroundColor: '#FFFFFF',
   },
-  keyboardAvoidingView: {
+  loginContent: {
     flex: 1,
   },
   content: {
