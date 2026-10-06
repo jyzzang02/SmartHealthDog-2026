@@ -36,9 +36,11 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     getSystemService(Context.LOCATION_SERVICE) as LocationManager
   }
   private val sensorManager by lazy { getSystemService(Context.SENSOR_SERVICE) as SensorManager }
+  private val cctDiagnostics by lazy { WalkCctDiagnostics(sensorManager) }
   private val handler = Handler(Looper.getMainLooper())
   private var lightSensor: Sensor? = null
   private var latestLux: Float? = null
+  private var latestLuxTimestampNs = 0L
   private var walkId: Long = 0L
   private var startedAtMs: Long = 0L
   private var wakeLock: PowerManager.WakeLock? = null
@@ -49,6 +51,7 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     override fun run() {
       val lux = latestLux
       if (walkId > 0L && lux != null && System.currentTimeMillis() >= startedAtMs) {
+        cctDiagnostics.logSample(lux, latestLuxTimestampNs)
         try {
           val saved = WalkLightStore.append(applicationContext, walkId, lux.toDouble())
           Log.i(LIGHT_LOG_TAG, "sample:stored walkId=$walkId lux=$lux saved=$saved")
@@ -67,6 +70,7 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
         Log.w(LIGHT_LOG_TAG, "sample:skipped walkId=$walkId freshEvent=${lux != null}")
       }
       latestLux = null
+      latestLuxTimestampNs = 0L
       lightSensor?.let { sensor ->
         try {
           sensorManager.unregisterListener(this@WalkLocationService)
@@ -120,6 +124,8 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     val value = event.values.firstOrNull() ?: return
     if (value.isFinite() && value >= 0f) {
       latestLux = value
+      latestLuxTimestampNs = event.timestamp
+      cctDiagnostics.onLuxEvent(event.timestamp)
       if (!loggedFirstLightEvent) {
         loggedFirstLightEvent = true
         Log.i(LIGHT_LOG_TAG, "sensor:first-event walkId=$walkId lux=$value")
@@ -151,6 +157,7 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
       return
     }
     Log.i(LIGHT_LOG_TAG, "sensor:registered walkId=$walkId name=${sensor.name}")
+    cctDiagnostics.start(walkId)
     val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:WalkLight")
       .apply { acquire() }
@@ -159,9 +166,11 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
 
   private fun stopLightTracking() {
     handler.removeCallbacks(sampleLight)
+    cctDiagnostics.stop()
     if (lightSensor != null) sensorManager.unregisterListener(this)
     lightSensor = null
     latestLux = null
+    latestLuxTimestampNs = 0L
     firstLightSampleQueued = false
     oneMinuteTestLux.clear()
     wakeLock?.let { if (it.isHeld) it.release() }
