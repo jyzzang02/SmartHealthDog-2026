@@ -27,6 +27,8 @@ import { WebView } from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
 import type { GeoPosition } from 'react-native-geolocation-service';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLatestWalkLightSample } from '../hooks/useLatestWalkLightSample';
+import type { LatestWalkLightSampleSource } from '../hooks/useLatestWalkLightSample';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import {
@@ -71,7 +73,7 @@ type BackgroundWalkLocation = {
   timestamp: number;
 };
 
-type WalkLocationTrackingModule = {
+type WalkLocationTrackingModule = LatestWalkLightSampleSource & {
   start: (walkId: number, startedAtMs: number) => Promise<void>;
   stop: () => Promise<void>;
   clearLocations: () => Promise<void>;
@@ -204,7 +206,6 @@ export default function WalkActiveScreen() {
   const [canLeaveScreen, setCanLeaveScreen] = useState(false);
   const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
   const [sunlightUnavailable, setSunlightUnavailable] = useState(false);
-  const [lastMeasuredLux, setLastMeasuredLux] = useState<number | null>(null);
 
   const timerStateRef = useRef(createWalkTimer(startedAtMs));
   const walkIdRef = useRef<number | null>(null);
@@ -234,6 +235,12 @@ export default function WalkActiveScreen() {
   const shouldResetBackgroundLocationsRef = useRef(false);
   const isStoppingRef = useRef(false);
   const lightUploadPromiseRef = useRef<Promise<void> | null>(null);
+
+  const lastMeasuredLux = useLatestWalkLightSample(
+    isSessionReady ? walkIdRef.current : null,
+    Platform.OS === 'android' ? walkLocationTrackingModule : undefined,
+    isPaused || showResultModal,
+  );
 
   const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
@@ -298,10 +305,6 @@ export default function WalkActiveScreen() {
     const upload = (async () => {
       const pending = await walkLocationTrackingModule.getLightSamples(walkId);
       if (pending.length > 0) {
-        const latestSample = pending.reduce((latest, sample) =>
-          Date.parse(sample.measured_at) > Date.parse(latest.measured_at) ? sample : latest,
-        );
-        setLastMeasuredLux(latestSample.lux);
         console.info('[walk-light] upload:pending', {
           walkId,
           count: pending.length,

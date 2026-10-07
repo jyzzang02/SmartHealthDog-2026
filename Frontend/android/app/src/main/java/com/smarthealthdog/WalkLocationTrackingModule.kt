@@ -69,7 +69,7 @@ class WalkLocationTrackingModule(
 
   @ReactMethod
   fun getLightSamples(walkId: Double, promise: Promise) {
-    val samples = WalkLightStore.get(reactContext, walkId.toLong())
+    val samples = WalkLightStore.getForUpload(reactContext, walkId.toLong())
     Log.i(LIGHT_LOG_TAG, "module:pending walkId=${walkId.toLong()} count=${samples.length()}")
     val result = Arguments.createArray()
     for (index in 0 until samples.length()) {
@@ -81,6 +81,21 @@ class WalkLocationTrackingModule(
       })
     }
     promise.resolve(result)
+  }
+
+  @ReactMethod
+  fun getLatestLightSample(walkId: Double, promise: Promise) {
+    try {
+      val sample = WalkLightStore.getLatest(reactContext, walkId.toLong())
+      promise.resolve(sample?.let {
+        Arguments.createMap().apply {
+          putString("measured_at", it.optString("measured_at"))
+          putDouble("lux", it.optDouble("lux"))
+        }
+      })
+    } catch (error: Exception) {
+      promise.reject("LIGHT_SAMPLE_READ_FAILED", "Failed to read the latest light sample.", error)
+    }
   }
 
   @ReactMethod

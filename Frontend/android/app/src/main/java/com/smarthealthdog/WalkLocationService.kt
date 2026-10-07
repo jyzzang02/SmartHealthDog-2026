@@ -51,10 +51,11 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     override fun run() {
       val lux = latestLux
       if (walkId > 0L && lux != null && System.currentTimeMillis() >= startedAtMs) {
-        cctDiagnostics.logSample(lux, latestLuxTimestampNs)
+        val uploadDecision = cctDiagnostics.evaluateForUpload(lux, latestLuxTimestampNs)
         try {
-          val saved = WalkLightStore.append(applicationContext, walkId, lux.toDouble())
-          Log.i(LIGHT_LOG_TAG, "sample:stored walkId=$walkId lux=$lux saved=$saved")
+          val saved = WalkLightStore.record(applicationContext, walkId, lux.toDouble(), uploadDecision)
+          Log.i(LIGHT_LOG_TAG, "sample:stored walkId=$walkId lux=$lux saved=$saved " +
+            "uploadQueued=${saved && uploadDecision.allowed} mode=${uploadDecision.mode}")
           if (saved) {
             oneMinuteTestLux.add(lux)
             if (oneMinuteTestLux.size == 2) {
@@ -262,20 +263,67 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
 
 object WalkLightStore {
   private const val PREFERENCES_NAME = "walk_light_samples"
+  private const val LATEST_SAMPLE_KEY = "latest_sample"
 
   @Synchronized
-  fun append(context: Context, walkId: Long, lux: Double): Boolean {
-    val samples = get(context, walkId)
+  internal fun record(
+    context: Context,
+    walkId: Long,
+    lux: Double,
+    uploadDecision: WalkCctUploadPolicy.Decision,
+  ): Boolean {
     val format = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
       timeZone = TimeZone.getTimeZone("UTC")
     }
-    samples.put(JSONObject().apply {
+    val sample = JSONObject().apply {
       put("client_sample_id", UUID.randomUUID().toString())
       put("measured_at", format.format(Date()))
       put("lux", lux)
-    })
-    return context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
-      .edit().putString(walkId.toString(), samples.toString()).commit()
+    }
+    // Keep one display snapshot independent of the acknowledged upload queue.
+    val latest = JSONObject(sample.toString()).apply { put("walk_id", walkId) }
+    val editor = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+      .edit().putString(LATEST_SAMPLE_KEY, latest.toString())
+    if (uploadDecision.allowed &&
+      WalkCctUploadPolicy.permitsStoredSample(uploadDecision.mode, uploadDecision.cctCandidate)) {
+      // Private queue metadata only: the existing API still receives ID, time and Lux.
+      sample.put("upload_mode", uploadDecision.mode)
+      uploadDecision.cctCandidate?.let { sample.put("cct_candidate", it.toDouble()) }
+      val samples = get(context, walkId)
+      samples.put(sample)
+      editor.putString(walkId.toString(), samples.toString())
+    }
+    return editor.commit()
+  }
+
+  @Synchronized
+  fun getForUpload(context: Context, walkId: Long): JSONArray {
+    val pending = get(context, walkId)
+    val eligible = JSONArray()
+    for (index in 0 until pending.length()) {
+      val sample = pending.optJSONObject(index) ?: continue
+      val mode = if (sample.has("upload_mode")) sample.optString("upload_mode") else null
+      val candidate = sample.optDouble("cct_candidate", Double.NaN).toFloat()
+      if (WalkCctUploadPolicy.permitsStoredSample(mode, candidate)) {
+        eligible.put(sample)
+      }
+    }
+    val blocked = pending.length() - eligible.length()
+    if (blocked > 0) {
+      Log.i("WalkLight", "queue:cct-blocked walkId=$walkId count=$blocked reason=missing_or_invalid_cct")
+    }
+    return eligible
+  }
+
+  @Synchronized
+  fun getLatest(context: Context, walkId: Long): JSONObject? {
+    val raw = context.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+      .getString(LATEST_SAMPLE_KEY, null)
+    val latest = try { raw?.let { JSONObject(it) } } catch (_: Exception) { null }
+    if (latest != null && latest.optLong("walk_id") == walkId) return latest
+    // Allow an existing session's pending samples to be read after an app update.
+    val pending = get(context, walkId)
+    return pending.optJSONObject(pending.length() - 1)
   }
 
   @Synchronized
