@@ -9,5 +9,8 @@
         <domain includeSubdomains="true">dapi.kakao.com</domain>
         <domain includeSubdomains="true">kakao.com</domain>
         <domain includeSubdomains="true">daumcdn.net</domain>
+        <!-- The Kakao Web SDK uses HTTP assets in inline/non-HTTPS WebViews. -->
+        <domain includeSubdomains="false">t1.kakaocdn.net</domain>
+        <domain includeSubdomains="false">mts.kakaocdn.net</domain>
     </domain-config>
 </network-security-config>
