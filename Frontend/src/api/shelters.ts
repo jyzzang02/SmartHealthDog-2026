@@ -1,7 +1,9 @@
 import {
   getStoredAccessToken,
   getStoredRefreshToken,
-  storeAuthTokens,
+  getAuthSession,
+  assertAuthSession,
+  storeRefreshedAuthTokens,
 } from '../storage/tokenStorage';
 import { refreshAuthToken } from './auth';
 
@@ -129,7 +131,9 @@ const authorizedFetch = async (
   input: string,
   init?: RequestInit
 ): Promise<Response> => {
+  const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
+  assertAuthSession(session);
 
   if (!accessToken) {
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
@@ -158,6 +162,7 @@ const authorizedFetch = async (
   }
 
   const refreshToken = await getStoredRefreshToken();
+  assertAuthSession(session);
 
   if (!refreshToken) {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -165,7 +170,8 @@ const authorizedFetch = async (
 
   try {
     const newTokens = await refreshAuthToken(refreshToken);
-    await storeAuthTokens(newTokens);
+    await storeRefreshedAuthTokens(newTokens, refreshToken, session);
+    assertAuthSession(session);
     accessToken = newTokens.accessToken;
 
     response = await doFetch(accessToken);
