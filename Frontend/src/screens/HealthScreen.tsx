@@ -14,12 +14,16 @@ import type { RootStackParamList } from '../../App';
 
 import PetQnaEntryCard from '../components/PetQnaEntryCard';
 import DiagnosisCard from '../components/DiagnosisCard';
+import HospitalSearchMap from '../components/HospitalSearchMap';
+import { useHospitalSearch } from '../hooks/useHospitalSearch';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
 
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
+
+const emptyHospitalCenter = { lat: 37.5665, lng: 126.9780 };
 
 const HealthScreen: React.FC = () => {
 
@@ -30,6 +34,7 @@ const HealthScreen: React.FC = () => {
   const [petList, setPetList] = useState<PetListItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+  const hospitalSearch = useHospitalSearch();
 
   useFocusEffect(
     useCallback(() => {
@@ -153,8 +158,13 @@ const HealthScreen: React.FC = () => {
       <View style={styles.whiteSection}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
 
-        {/* 지도 API 영역 (추후 연동) */}
-        <View style={styles.mapArea} />
+        <HospitalSearchMap
+          center={hospitalSearch.result?.center ?? emptyHospitalCenter}
+          hospitals={hospitalSearch.result?.items ?? []}
+          loading={hospitalSearch.loading}
+          error={hospitalSearch.error}
+          onRetry={hospitalSearch.retry}
+        />
 
       </View>
 
@@ -299,5 +309,4 @@ const styles = StyleSheet.create({
 
   sectionTitle: { fontSize: 20, fontWeight: '700', color: '#000', marginBottom: 16 },
 
-  mapArea: { height: 260 },
 });
