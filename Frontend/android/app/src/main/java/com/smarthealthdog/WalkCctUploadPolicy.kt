@@ -2,7 +2,7 @@ package com.smarthealthdog
 
 /** Experimental vendor CCT gate; this is not a validated outdoor classifier. */
 internal object WalkCctUploadPolicy {
-  const val MIN_CCT = 5_000f
+  const val MIN_CCT = 6_000f
   const val MAX_SAMPLE_AGE_NS = 35_000_000_000L
   const val MAX_PAIR_GAP_NS = 5_000_000_000L
   const val MODE_LUX_ONLY = "lux_only"
