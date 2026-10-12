@@ -15,6 +15,8 @@ import type { RootStackParamList } from '../../App';
 import PetQnaEntryCard from '../components/PetQnaEntryCard';
 import DiagnosisCard from '../components/DiagnosisCard';
 import HospitalSearchMap from '../components/HospitalSearchMap';
+import HospitalSearchControls from '../components/HospitalSearchControls';
+import HospitalSearchResults from '../components/HospitalSearchResults';
 import { useHospitalSearch } from '../hooks/useHospitalSearch';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
@@ -64,7 +66,7 @@ const HealthScreen: React.FC = () => {
   const hasHealthData = Boolean(currentSummary);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} >
+    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
       {/* HEADER */}
       <View style={styles.headerContainer}>
@@ -157,6 +159,7 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       <View style={styles.whiteSection}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
+        <HospitalSearchControls />
 
         <HospitalSearchMap
           center={hospitalSearch.result?.center ?? emptyHospitalCenter}
@@ -165,6 +168,7 @@ const HealthScreen: React.FC = () => {
           error={hospitalSearch.error}
           onRetry={hospitalSearch.retry}
         />
+        {!hospitalSearch.loading && !hospitalSearch.error && <HospitalSearchResults hospitals={hospitalSearch.result?.items ?? []} />}
 
       </View>
 
