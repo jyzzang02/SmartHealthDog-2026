@@ -116,7 +116,7 @@ export const searchHospitals = async (
   const offset = params.offset ?? 0;
   if (!Number.isFinite(radius) || radius <= 0 || radius > 100 ||
       !Number.isInteger(limit) || limit < 1 || limit > 50 ||
-      !Number.isInteger(offset) || offset < 0 ||
+      !Number.isSafeInteger(offset) || offset < 0 ||
       (params.sort_by !== undefined && params.sort_by !== 'distance')) {
     throw new Error('병원검색 반경 또는 페이지 설정이 올바르지 않습니다.');
   }
@@ -157,6 +157,14 @@ export const searchHospitals = async (
     if (!isHospitalCoordinates(data?.center) || !Array.isArray(data?.items)) {
       throw new Error('병원검색 응답 형식이 명세서와 다릅니다.');
     }
+    const total = data.total;
+    const pageLimit = data.page?.limit;
+    const pageOffset = data.page?.offset;
+    if (!Number.isSafeInteger(total) || total < 0 || !Number.isInteger(pageLimit) || pageLimit < 1 || pageLimit > 50 ||
+        !Number.isSafeInteger(pageOffset) || pageOffset < 0 || data.items.length > pageLimit ||
+        data.items.length > total) {
+      throw new Error('병원검색 응답 형식이 명세서와 다릅니다.');
+    }
     const items: HospitalItem[] = data.items.flatMap((item: Record<string, unknown> | null) => {
       if (!item || typeof item.name !== 'string' || !item.name.trim() ||
           !isHospitalCoordinates(item.location) ||
@@ -185,8 +193,7 @@ export const searchHospitals = async (
     return {
       center: { lat: data.center.lat, lng: data.center.lng }, items,
       radius_km: nullableNumber(data.radius_km) ?? radius, sort_by: 'distance',
-      total: nullableNumber(data.total) ?? items.length,
-      page: { limit: nullableNumber(data.page?.limit) ?? limit, offset: nullableNumber(data.page?.offset) ?? offset },
+      total, page: { limit: pageLimit, offset: pageOffset },
     };
   } catch (error) {
     if (timedOut && !signal?.aborted) throw new Error('병원검색 응답이 지연되고 있습니다. 다시 시도해 주세요.');

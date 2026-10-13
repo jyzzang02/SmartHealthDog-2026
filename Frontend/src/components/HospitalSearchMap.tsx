@@ -21,13 +21,15 @@ interface Props {
   loading?: boolean;
   error?: string | null;
   onRetry?: () => void;
+  radiusKm?: number;
+  searchLocation?: string;
 }
 
 const isValidPoint = (point: MapPoint) =>
   Number.isFinite(point.lat) && Math.abs(point.lat) <= 90 &&
   Number.isFinite(point.lng) && Math.abs(point.lng) <= 180;
 
-const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false, error, onRetry }) => {
+const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false, error, onRetry, radiusKm = 10, searchLocation }) => {
   const [selected, setSelected] = useState<HospitalMapItem | null>(null);
   const [mapFailed, setMapFailed] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -101,7 +103,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
   return (
     <View>
       <Text style={styles.previewNotice}>
-        {loading ? '주변 병원을 검색하고 있습니다.' : error ? '주변 병원 검색을 완료하지 못했습니다.' : '현재 위치 기준 반경 10km'}
+        {loading ? '주변 병원을 검색하고 있습니다.' : error ? '주변 병원 검색을 완료하지 못했습니다.' : `${searchLocation || '현재 위치'} 기준 반경 ${radiusKm}km`}
       </Text>
       <View style={styles.mapArea}>
         {mapFailed ? (
@@ -150,7 +152,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             <Text style={styles.name}>{selectedHospital.name}</Text>
             <Text style={styles.description}>{selectedHospital.address || '주소 정보 없음'}</Text>
             {typeof selectedHospital.distance_m === 'number' && Number.isFinite(selectedHospital.distance_m) && selectedHospital.distance_m >= 0 && (
-              <Text style={styles.distance}>현재 위치에서 {selectedHospital.distance_m.toLocaleString()}m</Text>
+              <Text style={styles.distance}>{searchLocation ? '검색 기준 위치' : '현재 위치'}에서 {selectedHospital.distance_m.toLocaleString()}m</Text>
             )}
           </>
         ) : (

@@ -176,7 +176,7 @@ it('distinguishes empty results from malformed responses', async () => {
 });
 
 it('excludes invalid coordinates while preserving valid items', async () => {
-  fetchMock.mockResolvedValue(response(JSON.stringify({ ...sample, items: [sample.items[0], {
+  fetchMock.mockResolvedValue(response(JSON.stringify({ ...sample, total: 2, items: [sample.items[0], {
     ...sample.items[0], location: { lat: null, lng: 126 },
   }] })));
   expect((await searchHospitals(coordinates)).items).toHaveLength(1);
@@ -200,4 +200,18 @@ it('aborts and cleans up a timed-out network request', async () => {
   await jest.advanceTimersByTimeAsync(25000);
   await request;
   expect(jest.getTimerCount()).toBe(0);
+});
+
+it.each([
+  { total: -1 }, { total: 1.5 }, { total: Number.MAX_SAFE_INTEGER + 1 },
+  { page: { limit: 0, offset: 0 } }, { page: { limit: 51, offset: 0 } },
+  { page: { limit: 5, offset: -1 } }, { page: { limit: 5, offset: 0.5 } },
+])('rejects malformed server pagination rather than treating it as an empty result: %j', async (fields) => {
+  fetchMock.mockResolvedValue(response(JSON.stringify({ ...sample, ...fields })));
+  await expect(searchHospitals(coordinates)).rejects.toThrow('응답 형식');
+});
+
+it('rejects unsafe integer offsets before making a request', async () => {
+  await expect(searchHospitals({ ...coordinates, offset: Number.MAX_SAFE_INTEGER + 1 })).rejects.toThrow();
+  expect(fetchMock).not.toHaveBeenCalled();
 });

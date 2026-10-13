@@ -102,3 +102,11 @@ it('builds markers from response coordinates and sends the selected index throug
   addListener.mock.calls[0][2]();
   expect(postMessage).toHaveBeenCalledWith('{"type":"hospital-select","index":0}');
 });
+
+it('shows the applied region and radius rather than a hard-coded GPS search', () => {
+  act(() => { tree = renderer.create(<HospitalSearchMap center={center} hospitals={hospitals}
+    searchLocation="고양시 덕양구" radiusKm={20} />); });
+  expect(texts()).toContain('고양시 덕양구 기준 반경 20km');
+  sendMessage('{"type":"hospital-select","index":0}');
+  expect(texts().some((text) => Array.isArray(text) && text.includes('검색 기준 위치'))).toBe(true);
+});

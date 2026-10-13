@@ -159,7 +159,7 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       <View style={styles.whiteSection}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
-        <HospitalSearchControls />
+        <HospitalSearchControls onSearch={hospitalSearch.search} loading={hospitalSearch.loading} />
 
         <HospitalSearchMap
           center={hospitalSearch.result?.center ?? emptyHospitalCenter}
@@ -167,8 +167,16 @@ const HealthScreen: React.FC = () => {
           loading={hospitalSearch.loading}
           error={hospitalSearch.error}
           onRetry={hospitalSearch.retry}
+          radiusKm={hospitalSearch.result?.radius_km ?? hospitalSearch.filters.radius_km ?? 10}
+          searchLocation={hospitalSearch.filters.location}
         />
-        {!hospitalSearch.loading && !hospitalSearch.error && <HospitalSearchResults hospitals={hospitalSearch.result?.items ?? []} />}
+        {!hospitalSearch.loading && !hospitalSearch.error && <HospitalSearchResults
+          hospitals={hospitalSearch.result?.items ?? []}
+          total={hospitalSearch.result?.total ?? 0}
+          page={hospitalSearch.result?.page ?? { limit: 5, offset: 0 }}
+          onPageChange={hospitalSearch.goToPage}
+          searchLocation={hospitalSearch.filters.location}
+        />}
 
       </View>
 

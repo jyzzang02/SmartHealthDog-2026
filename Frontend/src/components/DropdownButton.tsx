@@ -1,14 +1,16 @@
 import React from 'react';
-import { TouchableOpacity, Text, Image, StyleSheet, ViewStyle } from 'react-native';
+import { TouchableOpacity, Text, Image, StyleSheet, ViewStyle, TextStyle } from 'react-native';
 
 interface Props {
   label: string;           // 버튼에 표시될 텍스트
   onPress: () => void;     // 누르면 열리는 드롭다운
   disabled?: boolean;      // 지역 선택 안되면 군구 비활성화
+  labelStyle?: TextStyle;
+  numberOfLines?: number;
   style?: ViewStyle;       // 필요하면 외부 스타일 추가
 }
 
-const DropdownButton: React.FC<Props> = ({ label, onPress, disabled, style }) => {
+const DropdownButton: React.FC<Props> = ({ label, onPress, disabled, style, labelStyle, numberOfLines }) => {
   return (
     <TouchableOpacity
       style={[styles.button, disabled && styles.disabled, style]}
@@ -16,7 +18,7 @@ const DropdownButton: React.FC<Props> = ({ label, onPress, disabled, style }) =>
       disabled={disabled}
       activeOpacity={0.7}
     >
-      <Text style={styles.label}>{label}</Text>
+      <Text style={[styles.label, labelStyle]} numberOfLines={numberOfLines}>{label}</Text>
       <Image
         source={require('../assets/icon_arrowDown.png')}
         style={styles.icon}
