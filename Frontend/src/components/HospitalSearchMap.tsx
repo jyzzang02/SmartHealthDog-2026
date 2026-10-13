@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { WebViewMessageEvent } from 'react-native-webview';
@@ -25,24 +25,31 @@ interface Props {
   searchLocation?: string;
 }
 
+const MAP_LOAD_TIMEOUT_MS = 20000;
+
 const isValidPoint = (point: MapPoint) =>
   Number.isFinite(point.lat) && Math.abs(point.lat) <= 90 &&
   Number.isFinite(point.lng) && Math.abs(point.lng) <= 180;
 
 const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false, error, onRetry, radiusKm = 10, searchLocation }) => {
   const [selected, setSelected] = useState<HospitalMapItem | null>(null);
-  const [mapFailed, setMapFailed] = useState(false);
+  const [failedDocumentId, setFailedDocumentId] = useState<string | null>(null);
+  const loadTimeout = useRef<{ documentId: string; timer: ReturnType<typeof setTimeout> } | null>(null);
+  const readyDocumentId = useRef<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const selectedHospital = selected && hospitals.includes(selected) ? selected : null;
   const hasMarkers = hospitals.some((hospital) => isValidPoint(hospital.location));
 
-  const mapHtml = useMemo(() => {
-    const mapCenter = isValidPoint(center) ? center : { lat: 37.5665, lng: 126.9780 };
+  const mapDocument = useMemo(() => {
+    let mapCenter = isValidPoint(center) ? center : { lat: 37.5665, lng: 126.9780 };
     const positions = hospitals
       .map((hospital, index) => ({ lat: hospital.location.lat, lng: hospital.location.lng, index }))
       .filter(isValidPoint);
-
-    return `<!DOCTYPE html>
+    const regionalSearch = !!searchLocation;
+    if (regionalSearch && positions.length > 0) mapCenter = positions[0];
+    // Identify each document so delayed messages cannot affect a newer search or retry.
+    const documentId = `${reloadKey}:${Date.now()}:${Math.random()}`;
+    const html = `<!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8" />
@@ -51,8 +58,9 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
           </style>
           <script>
+            var mapDocumentId = ${JSON.stringify(documentId)};
             function notifyMapError() {
-              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'map-error' }));
+              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'map-error', documentId: mapDocumentId }));
             }
           </script>
           <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false" onerror="notifyMapError()"></script>
@@ -62,35 +70,62 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
           <script>
             (function() {
               if (!window.kakao || !kakao.maps) { notifyMapError(); return; }
-              kakao.maps.load(function() {
-                var center = new kakao.maps.LatLng(${mapCenter.lat}, ${mapCenter.lng});
-                var map = new kakao.maps.Map(document.getElementById('map'), { center: center, level: 4 });
-                var positions = ${JSON.stringify(positions)};
-                var bounds = new kakao.maps.LatLngBounds();
-                bounds.extend(center);
-                positions.forEach(function(point) {
-                  var position = new kakao.maps.LatLng(point.lat, point.lng);
-                  var marker = new kakao.maps.Marker({ map: map, position: position });
-                  bounds.extend(position);
-                  kakao.maps.event.addListener(marker, 'click', function() {
-                    window.ReactNativeWebView.postMessage(JSON.stringify({
-                      type: 'hospital-select', index: point.index
-                    }));
-                  });
+              try {
+                kakao.maps.load(function() {
+                  try {
+                    var center = new kakao.maps.LatLng(${mapCenter.lat}, ${mapCenter.lng});
+                    var map = new kakao.maps.Map(document.getElementById('map'), { center: center, level: 4 });
+                    var positions = ${JSON.stringify(positions)};
+                    var bounds = new kakao.maps.LatLngBounds();
+                    if (!${regionalSearch} || positions.length === 0) bounds.extend(center);
+                    positions.forEach(function(point) {
+                      var position = new kakao.maps.LatLng(point.lat, point.lng);
+                      var marker = new kakao.maps.Marker({ map: map, position: position });
+                      bounds.extend(position);
+                      kakao.maps.event.addListener(marker, 'click', function() {
+                        window.ReactNativeWebView.postMessage(JSON.stringify({
+                          type: 'hospital-select', index: point.index, documentId: mapDocumentId
+                        }));
+                      });
+                    });
+                    if (positions.length > 0) { map.setBounds(bounds); }
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'map-ready', documentId: mapDocumentId }));
+                  } catch (error) { notifyMapError(); }
                 });
-                if (positions.length > 0) { map.setBounds(bounds); }
-              });
+              } catch (error) { notifyMapError(); }
             })();
           </script>
         </body>
       </html>`;
-  }, [center, hospitals]);
+    return { html, documentId };
+  }, [center, hospitals, searchLocation, reloadKey]);
+  const mapFailed = failedDocumentId === mapDocument.documentId;
+  const clearLoadTimeout = useCallback(() => {
+    if (loadTimeout.current) clearTimeout(loadTimeout.current.timer);
+    loadTimeout.current = null;
+  }, []);
+  useEffect(() => {
+    if (mapFailed || readyDocumentId.current === mapDocument.documentId) return;
+    const documentId = mapDocument.documentId;
+    loadTimeout.current = {
+      documentId,
+      timer: setTimeout(() => {
+        loadTimeout.current = null;
+        setFailedDocumentId(documentId);
+      }, MAP_LOAD_TIMEOUT_MS),
+    };
+    return clearLoadTimeout;
+  }, [mapDocument.documentId, mapFailed, clearLoadTimeout]);
 
   const handleMessage = ({ nativeEvent }: WebViewMessageEvent) => {
     try {
       const message = JSON.parse(nativeEvent.data);
-      if (message?.type === 'map-error') {
-        setMapFailed(true);
+      if (message?.documentId !== mapDocument.documentId) return;
+      if (message?.type === 'map-ready') {
+        readyDocumentId.current = message.documentId;
+        if (loadTimeout.current?.documentId === message.documentId) clearLoadTimeout();
+      } else if (message?.type === 'map-error') {
+        setFailedDocumentId(mapDocument.documentId);
       } else if (message?.type === 'hospital-select' && Number.isInteger(message.index)) {
         const hospital = hospitals[message.index];
         if (hospital && isValidPoint(hospital.location)) setSelected(hospital);
@@ -111,7 +146,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             <Text style={styles.description}>지도를 불러오지 못했습니다.</Text>
             <TouchableOpacity
               accessibilityRole="button"
-              onPress={() => { setMapFailed(false); setReloadKey((value) => value + 1); }}
+              onPress={() => { setReloadKey((value) => value + 1); }}
               style={styles.retryButton}
             >
               <Text style={styles.retryText}>다시 시도</Text>
@@ -119,9 +154,9 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
           </View>
         ) : (
           <WebView
-            key={reloadKey}
+            key={mapDocument.documentId}
             style={styles.map}
-            source={{ html: mapHtml }}
+            source={{ html: mapDocument.html }}
             originWhitelist={['*']}
             javaScriptEnabled
             domStorageEnabled
@@ -134,8 +169,10 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
               </View>
             )}
             onMessage={handleMessage}
-            onError={() => setMapFailed(true)}
-            onHttpError={() => setMapFailed(true)}
+            onError={() => setFailedDocumentId(mapDocument.documentId)}
+            onHttpError={() => setFailedDocumentId(mapDocument.documentId)}
+            onRenderProcessGone={() => setFailedDocumentId(mapDocument.documentId)}
+            onContentProcessDidTerminate={() => setFailedDocumentId(mapDocument.documentId)}
           />
         )}
       </View>

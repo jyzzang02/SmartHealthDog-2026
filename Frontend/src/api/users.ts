@@ -1,11 +1,9 @@
 import {
   getStoredAccessToken,
-  getStoredRefreshToken,
   getAuthSession,
   assertAuthSession,
-  storeRefreshedAuthTokens,
 } from '../storage/tokenStorage';
-import { refreshAuthToken } from './auth';
+import { refreshSessionAccessToken } from './refreshSession';
 import { getResponseErrorMessage } from './responseError';
 import { resolveImageUri } from '../utils/imageUri';
 
@@ -106,17 +104,9 @@ const authorizedFetch = async (
     return response;
   }
 
-  const refreshToken = await getStoredRefreshToken();
-  assertAuthSession(session);
-  if (!refreshToken) {
-    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
-  }
-
   try {
-    const newTokens = await refreshAuthToken(refreshToken);
-    await storeRefreshedAuthTokens(newTokens, refreshToken, session);
+    accessToken = await refreshSessionAccessToken(session, accessToken);
     assertAuthSession(session);
-    accessToken = newTokens.accessToken;
     response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');

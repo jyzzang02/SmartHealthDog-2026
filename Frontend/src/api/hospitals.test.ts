@@ -26,11 +26,12 @@ const response = (body = rawExample, status = 200) => ({
   ok: status >= 200 && status < 300, status, text: jest.fn().mockResolvedValue(body),
 });
 const originalFetch = globalThis.fetch;
-const session = Symbol('test-session');
+let session: symbol;
 let fetchMock: jest.Mock;
 
 beforeEach(() => {
   jest.clearAllMocks();
+  session = Symbol('test-session');
   jest.mocked(getAuthSession).mockReturnValue(session);
   jest.mocked(assertAuthSession).mockImplementation(() => {});
   jest.mocked(storeRefreshedAuthTokens).mockResolvedValue(undefined);
@@ -111,13 +112,13 @@ it('cancels a search waiting for refresh without discarding rotated session toke
   fetchMock.mockResolvedValueOnce(response('', 401));
   jest.mocked(refreshAuthToken).mockImplementation(() => new Promise((resolve) => { completeRefresh = resolve; }));
   const pending = searchHospitals(coordinates, controller.signal);
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  for (let index = 0; index < 30; index += 1) await Promise.resolve();
   expect(refreshAuthToken).toHaveBeenCalledTimes(1);
   controller.abort();
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   const tokens = { accessToken: 'rotated', refreshToken: 'rotated-refresh', expiration: 'later' };
   completeRefresh(tokens);
-  for (let index = 0; index < 8; index += 1) await Promise.resolve();
+  for (let index = 0; index < 30; index += 1) await Promise.resolve();
   expect(storeRefreshedAuthTokens).toHaveBeenCalledWith(tokens, 'test-refresh-token', session);
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });

@@ -1,9 +1,8 @@
 import {
-  getStoredAccessToken, getStoredRefreshToken, getAuthSession,
-  assertAuthSession, storeRefreshedAuthTokens,
+  getStoredAccessToken, getAuthSession,
+  assertAuthSession,
 } from '../storage/tokenStorage';
-import { refreshAuthToken } from './auth';
-import type { AuthTokens } from './auth';
+import { refreshSessionAccessToken } from './refreshSession';
 import { getResponseErrorMessage } from './responseError';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
@@ -57,7 +56,7 @@ const checkAborted = (signal: AbortSignal) => { if (signal.aborted) throw abortE
 const nullableString = (value: unknown) => typeof value === 'string' && value.trim() ? value : null;
 const nullableNumber = (value: unknown) => typeof value === 'number' && Number.isFinite(value) ? value : null;
 
-const refreshSessionForSearch = (refreshToken: string, session: symbol, signal: AbortSignal): Promise<AuthTokens> =>
+const refreshSessionForSearch = (accessToken: string, session: symbol, signal: AbortSignal): Promise<string> =>
   new Promise((resolve, reject) => {
     const cleanup = () => signal.removeEventListener('abort', onAbort);
     const onAbort = () => { cleanup(); reject(abortError()); };
@@ -65,12 +64,8 @@ const refreshSessionForSearch = (refreshToken: string, session: symbol, signal: 
     if (signal.aborted) { onAbort(); return; }
 
     // Cancel the search's wait, but persist rotated session tokens if refresh completes.
-    refreshAuthToken(refreshToken)
-      .then(async (tokens) => {
-        await storeRefreshedAuthTokens(tokens, refreshToken, session);
-        return tokens;
-      })
-      .then((tokens) => { cleanup(); resolve(tokens); }, (error) => { cleanup(); reject(error); });
+    Promise.resolve().then(() => refreshSessionAccessToken(session, accessToken))
+      .then((token) => { cleanup(); resolve(token); }, (error) => { cleanup(); reject(error); });
   });
 
 const authorizedFetch = async (url: string, signal: AbortSignal) => {
@@ -87,14 +82,11 @@ const authorizedFetch = async (url: string, signal: AbortSignal) => {
   logHospitalSearch('http', { status: response.status });
   // Follow the existing shelter API: refresh on 401, not on permission-related 403.
   if (response.status === 401) {
-    const refreshToken = await getStoredRefreshToken();
+    checkAborted(signal);
+    const token = await refreshSessionForSearch(accessToken, session, signal);
     assertAuthSession(session);
     checkAborted(signal);
-    if (!refreshToken) throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
-    const tokens = await refreshSessionForSearch(refreshToken, session, signal);
-    assertAuthSession(session);
-    checkAborted(signal);
-    response = await request(tokens.accessToken);
+    response = await request(token);
     logHospitalSearch('http:retry', { status: response.status });
   }
   return response;

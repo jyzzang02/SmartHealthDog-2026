@@ -22,11 +22,21 @@ const renderMap = (items = hospitals) => {
   act(() => { tree = renderer.create(<HospitalSearchMap center={center} hospitals={items} />); });
 };
 const texts = () => tree.root.findAllByType(Text).map((node) => node.props.children);
+const documentId = () => {
+  const html: string = tree.root.findByType(WebView).props.source.html;
+  return JSON.parse(html.match(/var mapDocumentId = (.*);/)![1]) as string;
+};
 const sendMessage = (data: string) => {
-  act(() => { tree.root.findByType(WebView).props.onMessage({ nativeEvent: { data } }); });
+  let message = data;
+  try {
+    const parsed = JSON.parse(data);
+    if (parsed) message = JSON.stringify({ documentId: documentId(), ...parsed });
+  } catch { /* Keep malformed input for bridge validation. */ }
+  act(() => { tree.root.findByType(WebView).props.onMessage({ nativeEvent: { data: message } }); });
 };
 
-afterEach(() => { act(() => { tree.unmount(); }); });
+beforeEach(() => { jest.useFakeTimers(); });
+afterEach(() => { act(() => { tree.unmount(); }); jest.useRealTimers(); });
 
 it('shows only explicitly selected hospital information and handles a missing address', () => {
   renderMap();
@@ -73,7 +83,7 @@ it('recreates the map after a load failure without contacting the hospital API',
   sendMessage('{"type":"map-error"}');
   expect(texts()).toContain('지도를 불러오지 못했습니다.');
   act(() => { tree.root.findByType(TouchableOpacity).props.onPress(); });
-  expect(tree.root.findByType(WebView).props.source.html).toBe(html);
+  expect(tree.root.findByType(WebView).props.source.html).not.toBe(html);
 });
 
 it('builds markers from response coordinates and sends the selected index through the bridge', () => {
@@ -100,7 +110,7 @@ it('builds markers from response coordinates and sends the selected index throug
     position: hospitals[0].location,
   }));
   addListener.mock.calls[0][2]();
-  expect(postMessage).toHaveBeenCalledWith('{"type":"hospital-select","index":0}');
+  expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'hospital-select', index: 0, documentId: documentId() }));
 });
 
 it('shows the applied region and radius rather than a hard-coded GPS search', () => {
@@ -109,4 +119,101 @@ it('shows the applied region and radius rather than a hard-coded GPS search', ()
   expect(texts()).toContain('고양시 덕양구 기준 반경 20km');
   sendMessage('{"type":"hospital-select","index":0}');
   expect(texts().some((text) => Array.isArray(text) && text.includes('검색 기준 위치'))).toBe(true);
+});
+
+it('shows retry when the SDK never reports readiness, and cancels the timeout after retry succeeds', () => {
+  renderMap();
+  act(() => { jest.advanceTimersByTime(20000); });
+  expect(texts()).toContain('지도를 불러오지 못했습니다.');
+  act(() => { tree.root.findByType(TouchableOpacity).props.onPress(); });
+  sendMessage('{"type":"map-ready"}');
+  act(() => { jest.advanceTimersByTime(60000); });
+  expect(tree.root.findAllByType(WebView)).toHaveLength(1);
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('ignores delayed readiness and failure messages from an old document', () => {
+  renderMap();
+  const oldId = documentId();
+  act(() => { tree.update(<HospitalSearchMap center={center} hospitals={[]} searchLocation="부산" />); });
+  sendMessage(JSON.stringify({ type: 'map-error', documentId: oldId }));
+  sendMessage(JSON.stringify({ type: 'map-ready', documentId: oldId }));
+  expect(tree.root.findAllByType(WebView)).toHaveLength(1);
+  act(() => { jest.advanceTimersByTime(20000); });
+  expect(texts()).toContain('지도를 불러오지 못했습니다.');
+});
+
+it('displays regional markers without including the server fallback center in map bounds', () => {
+  const regionalHospital = { ...hospitals[0], location: { lat: 35.1796, lng: 129.0756 } };
+  act(() => { tree = renderer.create(<HospitalSearchMap center={{ lat: 37.5665, lng: 126.978 }}
+    hospitals={[regionalHospital]} searchLocation="부산" />); });
+  const extend = jest.fn();
+  const postMessage = jest.fn();
+  const maps = {
+    load: (callback: () => void) => callback(),
+    LatLng: jest.fn((lat, lng) => ({ lat, lng })),
+    Map: jest.fn(() => ({ setBounds: jest.fn() })),
+    Marker: jest.fn(), LatLngBounds: jest.fn(() => ({ extend })),
+    event: { addListener: jest.fn() },
+  };
+  const kakao = { maps };
+  const html: string = tree.root.findByType(WebView).props.source.html;
+  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
+  runInNewContext(scripts.join('\n'), { window: { kakao, ReactNativeWebView: { postMessage } },
+    kakao, document: { getElementById: () => ({}) } });
+  expect(extend).toHaveBeenCalledTimes(1);
+  expect(extend).toHaveBeenCalledWith(regionalHospital.location);
+  expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'map-ready', documentId: documentId() }));
+});
+
+it('releases the watchdog when unmounted and handles WebView process termination', () => {
+  renderMap();
+  const terminate = tree.root.findByType(WebView).props.onRenderProcessGone;
+  act(() => { terminate(); });
+  expect(texts()).toContain('지도를 불러오지 못했습니다.');
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('clears a pending load timeout when the map is unmounted', () => {
+  renderMap();
+  expect(jest.getTimerCount()).toBe(1);
+  act(() => { tree.unmount(); });
+  expect(jest.getTimerCount()).toBe(0);
+});
+
+it('reports SDK initialization exceptions through the existing failure bridge', () => {
+  renderMap();
+  const postMessage = jest.fn();
+  const kakao = { maps: { load: () => { throw new Error('SDK failed'); } } };
+  const html: string = tree.root.findByType(WebView).props.source.html;
+  const scripts = Array.from(html.matchAll(/<script>([\s\S]*?)<\/script>/g), (match) => match[1]);
+  expect(() => runInNewContext(scripts.join('\n'), {
+    window: { kakao, ReactNativeWebView: { postMessage } }, kakao,
+  })).not.toThrow();
+  expect(postMessage).toHaveBeenCalledWith(JSON.stringify({ type: 'map-error', documentId: documentId() }));
+});
+
+it('starts a fresh watchdog when returning to previously loaded search results', () => {
+  renderMap();
+  const originalId = documentId();
+  sendMessage('{"type":"map-ready"}');
+  act(() => { tree.update(<HospitalSearchMap center={center} hospitals={[]} searchLocation="부산" />); });
+  act(() => { tree.update(<HospitalSearchMap center={center} hospitals={hospitals} />); });
+  expect(documentId()).not.toBe(originalId);
+  sendMessage(JSON.stringify({ type: 'map-ready', documentId: originalId }));
+  act(() => { jest.advanceTimersByTime(20000); });
+  expect(texts()).toContain('지도를 불러오지 못했습니다.');
+});
+
+it('does not reuse a previous failed map when the same results are revisited', () => {
+  renderMap();
+  const originalId = documentId();
+  sendMessage('{"type":"map-error"}');
+  act(() => { tree.update(<HospitalSearchMap center={center} hospitals={[]} searchLocation="부산" />); });
+  act(() => { tree.update(<HospitalSearchMap center={center} hospitals={hospitals} />); });
+  expect(tree.root.findAllByType(WebView)).toHaveLength(1);
+  expect(documentId()).not.toBe(originalId);
+  sendMessage('{"type":"map-ready"}');
+  act(() => { jest.advanceTimersByTime(20000); });
+  expect(tree.root.findAllByType(WebView)).toHaveLength(1);
 });
