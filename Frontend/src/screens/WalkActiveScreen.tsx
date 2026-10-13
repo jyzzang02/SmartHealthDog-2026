@@ -32,12 +32,11 @@ import type { LatestWalkLightSampleSource } from '../hooks/useLatestWalkLightSam
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import {
-  endPetWalk,
   findActivePetWalkId,
   getPetTodaySunlight,
   startPetWalk,
-  uploadPetLightSamples,
 } from '../api/walks';
+import { finishWalkWithPendingLight, flushWalkLightSamples } from '../utils/walkLightSync';
 import type { LightSample, SunlightTodayResponse, WalkCoordinate } from '../api/walks';
 import {
   clearActiveWalkSession,
@@ -136,7 +135,6 @@ const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
 const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
 const MAX_DISTANCE_ACCUMULATION_GAP_MS = 5 * 60_000;
 const SUNLIGHT_TARGET_LUX_MINUTES = 60_000;
-const LIGHT_BATCH_SIZE = 100;
 
 function SunlightProgressCard({
   data,
@@ -303,42 +301,8 @@ export default function WalkActiveScreen() {
     if (lightUploadPromiseRef.current) return lightUploadPromiseRef.current;
     const walkId = walkIdRef.current;
     const upload = (async () => {
-      const pending = await walkLocationTrackingModule.getLightSamples(walkId);
-      if (pending.length > 0) {
-        console.info('[walk-light] upload:pending', {
-          walkId,
-          count: pending.length,
-          firstLux: pending[0].lux,
-          firstMeasuredAt: pending[0].measured_at,
-        });
-        for (const sample of pending) {
-          const secondsFromWalkStart = (Date.parse(sample.measured_at) - timerStateRef.current.startedAtMs) / 1000;
-          console.info('[walk-light] upload:sample', {
-            walkId,
-            lux: sample.lux,
-            measuredAt: sample.measured_at,
-            secondsFromWalkStart,
-            inFirstWindow: secondsFromWalkStart >= 0 && secondsFromWalkStart < 600,
-          });
-        }
-      }
-      for (let index = 0; index < pending.length; index += LIGHT_BATCH_SIZE) {
-        const batch = pending.slice(index, index + LIGHT_BATCH_SIZE);
-        const response = await uploadPetLightSamples(petId, walkId, batch);
-        const result = response.result;
-        console.info('[walk-light] upload:response', { walkId, count: batch.length, result });
-        if (
-          result?.received_count !== batch.length ||
-          result.saved_count + result.duplicate_count !== batch.length
-        ) {
-          throw new Error('조도 기록 일부가 저장되지 않아 전송을 다시 시도합니다.');
-        }
-        await walkLocationTrackingModule.acknowledgeLightSamples(
-          walkId,
-          batch.map((sample) => sample.client_sample_id),
-        );
-      }
-      if (pending.length > 0 && appStateRef.current === 'active') {
+      const uploadedCount = await flushWalkLightSamples(petId, walkId, walkLocationTrackingModule);
+      if (uploadedCount > 0 && appStateRef.current === 'active') {
         try {
           const sunlight = await getPetTodaySunlight(petId);
           console.info('[walk-light] summary:after-upload', {
@@ -1053,14 +1017,11 @@ export default function WalkActiveScreen() {
 
     setIsSubmitting(true);
     try {
-      await flushLightSamples();
-      // A sample may have arrived while an earlier upload was in flight.
-      await flushLightSamples();
-      await endPetWalk(petId, walkId, {
+      await finishWalkWithPendingLight(petId, walkId, {
         end_time: snapshot.endTime,
         distance: snapshot.distanceKm,
         path_coordinates: snapshot.pathCoordinates,
-      });
+      }, Platform.OS === 'android' ? walkLocationTrackingModule : undefined);
       await saveWalkRouteSegmentStartIndices(
         walkId,
         snapshot.pathSegmentStartIndices,

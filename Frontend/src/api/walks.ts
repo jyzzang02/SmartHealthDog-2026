@@ -306,7 +306,8 @@ export const endPetWalk = async (
 export const uploadPetLightSamples = async (
   petId: number,
   walkId: number,
-  samples: LightSample[]
+  samples: LightSample[],
+  signal?: AbortSignal,
 ): Promise<LightSamplesResponse> => {
   const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   const isoInstantPattern = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T.+(?:Z|[+-][0-9]{2}:[0-9]{2})$/;
@@ -326,6 +327,7 @@ export const uploadPetLightSamples = async (
   const response = await authorizedFetch(
     API_BASE_URL + '/api/pets/' + petId + '/walks/' + walkId + '/light-samples',
     {
+      signal,
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ samples }),

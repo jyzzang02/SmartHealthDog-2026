@@ -9,6 +9,9 @@ import {
   Modal,
   Animated,
   ActivityIndicator,
+  AppState,
+  NativeModules,
+  Platform,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,8 +25,12 @@ import {
   isCompletedWalkRecord,
   WalkRecordDto,
 } from '../api/walks';
+import { retryPendingWalkLightSamples } from '../utils/walkLightSync';
+import type { WalkLightSampleSource } from '../utils/walkLightSync';
 import { resolveImageUri } from '../utils/imageUri';
 import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
+
+const walkLightSampleSource = NativeModules.WalkLocationTracking as WalkLightSampleSource | undefined;
 
 const WALK_SHEET_HEIGHT = 420;
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -235,30 +242,44 @@ export default function WalkScreen() {
       };
     }
 
-    Promise.allSettled(
-      pets.map(async (pet) => {
-        const sunlight = await getPetTodaySunlight(pet.id);
-        const percent = Number.isFinite(sunlight.progress_percent)
-          ? sunlight.progress_percent
-          : sunlight.target_lux_minutes > 0
-            ? (sunlight.achieved_lux_minutes / sunlight.target_lux_minutes) * 100
-            : 0;
-        return [pet.id, Math.max(0, Math.min(100, percent))] as const;
-      })
-    ).then((results) => {
-      if (!isCurrent) return;
-      setTodaySunlightPercentByPet(
-        Object.fromEntries(
-          results.map((result, index) => [
-            pets[index].id,
-            result.status === 'fulfilled' ? result.value[1] : null,
-          ])
-        )
-      );
+    let refreshVersion = 0;
+    const refreshSunlight = () => {
+      const version = ++refreshVersion;
+      const retry = Platform.OS === 'android' && walkLightSampleSource
+        ? retryPendingWalkLightSamples(pets.map(pet => pet.id), walkLightSampleSource)
+        : Promise.resolve();
+      retry.catch(() => undefined).then(() => {
+        if (!isCurrent || version !== refreshVersion) return [];
+        return Promise.allSettled(
+          pets.map(async (pet) => {
+            const sunlight = await getPetTodaySunlight(pet.id);
+            const percent = Number.isFinite(sunlight.progress_percent)
+              ? sunlight.progress_percent
+              : sunlight.target_lux_minutes > 0
+                ? (sunlight.achieved_lux_minutes / sunlight.target_lux_minutes) * 100
+                : 0;
+            return [pet.id, Math.max(0, Math.min(100, percent))] as const;
+          })
+        );
+      }).then((results) => {
+        if (!isCurrent || version !== refreshVersion) return;
+        setTodaySunlightPercentByPet(
+          Object.fromEntries(
+            results.map((result, index) => [
+              pets[index].id,
+              result.status === 'fulfilled' ? result.value[1] : null,
+            ])
+          )
+        );
+      }).catch(() => undefined);
+    };
+    refreshSunlight();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshSunlight();
     });
-
     return () => {
       isCurrent = false;
+      subscription.remove();
     };
   }, [pets]);
 
