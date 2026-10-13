@@ -169,12 +169,38 @@ export const login = async (
 export const refreshAuthToken = async (
   refreshToken: string
 ): Promise<AuthTokens> => {
-  const response = await fetch(`${API_BASE_URL}/api/auth/token/refresh`, {
+  const controller = new AbortController();
+  // Bound the shared refresh so a stalled connection cannot block future requests.
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/token/refresh`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (!response.ok) {
+      const { message, codes } = await parseErrorResponse(response);
+      throw new ApiError(message, response.status, codes);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const loginWithKakaoCode = async (code: string): Promise<AuthTokens> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/login/social/kakao/code`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      Accept: 'application/json',
     },
-    body: JSON.stringify({ refreshToken }),
+    body: JSON.stringify({ code }),
   });
 
   if (!response.ok) {
@@ -182,7 +208,7 @@ export const refreshAuthToken = async (
     throw new ApiError(message, response.status, codes);
   }
 
-  return response.json();
+  return (await response.json()) as AuthTokens;
 };
 
 export const logout = async (refreshToken: string): Promise<void> => {
@@ -203,5 +229,3 @@ export const logout = async (refreshToken: string): Promise<void> => {
 export const isApiError = (error: unknown): error is ApiError => {
   return error instanceof ApiError;
 };
-
-console.log('[login] URL =', `${API_BASE_URL}/api/auth/login`);

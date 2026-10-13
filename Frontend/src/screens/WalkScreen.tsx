@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -9,15 +9,28 @@ import {
   Modal,
   Animated,
   ActivityIndicator,
+  AppState,
+  NativeModules,
+  Platform,
 } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getMyThisWeekWalks, getPetWalks, WalkRecordDto } from '../api/walks';
+import {
+  getPetTodaySunlight,
+  getMyThisWeekWalks,
+  getPetWalks,
+  isCompletedWalkRecord,
+  WalkRecordDto,
+} from '../api/walks';
+import { retryPendingWalkLightSamples } from '../utils/walkLightSync';
+import type { WalkLightSampleSource } from '../utils/walkLightSync';
 import { resolveImageUri } from '../utils/imageUri';
 import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
+
+const walkLightSampleSource = NativeModules.WalkLocationTracking as WalkLightSampleSource | undefined;
 
 const WALK_SHEET_HEIGHT = 420;
 const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -40,7 +53,7 @@ const normalizeWalk = (
   const itemPetIdRaw = item.pet_id ?? item.petId ?? item.pet?.id ?? petOverride?.id ?? 0;
   const itemPetId = Number(itemPetIdRaw) || 0;
   const pet = petOverride ?? petList.find((p) => p.id === itemPetId);
-  const walkId = (item as any).id ?? item.walk_id ?? item.walkId;
+  const walkId = item.id ?? item.walk_id ?? item.walkId;
   const startTimeIso = item.start_time ?? item.startTime ?? '';
   const endTimeIso = item.end_time ?? item.endTime ?? '';
   const durationSec = item.duration ?? 0;
@@ -109,11 +122,28 @@ const getDayLabel = (dateText: string) => {
   return DAYS[date.getDay()] ?? '일';
 };
 
+const getSeoulDateKey = (date: Date) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+
+const formatWalkDuration = (seconds: number) => {
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
+};
+
 export default function WalkScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
+  const [isSunlightIntroVisible, setSunlightIntroVisible] = useState(false);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [pets, setPets] = useState<PetListItem[]>([]);
+  const [todaySunlightPercentByPet, setTodaySunlightPercentByPet] = useState<Record<number, number | null>>({});
   const [walkRecords, setWalkRecords] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const bottomSheetY = useRef(new Animated.Value(WALK_SHEET_HEIGHT)).current;
@@ -138,7 +168,9 @@ export default function WalkScreen() {
       try {
         const thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
         walkSource = thisWeekWalks;
-        merged = thisWeekWalks.map((item) => normalizeWalk(item, petList));
+        merged = thisWeekWalks
+          .filter(isCompletedWalkRecord)
+          .map((item) => normalizeWalk(item, petList));
       } catch {
         const settled = await Promise.allSettled(
           petList.map(async (pet) => {
@@ -155,7 +187,9 @@ export default function WalkScreen() {
         walkSource = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value.items : [])) as WalkRecordDto[];
         merged = settled.flatMap((result) =>
           result.status === 'fulfilled'
-            ? result.value.items.map((item) => normalizeWalk(item, petList, result.value.pet))
+            ? result.value.items
+                .filter(isCompletedWalkRecord)
+                .map((item) => normalizeWalk(item, petList, result.value.pet))
             : []
         );
       }
@@ -199,6 +233,68 @@ export default function WalkScreen() {
     }, [loadWalkData, refreshTip])
   );
 
+  useEffect(() => {
+    let isCurrent = true;
+    if (pets.length === 0) {
+      setTodaySunlightPercentByPet({});
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    let refreshVersion = 0;
+    const refreshSunlight = () => {
+      const version = ++refreshVersion;
+      const retry = Platform.OS === 'android' && walkLightSampleSource
+        ? retryPendingWalkLightSamples(pets.map(pet => pet.id), walkLightSampleSource)
+        : Promise.resolve();
+      retry.catch(() => undefined).then(() => {
+        if (!isCurrent || version !== refreshVersion) return [];
+        return Promise.allSettled(
+          pets.map(async (pet) => {
+            const sunlight = await getPetTodaySunlight(pet.id);
+            const percent = Number.isFinite(sunlight.progress_percent)
+              ? sunlight.progress_percent
+              : sunlight.target_lux_minutes > 0
+                ? (sunlight.achieved_lux_minutes / sunlight.target_lux_minutes) * 100
+                : 0;
+            return [pet.id, Math.max(0, Math.min(100, percent))] as const;
+          })
+        );
+      }).then((results) => {
+        if (!isCurrent || version !== refreshVersion) return;
+        setTodaySunlightPercentByPet(
+          Object.fromEntries(
+            results.map((result, index) => [
+              pets[index].id,
+              result.status === 'fulfilled' ? result.value[1] : null,
+            ])
+          )
+        );
+      }).catch(() => undefined);
+    };
+    refreshSunlight();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshSunlight();
+    });
+    return () => {
+      isCurrent = false;
+      subscription.remove();
+    };
+  }, [pets]);
+
+  const todayWalkSecondsByPet = useMemo(() => {
+    const todayKey = getSeoulDateKey(new Date());
+    return walkRecords.reduce<Record<number, number>>((totals, record) => {
+      const startedAt = record.startedAt ? new Date(record.startedAt) : null;
+      if (!startedAt || !Number.isFinite(startedAt.getTime()) || getSeoulDateKey(startedAt) !== todayKey) {
+        return totals;
+      }
+      totals[record.petId] = (totals[record.petId] ?? 0) + Math.max(0, record.durationSec || 0);
+      return totals;
+    }, {});
+  }, [walkRecords]);
+
   const petOptions = useMemo(
     () =>
       pets.map((pet) => {
@@ -237,7 +333,17 @@ export default function WalkScreen() {
     const pet = petOptions.find((p) => p.id === selectedPetId);
     if (!pet) return;
 
-    closeBottomSheet();
+    setBottomSheetVisible(false);
+    setSunlightIntroVisible(true);
+  };
+
+  const confirmStartWalk = () => {
+    const pet = petOptions.find((p) => p.id === selectedPetId);
+    if (!pet) {
+      setSunlightIntroVisible(false);
+      return;
+    }
+    setSunlightIntroVisible(false);
     navigation.navigate('WalkActive', {
       petId: pet.id,
       petName: pet.name,
@@ -341,7 +447,7 @@ export default function WalkScreen() {
         <View style={styles.graphContainer}>
           {weeklyData.map((item, index) => {
             const total = item.pet1 + item.pet2;
-            const maxHeight = 110;
+            const maxHeight = 90;
             const scaledTotal =
               total > 0 && maxDailyDistance > 0
                 ? Math.max(10, (total / maxDailyDistance) * maxHeight)
@@ -386,6 +492,27 @@ export default function WalkScreen() {
             );
           })}
         </View>
+        <ScrollView
+          style={{ height: Math.min(pets.length * 28, 56) }}
+          contentContainerStyle={styles.petDailySummaryList}
+          nestedScrollEnabled
+          scrollEnabled={pets.length > 2}
+          showsVerticalScrollIndicator={pets.length > 2}
+        >
+          {pets.map((pet) => {
+            const sunlightPercent = todaySunlightPercentByPet[pet.id];
+            return (
+              <View key={pet.id} style={styles.petDailySummary}>
+                <Text style={[styles.petDailySummaryName, { color: getPetColor(pet.id) }]} numberOfLines={1}>
+                  {pet.name || '이름 없음'}
+                </Text>
+                <Text style={styles.petDailySummaryText} numberOfLines={1}>
+                  산책 시간 {formatWalkDuration(todayWalkSecondsByPet[pet.id] ?? 0)} · <Text style={styles.petDailySunlightLabel}>조도 측정량</Text> {sunlightPercent == null ? '--' : `${Math.round(sunlightPercent)}%`}
+                </Text>
+              </View>
+            );
+          })}
+        </ScrollView>
       </View>
 
       <View style={styles.bottomSheet}>
@@ -482,11 +609,48 @@ export default function WalkScreen() {
           </Animated.View>
         </View>
       </Modal>
+      <Modal
+        visible={isSunlightIntroVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSunlightIntroVisible(false)}
+      >
+        <View style={styles.sunlightModalOverlay}>
+          <View style={styles.sunlightModal}>
+            <Text style={styles.sunlightModalTitle}>햇빛 산책을 측정할게요</Text>
+            <Text style={styles.sunlightModalDescription}>• 오전 8시 ~ 오후 5시 산책 중 일광 노출을 측정해요</Text>
+            <Text style={styles.sunlightModalDescription}>• 10분 평균 조도가 2,000 lux 이상이면 20,000 Lux·min이 적립돼요</Text>
+            <Text style={styles.sunlightModalDescription}>• 하루 최대 60,000 Lux·min까지 적립할 수 있어요</Text>
+            <Text style={styles.sunlightModalDescription}>• 일광 기록 기능은 현재 준비 중이에요</Text>
+            <View style={styles.sunlightModalActions}>
+              <TouchableOpacity
+                style={[styles.sunlightModalButton, styles.sunlightCancelButton]}
+                onPress={() => setSunlightIntroVisible(false)}
+              >
+                <Text style={styles.sunlightCancelText}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.sunlightModalButton, styles.sunlightStartButton]} onPress={confirmStartWalk}>
+                <Text style={styles.sunlightStartText}>산책 시작</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  sunlightModalOverlay: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, backgroundColor: 'rgba(0,0,0,0.6)' },
+  sunlightModal: { padding: 24, borderRadius: 20, backgroundColor: '#FFF' },
+  sunlightModalTitle: { color: '#0081D5', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  sunlightModalDescription: { color: '#7B7C7D', fontSize: 14, lineHeight: 22, marginBottom: 8 },
+  sunlightModalActions: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  sunlightModalButton: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  sunlightCancelButton: { backgroundColor: '#F2F4F7' },
+  sunlightStartButton: { backgroundColor: '#0081D5' },
+  sunlightCancelText: { color: '#7B7C7D', fontSize: 15, fontWeight: '600' },
+  sunlightStartText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
   container: { flex: 1, backgroundColor: '#F8F8F8' },
   headerContainer: { paddingHorizontal: 20, paddingTop: 48, marginBottom: 4 },
   headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -514,6 +678,11 @@ const styles = StyleSheet.create({
   graphTitle: { color: '#000000', fontSize: 18, fontWeight: '600', alignSelf: 'flex-start' },
   graphMoreButton: { width: 56, height: 30, resizeMode: 'contain' },
   graphContainer: { width: 310, height: 135, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12, paddingBottom: 22 },
+  petDailySummaryList: { width: '100%' },
+  petDailySummary: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center' },
+  petDailySummaryName: { width: 76, fontSize: 12, fontWeight: '600' },
+  petDailySummaryText: { flex: 1, color: '#7B7C7D', fontSize: 12 },
+  petDailySunlightLabel: { color: '#F4B844' },
   barColumn: { alignItems: 'center', width: 20 },
   barWrapper: { width: 20, alignItems: 'center' },
   barSegment: { width: 20 },

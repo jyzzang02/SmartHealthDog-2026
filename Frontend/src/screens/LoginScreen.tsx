@@ -1,5 +1,8 @@
-import React, { useState, useRef } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Modal,
   View,
   Text,
   TouchableOpacity,
@@ -9,9 +12,18 @@ import {
   Platform,
   Image,
   Animated,
+  requireNativeComponent,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import Config from 'react-native-config';
+import { WebView, WebViewProps } from 'react-native-webview';
+import {
+  SafeAreaProvider,
+  SafeAreaView as ModalSafeAreaView,
+} from 'react-native-safe-area-context';
 import LogoAnimation from '../components/LogoAnimation';
+import { isApiError, loginWithKakaoCode } from '../api/auth';
+import { storeAuthTokens } from '../storage/tokenStorage';
 
 type RootStackParamList = {
   Login: undefined;
@@ -29,13 +41,100 @@ interface Props {
   navigation: LoginScreenNavigationProp;
 }
 
+const KAKAO_AUTHORIZE_URL = 'https://kauth.kakao.com/oauth/authorize';
+const kakaoNativeConfig: WebViewProps['nativeConfig'] = Platform.OS === 'android'
+  ? {
+      component: requireNativeComponent('KakaoLoginWebView') as NonNullable<
+        WebViewProps['nativeConfig']
+      >['component'],
+    }
+  : undefined;
+// TODO: Switch to an HTTPS redirect URI and validate OAuth state before production release.
+const KAKAO_REDIRECT_URI = 'http://api.puppydoc.ovh:8080/api/auth/kakao/callback';
+
+const getQueryParameter = (url: string, name: string) => {
+  const query = url.split('?')[1]?.split('#')[0];
+  if (!query) return null;
+
+  const parameter = query.split('&').find((item) => item.split('=')[0] === name);
+  if (!parameter) return null;
+
+  const value = parameter.slice(parameter.indexOf('=') + 1).replace(/\+/g, ' ');
+  return value ? decodeURIComponent(value) : null;
+};
+
+const isKakaoCallbackUrl = (url: string) => url.split('?')[0].split('#')[0] === KAKAO_REDIRECT_URI;
+
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const [showLoginForm, setShowLoginForm] = useState(false);
+  const [isKakaoLoginVisible, setIsKakaoLoginVisible] = useState(false);
+  const [isKakaoSubmitting, setIsKakaoSubmitting] = useState(false);
   
   const animationLayerOpacity = useRef(new Animated.Value(1)).current;
   const buttonsOpacity = useRef(new Animated.Value(0)).current;
+  const hasHandledKakaoCallback = useRef(false);
 
-  const handleKakaoLogin = () => {};
+  const kakaoRestApiKey = Config.KAKAO_REST_API_KEY?.trim();
+  const kakaoAuthorizeUrl = kakaoRestApiKey
+    ? `${KAKAO_AUTHORIZE_URL}?client_id=${encodeURIComponent(kakaoRestApiKey)}&redirect_uri=${encodeURIComponent(KAKAO_REDIRECT_URI)}&response_type=code`
+    : null;
+
+  const closeKakaoLogin = useCallback(() => {
+    if (isKakaoSubmitting) return;
+    setIsKakaoLoginVisible(false);
+  }, [isKakaoSubmitting]);
+
+  const handleKakaoLogin = () => {
+    if (!kakaoAuthorizeUrl) {
+      Alert.alert('카카오 로그인 설정 필요', 'REST API Key를 설정한 뒤 다시 시도해 주세요.');
+      return;
+    }
+
+    hasHandledKakaoCallback.current = false;
+    setIsKakaoLoginVisible(true);
+  };
+
+  const handleKakaoNavigation = useCallback(
+    async (url: string) => {
+      if (!isKakaoCallbackUrl(url) || hasHandledKakaoCallback.current) return;
+
+      hasHandledKakaoCallback.current = true;
+      const kakaoError = getQueryParameter(url, 'error');
+      const code = getQueryParameter(url, 'code');
+
+      if (kakaoError) {
+        setIsKakaoLoginVisible(false);
+        Alert.alert('카카오 로그인 취소', '카카오 로그인을 완료하지 않았습니다.');
+        return;
+      }
+
+      if (!code) {
+        setIsKakaoLoginVisible(false);
+        Alert.alert('카카오 로그인 실패', '카카오 인가 코드를 받지 못했습니다. 다시 시도해 주세요.');
+        return;
+      }
+
+      setIsKakaoSubmitting(true);
+      try {
+        const tokens = await loginWithKakaoCode(code);
+        await storeAuthTokens(tokens);
+        setIsKakaoLoginVisible(false);
+        navigation.reset({
+          index: 0,
+          routes: [{ name: 'Main' }],
+        });
+      } catch (error) {
+        setIsKakaoLoginVisible(false);
+        const message = isApiError(error)
+          ? error.message
+          : '네트워크 오류가 발생했습니다. 다시 시도해 주세요.';
+        Alert.alert('카카오 로그인 실패', message);
+      } finally {
+        setIsKakaoSubmitting(false);
+      }
+    },
+    [navigation]
+  );
 
   const handleNormalLogin = () => {
     navigation.navigate('OrdinaryLogin');
@@ -81,10 +180,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <LogoAnimation onAnimationComplete={handleAnimationComplete} />
       </Animated.View>
 
-      <KeyboardAvoidingView 
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.keyboardAvoidingView}
-      >
+      <View style={styles.loginContent}>
         <View style={styles.content}>
           <View style={styles.logoContainer}>
             <Image
@@ -146,7 +242,63 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
             </TouchableOpacity>
           </Animated.View>
         </View>
-      </KeyboardAvoidingView>
+      </View>
+
+      <Modal
+        visible={isKakaoLoginVisible}
+        animationType="slide"
+        hardwareAccelerated
+        onRequestClose={closeKakaoLogin}
+      >
+        {/* Measure system-bar insets in the modal's own window. */}
+        <SafeAreaProvider>
+          <ModalSafeAreaView style={styles.kakaoModal}>
+            <View style={styles.kakaoModalHeader}>
+              <TouchableOpacity
+                style={styles.kakaoCloseButton}
+                onPress={closeKakaoLogin}
+                disabled={isKakaoSubmitting}
+              >
+                <Text style={styles.kakaoCloseButtonText}>닫기</Text>
+              </TouchableOpacity>
+            </View>
+            <KeyboardAvoidingView
+              style={styles.kakaoWebViewContainer}
+              enabled={Platform.OS === 'ios'}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            >
+              {kakaoAuthorizeUrl && (
+                <WebView
+                  style={styles.kakaoWebView}
+                  nativeConfig={kakaoNativeConfig}
+                  source={{ uri: kakaoAuthorizeUrl }}
+                  nestedScrollEnabled
+                  onShouldStartLoadWithRequest={({ url }) => {
+                    if (!isKakaoCallbackUrl(url)) return true;
+
+                    handleKakaoNavigation(url).catch(() => {
+                      setIsKakaoLoginVisible(false);
+                      Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+                    });
+                    return false;
+                  }}
+                  onError={() => {
+                    if (!hasHandledKakaoCallback.current) {
+                      setIsKakaoLoginVisible(false);
+                      Alert.alert('카카오 로그인 실패', '로그인 화면을 불러오지 못했습니다. 네트워크 상태를 확인해 주세요.');
+                    }
+                  }}
+                />
+              )}
+            </KeyboardAvoidingView>
+            {isKakaoSubmitting && (
+              <View style={styles.kakaoLoadingOverlay}>
+                <ActivityIndicator size="large" color="#0081D5" />
+              </View>
+            )}
+          </ModalSafeAreaView>
+        </SafeAreaProvider>
+      </Modal>
     </SafeAreaView>
   );
 };
@@ -165,7 +317,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
     backgroundColor: '#FFFFFF',
   },
-  keyboardAvoidingView: {
+  loginContent: {
     flex: 1,
   },
   content: {
@@ -288,6 +440,39 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#0081D5',
     fontWeight: '600',
+  },
+  kakaoModal: {
+    flex: 1,
+    backgroundColor: '#FFFFFF',
+  },
+  kakaoModalHeader: {
+    height: 52,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: '#EAECEE',
+  },
+  kakaoWebViewContainer: {
+    flex: 1,
+  },
+  kakaoWebView: {
+    flex: 1,
+  },
+  kakaoCloseButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+  },
+  kakaoCloseButtonText: {
+    color: '#000000',
+    fontSize: 16,
+    fontFamily: 'Pretendard-SemiBold',
+  },
+  kakaoLoadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.7)',
   },
 });
 

@@ -21,6 +21,7 @@
     "@react-navigation/stack": "^7.6.8",
     "react": "19.1.0",
     "react-native": "0.81.1",
+    "react-native-config": "^1.7.2",
     "react-native-geolocation-service": "^5.3.1",
     "react-native-gesture-handler": "^2.29.1",
     "react-native-image-picker": "^8.2.1",

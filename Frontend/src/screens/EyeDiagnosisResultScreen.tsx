@@ -1,6 +1,5 @@
 ﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
   Alert,
   BackHandler,
   Image,
@@ -20,6 +19,7 @@ import {
   getPetSubmissions,
   SubmissionSummary,
 } from '../api/diagnosis';
+import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
 
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROCESSING = 'PROCESSING';
@@ -80,7 +80,11 @@ const getSubmissionId = (submission: SubmissionSummary): string => {
   return submission.id ?? submission.submissionId ?? '';
 };
 
-const getSubmissionTime = (submission: SubmissionSummary): number => {
+const getSubmissionTime = (submission?: SubmissionSummary | null): number => {
+  if (!submission) {
+    return 0;
+  }
+
   const value =
     submission.submittedAt ??
     submission.submitted_at ??
@@ -102,6 +106,10 @@ const getFailureReason = (submission: SubmissionSummary): string | null => {
 const isEyeType = (type?: string) => {
   const normalized = (type || '').toUpperCase();
   return normalized.includes('EYE');
+};
+
+const logEyeDiagnosis = (event: string, details: Record<string, unknown>) => {
+  console.log(`[eye-diagnosis] ${event}`, details);
 };
 
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -165,6 +173,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const [message, setMessage] = useState('');
   const isMountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const lastLoggedStatusRef = useRef('');
 
   useEffect(() => {
     return () => {
@@ -181,6 +190,12 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId;
 
     setIsLoading(true);
+    logEyeDiagnosis('status-check:start', {
+      requestId,
+      petId,
+      submissionId: submissionId ?? null,
+      directLookupTried: directLookupTriedRef.current,
+    });
 
     try {
       if (submissionId && !directLookupTriedRef.current) {
@@ -191,9 +206,10 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setSubmission({ id: submissionId, type: 'EYE', status: STATUS_COMPLETED });
           setResult(direct);
           setMessage('');
+          logEyeDiagnosis('direct-result:success', { submissionId });
           return;
         } catch (directError) {
-          console.log('[eye] direct submission lookup skipped; using list fallback', {
+          console.warn('[eye-diagnosis] direct-result:failed', {
             submissionId,
             message:
               directError instanceof Error ? directError.message : String(directError),
@@ -207,6 +223,11 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       const eyeSubmissions = submissions.filter((item) => isEyeType(item.type));
 
       if (eyeSubmissions.length === 0) {
+        logEyeDiagnosis('submission:not-found', {
+          petId,
+          submissionId: submissionId ?? null,
+          totalSubmissions: submissions.length,
+        });
         setSubmission(null);
         setResult(null);
         setMessage('안구 진단 요청이 아직 없습니다.');
@@ -221,6 +242,11 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
             )[0];
 
       if (!target) {
+        logEyeDiagnosis('submission:id-not-found', {
+          petId,
+          submissionId,
+          availableSubmissionIds: eyeSubmissions.map(getSubmissionId),
+        });
         setSubmission(null);
         setResult(null);
         setMessage('해당 진단 기록을 찾을 수 없습니다.');
@@ -231,8 +257,24 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       const normalizedStatus = normalizeStatus(target.status);
       const idToFetch = getSubmissionId(target);
+      const failureReason = getFailureReason(target);
+      const statusKey = `${idToFetch}:${normalizedStatus}:${failureReason ?? ''}`;
+      const isNewStatus = lastLoggedStatusRef.current !== statusKey;
+
+      if (isNewStatus) {
+        lastLoggedStatusRef.current = statusKey;
+        logEyeDiagnosis('submission:status', {
+          submissionId: idToFetch || null,
+          status: normalizedStatus || null,
+          submittedAt: target.submittedAt ?? target.submitted_at ?? null,
+          completedAt: target.completedAt ?? target.completed_at ?? null,
+          failureReason,
+          submission: target,
+        });
+      }
 
       if (!idToFetch) {
+        console.warn('[eye-diagnosis] submission:missing-id', { target });
         setResult(null);
         setMessage('진단 기록 ID를 확인할 수 없습니다.');
         return;
@@ -245,6 +287,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (isFailedStatus(normalizedStatus)) {
+        if (isNewStatus) {
+          console.warn('[eye-diagnosis] submission:failed', {
+            submissionId: idToFetch,
+            status: normalizedStatus,
+            failureReason,
+          });
+        }
         setResult(null);
         setMessage(
           getFailureReason(target) ||
@@ -254,6 +303,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (isDeletedStatus(normalizedStatus)) {
+        if (isNewStatus) {
+          console.warn('[eye-diagnosis] submission:deleted', {
+            submissionId: idToFetch,
+            status: normalizedStatus,
+            failureReason,
+          });
+        }
         setResult(null);
         setMessage(
           getFailureReason(target) === 'TIMEOUT'
@@ -269,9 +325,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           if (!canUpdate()) return;
           setResult(detail);
           setMessage('');
+          logEyeDiagnosis('detail-result:success', {
+            submissionId: idToFetch,
+            status: normalizedStatus,
+          });
           return;
         } catch (detailError) {
-          console.log('[eye] detail fetch failed', {
+          console.warn('[eye-diagnosis] detail-result:failed', {
             status: normalizedStatus,
             submissionId: idToFetch,
             error: String(detailError),
@@ -295,6 +355,12 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           : '결과를 불러오지 못했습니다.';
 
       if (!canUpdate()) return;
+      console.error('[eye-diagnosis] status-check:failed', {
+        requestId,
+        petId,
+        submissionId: submissionId ?? null,
+        error: errorMessage,
+      });
       setResult(null);
       setMessage(errorMessage);
       Alert.alert('오류', errorMessage);
@@ -333,14 +399,6 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     return () => clearTimeout(timer);
   }, [isFocused, isLoading, loadResult, result, status, submission, submissionId]);
 
-  const resultText = useMemo(() => {
-    if (!result) {
-      return '';
-    }
-
-    return JSON.stringify(result, null, 2);
-  }, [result]);
-
   // 결과 데이터 파싱
   const parsedResults = useMemo(() => {
     if (!result || typeof result !== 'object') {
@@ -370,21 +428,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const renderAnalyzingScreen = () => {
     return (
-      <View style={styles.analyzingContainer}>
-        <Text style={styles.analyzingTitle}>결과 분석중..</Text>
-
-        <View style={styles.progressWrapper}>
-          <View style={styles.progressBase} />
-          <View style={styles.progressArc} />
-          <Image source={dogImage} style={styles.dogImage} />
-        </View>
-
-        <Text style={styles.waitText}>대기시간이 너무 길까요?</Text>
-
-        <TouchableOpacity style={styles.homeButton} onPress={goHome}>
-          <Text style={styles.homeButtonText}>홈으로</Text>
-        </TouchableOpacity>
-      </View>
+      <DiagnosisAnalysisProgress
+        imageSource={dogImage}
+        startedAtMs={getSubmissionTime(submission) || undefined}
+        status={status}
+        onRefresh={loadResult}
+        onGoHome={goHome}
+      />
     );
   };
 
@@ -456,21 +506,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   };
 
-  if (isLoading) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#0081D5" />
-          <Text style={styles.loadingText}>진단 상태를 확인 중입니다.</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (isProcessingStatus(status)) {
+  if (isProcessingStatus(status) || (isLoading && !submission && !result && !message)) {
     return (
       <SafeAreaView style={styles.safeArea}>
         <TouchableOpacity style={styles.backButton} onPress={handleBack}>
@@ -508,67 +544,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
 
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 15,
-    color: '#3C4144',
-  },
-
-  analyzingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    paddingTop: 110,
-    backgroundColor: '#FFFFFF',
-  },
-  analyzingTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: '#111111',
-    marginBottom: 42,
-  },
-  progressWrapper: {
-    width: 210,
-    height: 210,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 72,
-  },
-  progressBase: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 10,
-    borderColor: '#C8E3FF',
-  },
-  progressArc: {
-    position: 'absolute',
-    width: 180,
-    height: 180,
-    borderRadius: 90,
-    borderWidth: 10,
-    borderTopColor: '#118AF5',
-    borderRightColor: '#118AF5',
-    borderBottomColor: 'transparent',
-    borderLeftColor: 'transparent',
-    transform: [{ rotate: '38deg' }],
-  },
-  dogImage: {
-    width: 105,
-    height: 105,
-    resizeMode: 'contain',
-  },
-  waitText: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#111111',
-    marginBottom: 28,
-  },
   homeButton: {
     width: 150,
     height: 48,

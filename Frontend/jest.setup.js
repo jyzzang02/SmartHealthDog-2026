@@ -6,6 +6,10 @@ jest.mock('@react-native-async-storage/async-storage', () =>
 
 jest.mock('react-native-webview', () => 'WebView');
 
+jest.mock('react-native-config', () => ({
+  KAKAO_REST_API_KEY: '',
+}));
+
 jest.mock('react-native-geolocation-service', () => ({
   getCurrentPosition: jest.fn(),
   watchPosition: jest.fn(),

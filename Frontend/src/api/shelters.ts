@@ -1,9 +1,9 @@
 import {
   getStoredAccessToken,
-  getStoredRefreshToken,
-  storeAuthTokens,
+  getAuthSession,
+  assertAuthSession,
 } from '../storage/tokenStorage';
-import { refreshAuthToken } from './auth';
+import { refreshSessionAccessToken } from './refreshSession';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
@@ -129,7 +129,9 @@ const authorizedFetch = async (
   input: string,
   init?: RequestInit
 ): Promise<Response> => {
+  const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
+  assertAuthSession(session);
 
   if (!accessToken) {
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
@@ -157,16 +159,9 @@ const authorizedFetch = async (
     return response;
   }
 
-  const refreshToken = await getStoredRefreshToken();
-
-  if (!refreshToken) {
-    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
-  }
-
   try {
-    const newTokens = await refreshAuthToken(refreshToken);
-    await storeAuthTokens(newTokens);
-    accessToken = newTokens.accessToken;
+    accessToken = await refreshSessionAccessToken(session, accessToken);
+    assertAuthSession(session);
 
     response = await doFetch(accessToken);
 

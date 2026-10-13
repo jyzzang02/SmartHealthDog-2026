@@ -12,33 +12,98 @@ import {
   PermissionsAndroid,
   Alert,
   AppState,
+  DeviceEventEmitter,
+  NativeModules,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
-import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import {
+  useNavigation,
+  usePreventRemove,
+  useRoute,
+  RouteProp,
+} from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import Geolocation from 'react-native-geolocation-service';
 import type { GeoPosition } from 'react-native-geolocation-service';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useLatestWalkLightSample } from '../hooks/useLatestWalkLightSample';
+import type { LatestWalkLightSampleSource } from '../hooks/useLatestWalkLightSample';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
-import { createPetWalk } from '../api/walks';
-import type { WalkCoordinate } from '../api/walks';
+import {
+  findActivePetWalkId,
+  getPetTodaySunlight,
+  startPetWalk,
+} from '../api/walks';
+import { finishWalkWithPendingLight, flushWalkLightSamples } from '../utils/walkLightSync';
+import type { LightSample, SunlightTodayResponse, WalkCoordinate } from '../api/walks';
 import {
   clearActiveWalkSession,
   loadActiveWalkSession,
   saveActiveWalkSession,
+  saveWalkRouteSegmentStartIndices,
 } from '../storage/walkSessionStorage';
 import type { ActiveWalkSession, WalkLocation } from '../storage/walkSessionStorage';
 import {
+  completeWalkTimer,
   createWalkTimer,
   getElapsedSeconds,
   pauseWalkTimer,
   resumeWalkTimer,
 } from '../utils/walkTimer';
+import {
+  evaluateWalkLocationTransition,
+  splitPathBySegmentStartIndices,
+} from '../utils/walkLocation';
 
 type RouteProps = RouteProp<RootStackParamList, 'WalkActive'>;
 type NavigationProps = NativeStackNavigationProp<RootStackParamList>;
+
+type CompassHeadingModule = {
+  start: () => void;
+  stop: () => void;
+};
+
+type BackgroundWalkLocation = {
+  latitude: number;
+  longitude: number;
+  accuracy: number;
+  timestamp: number;
+};
+
+type WalkLocationTrackingModule = LatestWalkLightSampleSource & {
+  start: (walkId: number, startedAtMs: number) => Promise<void>;
+  stop: () => Promise<void>;
+  clearLocations: () => Promise<void>;
+  getLocations: () => Promise<BackgroundWalkLocation[]>;
+  getLightSamples: (walkId: number) => Promise<LightSample[]>;
+  acknowledgeLightSamples: (walkId: number, ids: string[]) => Promise<void>;
+  isIgnoringBatteryOptimizations: () => Promise<boolean>;
+  requestIgnoreBatteryOptimizations: () => Promise<void>;
+};
+
+const compassHeadingModule = NativeModules.SmartHealthDogCompass as
+  | CompassHeadingModule
+  | undefined;
+const walkLocationTrackingModule = NativeModules.WalkLocationTracking as
+  | WalkLocationTrackingModule
+  | undefined;
+
+const normalizeHeading = (value: unknown): number | null => {
+  const heading = Number(value);
+  if (!Number.isFinite(heading) || heading < 0) return null;
+  return heading % 360;
+};
+
+interface CompletedWalkSnapshot {
+  startTime: string;
+  endTime: string;
+  elapsedSeconds: number;
+  distanceKm: number;
+  pathCoordinates: WalkCoordinate[];
+  pathSegmentStartIndices: number[];
+}
 
 const formatTime = (seconds: number) => {
   const mm = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -65,20 +130,57 @@ const formatClock = (date: Date) => {
 };
 
 const formatDurationMinutes = (seconds: number) => `${Math.round(seconds / 60)}분`;
-const toRad = (deg: number) => (deg * Math.PI) / 180;
+const MAX_LOCATION_ACCURACY_METERS = 25;
+const MIN_ROUTE_POINT_DISTANCE_KM = 0.005;
+const MAX_WALK_SPEED_METERS_PER_SECOND = 8;
+const MAX_DISTANCE_ACCUMULATION_GAP_MS = 5 * 60_000;
+const SUNLIGHT_TARGET_LUX_MINUTES = 60_000;
 
-const haversine = (a: { lat: number; lng: number }, b: { lat: number; lng: number }) => {
-  const R = 6371;
-  const dLat = toRad(b.lat - a.lat);
-  const dLng = toRad(b.lng - a.lng);
-  const lat1 = toRad(a.lat);
-  const lat2 = toRad(b.lat);
-  const sinDLat = Math.sin(dLat / 2);
-  const sinDLng = Math.sin(dLng / 2);
-  const h = sinDLat * sinDLat + sinDLng * sinDLng * Math.cos(lat1) * Math.cos(lat2);
-  const c = 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-  return R * c;
-};
+function SunlightProgressCard({
+  data,
+  lastMeasuredLux,
+  isUnavailable = false,
+}: {
+  data: SunlightTodayResponse | null;
+  lastMeasuredLux: number | null;
+  isUnavailable?: boolean;
+}) {
+  const targetLuxMinutes = data?.target_lux_minutes ?? SUNLIGHT_TARGET_LUX_MINUTES;
+  const achievedLuxMinutes = data?.achieved_lux_minutes ?? null;
+  const progressPercent = data && Number.isFinite(data.progress_percent)
+    ? Math.max(0, Math.min(100, data.progress_percent))
+    : achievedLuxMinutes === null || targetLuxMinutes <= 0
+      ? 0
+      : Math.max(0, Math.min(100, achievedLuxMinutes / targetLuxMinutes * 100));
+
+  return (
+    <View style={styles.sunlightCard}>
+      <View style={styles.sunlightCardHeader}>
+        <Text style={styles.sunlightCardTitle}>오늘의 일광 노출</Text>
+        <Text style={styles.sunlightCardPercent}>{achievedLuxMinutes === null ? '--' : `${progressPercent}%`}</Text>
+      </View>
+      <Text style={styles.sunlightCardAmount}>
+        <Text style={styles.sunlightCardAchieved}>{achievedLuxMinutes === null ? '--' : achievedLuxMinutes.toLocaleString()}</Text>
+        {' / ' + targetLuxMinutes.toLocaleString() + ' Lux·min'}
+      </Text>
+      <View style={styles.sunlightProgressTrack}>
+        <View style={[styles.sunlightProgressFill, { width: `${progressPercent}%` }]} />
+      </View>
+      <View style={styles.sunlightCardFooter}>
+        <Text style={styles.sunlightCardNote}>
+          {isUnavailable
+            ? '오늘의 일광 정보를 불러오지 못했습니다'
+            : data
+              ? data.qualifying_minutes + '분 달성 · 측정 ' + data.sample_count + '회'
+              : '오늘의 일광 정보를 불러오는 중...'}
+        </Text>
+        <Text style={styles.sunlightCardLastLux}>
+          마지막 측정 {lastMeasuredLux === null ? '--' : Math.round(lastMeasuredLux).toLocaleString()} Lux
+        </Text>
+      </View>
+    </View>
+  );
+}
 
 export default function WalkActiveScreen() {
   const navigation = useNavigation<NavigationProps>();
@@ -97,9 +199,14 @@ export default function WalkActiveScreen() {
   const [mapReady, setMapReady] = useState(false);
   const [initialCoord, setInitialCoord] = useState<{ lat: number; lng: number } | null>(null);
   const [currentCoord, setCurrentCoord] = useState<{ lat: number; lng: number } | null>(null);
+  const [completedWalk, setCompletedWalk] = useState<CompletedWalkSnapshot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [canLeaveScreen, setCanLeaveScreen] = useState(false);
+  const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
+  const [sunlightUnavailable, setSunlightUnavailable] = useState(false);
 
   const timerStateRef = useRef(createWalkTimer(startedAtMs));
+  const walkIdRef = useRef<number | null>(null);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const badgeAnim = useRef(new Animated.Value(0.6)).current;
   const watchIdRef = useRef<number | null>(null);
@@ -107,6 +214,8 @@ export default function WalkActiveScreen() {
   const pauseTrackingRef = useRef(false);
   const hasInitialCoordRef = useRef(false);
   const pathCoordinatesRef = useRef<WalkCoordinate[]>([]);
+  const pathSegmentStartIndicesRef = useRef<number[]>([]);
+  const shouldStartNewPathSegmentRef = useRef(false);
   const initialCoordRef = useRef<WalkLocation | null>(null);
   const currentCoordRef = useRef<WalkLocation | null>(null);
   const distanceKmRef = useRef(0);
@@ -115,15 +224,43 @@ export default function WalkActiveScreen() {
   const isFinishingRef = useRef(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const webViewRef = useRef<WebView>(null);
+  const headingRef = useRef<number | null>(null);
+  const lastAcceptedLocationAtMsRef = useRef<number | null>(null);
+  const lastProcessedLocationAtMsRef = useRef<number | null>(null);
+  const shouldBufferForegroundLocationsRef = useRef(true);
+  const pendingForegroundLocationsRef = useRef<GeoPosition[]>([]);
+  const backgroundMergePromiseRef = useRef<Promise<void> | null>(null);
+  const shouldResetBackgroundLocationsRef = useRef(false);
+  const isStoppingRef = useRef(false);
+  const lightUploadPromiseRef = useRef<Promise<void> | null>(null);
+
+  const lastMeasuredLux = useLatestWalkLightSample(
+    isSessionReady ? walkIdRef.current : null,
+    Platform.OS === 'android' ? walkLocationTrackingModule : undefined,
+    isPaused || showResultModal,
+  );
 
   const startDate = useMemo(() => new Date(startedAtMs), [startedAtMs]);
-  const startTimeText = useMemo(() => formatClock(startDate), [startDate]);
-  const startPeriod = useMemo(() => formatPeriod(startTimeText), [startTimeText]);
   const endDate = useMemo(() => new Date(startDate.getTime() + elapsedSeconds * 1000), [startDate, elapsedSeconds]);
-  const endTimeText = useMemo(() => formatClock(endDate), [endDate]);
-  const endPeriod = useMemo(() => formatPeriod(endTimeText), [endTimeText]);
-  const dateLabel = useMemo(() => formatDateLabel(startDate), [startDate]);
   const displayPetName = petName?.trim() || '이름 없음';
+
+  const createCompletedWalkSnapshot = useCallback((now: number): CompletedWalkSnapshot => {
+    const completedTimer = completeWalkTimer(timerStateRef.current, now);
+    const startedAt = new Date(completedTimer.timer.startedAtMs);
+
+    timerStateRef.current = completedTimer.timer;
+
+    return {
+      startTime: startedAt.toISOString(),
+      endTime: new Date(completedTimer.endedAtMs).toISOString(),
+      elapsedSeconds: completedTimer.elapsedSeconds,
+      distanceKm: Number(distanceKmRef.current.toFixed(3)),
+      pathCoordinates: pathCoordinatesRef.current.map(
+        (point) => [...point] as WalkCoordinate
+      ),
+      pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
+    };
+  }, []);
 
   const queueSessionSave = useCallback((force = false) => {
     if (isFinishingRef.current) return;
@@ -134,12 +271,16 @@ export default function WalkActiveScreen() {
     const snapshot: ActiveWalkSession = {
       version: 1,
       petId,
+      walkId: walkIdRef.current,
       timer: { ...timerStateRef.current },
       distanceKm: distanceKmRef.current,
       pathCoordinates: pathCoordinatesRef.current.map((point) => [...point] as WalkCoordinate),
+      pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
       initialCoord: initialCoordRef.current ? { ...initialCoordRef.current } : null,
       currentCoord: currentCoordRef.current ? { ...currentCoordRef.current } : null,
       lastCoord: lastCoordRef.current ? { ...lastCoordRef.current } : null,
+      lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
+      lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
       updatedAtMs: now,
     };
 
@@ -155,55 +296,174 @@ export default function WalkActiveScreen() {
     return seconds;
   }, []);
 
+  const flushLightSamples = useCallback(async () => {
+    if (Platform.OS !== 'android' || !walkLocationTrackingModule || !walkIdRef.current) return;
+    if (lightUploadPromiseRef.current) return lightUploadPromiseRef.current;
+    const walkId = walkIdRef.current;
+    const upload = (async () => {
+      const uploadedCount = await flushWalkLightSamples(petId, walkId, walkLocationTrackingModule);
+      if (uploadedCount > 0 && appStateRef.current === 'active') {
+        try {
+          const sunlight = await getPetTodaySunlight(petId);
+          console.info('[walk-light] summary:after-upload', {
+            walkId,
+            sampleCount: sunlight.sample_count,
+            qualifyingMinutes: sunlight.qualifying_minutes,
+            achievedLuxMinutes: sunlight.achieved_lux_minutes,
+          });
+          setTodaySunlight(sunlight);
+          setSunlightUnavailable(false);
+        } catch (error) {
+          console.warn('[walk-light] summary:refresh-failed', error);
+          // The samples are already saved; a progress refresh can retry later.
+        }
+      }
+    })();
+    lightUploadPromiseRef.current = upload;
+    try {
+      await upload;
+    } catch (error) {
+      console.warn('[walk-light] upload:failed', { walkId, error });
+      throw error;
+    } finally {
+      lightUploadPromiseRef.current = null;
+    }
+  }, [petId]);
+
   useEffect(() => {
     let isMounted = true;
 
     const restoreSession = async () => {
-      const savedSession = await loadActiveWalkSession(petId);
-      if (!isMounted) return;
+      try {
+        const savedSession = await loadActiveWalkSession(petId);
+        if (!isMounted) return;
 
-      if (savedSession) {
-        timerStateRef.current = savedSession.timer;
-        setStartedAtMs(savedSession.timer.startedAtMs);
-        setElapsedSeconds(getElapsedSeconds(savedSession.timer, Date.now()));
-        setIsPaused(savedSession.timer.isPaused);
-        pauseTrackingRef.current = savedSession.timer.isPaused;
+        if (savedSession) {
+          shouldResetBackgroundLocationsRef.current = false;
+          const startedAt = new Date(savedSession.timer.startedAtMs).toISOString();
+          const walkId =
+            savedSession.walkId ??
+            (await findActivePetWalkId(petId, startedAt)) ??
+            (await startPetWalk(petId, { startTime: startedAt }));
+          if (!isMounted) return;
 
-        distanceKmRef.current = savedSession.distanceKm;
-        setDistanceKm(savedSession.distanceKm);
-        pathCoordinatesRef.current = savedSession.pathCoordinates.slice();
-        initialCoordRef.current = savedSession.initialCoord;
-        currentCoordRef.current = savedSession.currentCoord;
-        lastCoordRef.current = savedSession.lastCoord;
-        hasInitialCoordRef.current = savedSession.initialCoord !== null;
-        setInitialCoord(savedSession.initialCoord);
-        setCurrentCoord(savedSession.currentCoord);
-      } else {
-        const now = Date.now();
-        const timer = createWalkTimer(now);
-        timerStateRef.current = timer;
-        setStartedAtMs(now);
-        await saveActiveWalkSession({
-          version: 1,
-          petId,
-          timer,
-          distanceKm: 0,
-          pathCoordinates: [],
-          initialCoord: null,
-          currentCoord: null,
-          lastCoord: null,
-          updatedAtMs: now,
-        }).catch(() => undefined);
+          walkIdRef.current = walkId;
+          timerStateRef.current = savedSession.timer;
+          setStartedAtMs(savedSession.timer.startedAtMs);
+          setElapsedSeconds(getElapsedSeconds(savedSession.timer, Date.now()));
+          setIsPaused(savedSession.timer.isPaused);
+          pauseTrackingRef.current = savedSession.timer.isPaused;
+
+          distanceKmRef.current = savedSession.distanceKm;
+          setDistanceKm(savedSession.distanceKm);
+          pathCoordinatesRef.current = savedSession.pathCoordinates.slice();
+          pathSegmentStartIndicesRef.current = (
+            savedSession.pathSegmentStartIndices ?? []
+          ).filter(
+            (index) => index > 0 && index < savedSession.pathCoordinates.length,
+          );
+          shouldStartNewPathSegmentRef.current = savedSession.timer.isPaused;
+          initialCoordRef.current = savedSession.initialCoord;
+          currentCoordRef.current = savedSession.currentCoord;
+          lastCoordRef.current = savedSession.lastCoord;
+          const restoredLocationAtMs =
+            savedSession.lastProcessedLocationAtMs ??
+            savedSession.lastAcceptedLocationAtMs ??
+            savedSession.updatedAtMs;
+          lastAcceptedLocationAtMsRef.current =
+            savedSession.lastAcceptedLocationAtMs ?? restoredLocationAtMs;
+          lastProcessedLocationAtMsRef.current = restoredLocationAtMs;
+          hasInitialCoordRef.current = savedSession.initialCoord !== null;
+          setInitialCoord(savedSession.initialCoord);
+          setCurrentCoord(savedSession.currentCoord);
+
+          await saveActiveWalkSession({
+            ...savedSession,
+            walkId,
+            lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
+            lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
+            updatedAtMs: Date.now(),
+          });
+        } else {
+          shouldResetBackgroundLocationsRef.current = true;
+          const now = Date.now();
+          const timer = createWalkTimer(now);
+          const walkId = await startPetWalk(petId, {
+            startTime: new Date(now).toISOString(),
+          });
+          if (!isMounted) return;
+
+          walkIdRef.current = walkId;
+          timerStateRef.current = timer;
+          setStartedAtMs(now);
+          await saveActiveWalkSession({
+            version: 1,
+            petId,
+            walkId,
+            timer,
+            distanceKm: 0,
+            pathCoordinates: [],
+            pathSegmentStartIndices: [],
+            initialCoord: null,
+            currentCoord: null,
+            lastCoord: null,
+            lastAcceptedLocationAtMs: null,
+            lastProcessedLocationAtMs: null,
+            updatedAtMs: now,
+          });
+        }
+
+        if (isMounted) setIsSessionReady(true);
+      } catch (error) {
+        if (!isMounted) return;
+        const message =
+          error instanceof Error ? error.message : '산책을 시작하지 못했습니다.';
+        Alert.alert('오류', message, [
+          { text: '확인', onPress: () => navigation.goBack() },
+        ]);
       }
-
-      if (isMounted) setIsSessionReady(true);
     };
 
     restoreSession();
     return () => {
       isMounted = false;
     };
-  }, [petId]);
+  }, [navigation, petId]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+    let isMounted = true;
+    getPetTodaySunlight(petId)
+      .then((sunlight) => {
+        if (isMounted) {
+          console.info('[walk-light] summary:initial', {
+            sampleCount: sunlight.sample_count,
+            qualifyingMinutes: sunlight.qualifying_minutes,
+            achievedLuxMinutes: sunlight.achieved_lux_minutes,
+          });
+          setTodaySunlight(sunlight);
+          setSunlightUnavailable(false);
+        }
+      })
+      .catch((error) => {
+        console.warn('[walk-light] summary:initial-failed', error);
+        if (isMounted) setSunlightUnavailable(true);
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, [isSessionReady, petId]);
+
+  useEffect(() => {
+    if (!isSessionReady) return;
+    flushLightSamples().catch(() => undefined);
+    const interval = setInterval(() => {
+      if (appStateRef.current === 'active') {
+        flushLightSamples().catch(() => undefined);
+      }
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [flushLightSamples, isSessionReady]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -228,9 +488,112 @@ export default function WalkActiveScreen() {
     return () => loop.stop();
   }, [badgeAnim]);
 
-  const recordLocation = useCallback((pos: GeoPosition) => {
-    const { latitude, longitude } = pos.coords;
+  useEffect(() => {
+    if (!isSessionReady || Platform.OS !== 'android' || !compassHeadingModule) return;
+
+    const subscription = DeviceEventEmitter.addListener(
+      'smartHealthDogCompassHeading',
+      (event: { heading?: unknown }) => {
+        const heading = normalizeHeading(event?.heading);
+        if (heading === null) return;
+
+        headingRef.current = heading;
+        webViewRef.current?.postMessage(
+          JSON.stringify({ type: 'HEADING_UPDATE', heading })
+        );
+      }
+    );
+
+    compassHeadingModule.start();
+    return () => {
+      subscription.remove();
+      compassHeadingModule.stop();
+    };
+  }, [isSessionReady]);
+
+  const showInitialLocationPreview = useCallback((pos: GeoPosition) => {
+    const { accuracy, latitude, longitude } = pos.coords;
+    if (typeof accuracy === 'number' && accuracy > 150) return;
+    if (
+      Number.isFinite(pos.timestamp) &&
+      lastProcessedLocationAtMsRef.current !== null &&
+      pos.timestamp <= lastProcessedLocationAtMsRef.current
+    ) {
+      return;
+    }
+
     const current = { lat: latitude, lng: longitude };
+    const gpsHeading = normalizeHeading(pos.coords.heading);
+    if (headingRef.current === null && gpsHeading !== null) {
+      headingRef.current = gpsHeading;
+    }
+
+    if (!hasInitialCoordRef.current) {
+      hasInitialCoordRef.current = true;
+      initialCoordRef.current = current;
+      setInitialCoord(current);
+    }
+
+    currentCoordRef.current = current;
+    setCurrentCoord(current);
+    webViewRef.current?.postMessage(
+      JSON.stringify({
+        type: 'LOCATION_UPDATE',
+        coord: current,
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
+        heading: headingRef.current,
+        forceCenter: true,
+      })
+    );
+  }, []);
+
+  const recordLocation = useCallback((pos: GeoPosition) => {
+    const { accuracy, latitude, longitude } = pos.coords;
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      (typeof accuracy === 'number' && accuracy > MAX_LOCATION_ACCURACY_METERS)
+    ) {
+      return;
+    }
+
+    const current = { lat: latitude, lng: longitude };
+    const recordedAtMs = Number.isFinite(pos.timestamp) ? pos.timestamp : Date.now();
+    const lastProcessedAtMs = lastProcessedLocationAtMsRef.current;
+    if (lastProcessedAtMs !== null && recordedAtMs <= lastProcessedAtMs) {
+      return;
+    }
+    lastProcessedLocationAtMsRef.current = recordedAtMs;
+
+    const previous = lastCoordRef.current;
+    const decision = evaluateWalkLocationTransition({
+      previous: previous
+        ? { latitude: previous.lat, longitude: previous.lng }
+        : null,
+      previousAtMs: lastAcceptedLocationAtMsRef.current,
+      current: { latitude, longitude },
+      currentAtMs: recordedAtMs,
+      minDistanceKm: MIN_ROUTE_POINT_DISTANCE_KM,
+      maxSpeedMetersPerSecond: MAX_WALK_SPEED_METERS_PER_SECOND,
+      maxGapMs: MAX_DISTANCE_ACCUMULATION_GAP_MS,
+    });
+
+    if (decision.type === 'reject') {
+      return;
+    }
+    if (decision.type === 'stationary') {
+      lastAcceptedLocationAtMsRef.current = recordedAtMs;
+      return;
+    }
+
+    lastAcceptedLocationAtMsRef.current = recordedAtMs;
+    const gpsHeading = normalizeHeading(pos.coords.heading);
+    if (headingRef.current === null && gpsHeading !== null) {
+      headingRef.current = gpsHeading;
+    }
 
     if (!hasInitialCoordRef.current) {
       hasInitialCoordRef.current = true;
@@ -242,27 +605,118 @@ export default function WalkActiveScreen() {
 
     if (pauseTrackingRef.current) {
       lastCoordRef.current = current;
+      shouldStartNewPathSegmentRef.current = true;
       queueSessionSave();
       return;
     }
 
+    if (
+      pathCoordinatesRef.current.length > 0 &&
+      (decision.type === 'baseline' || shouldStartNewPathSegmentRef.current)
+    ) {
+      const segmentStartIndex = pathCoordinatesRef.current.length;
+      const previousSegmentStart =
+        pathSegmentStartIndicesRef.current[
+          pathSegmentStartIndicesRef.current.length - 1
+        ];
+      if (previousSegmentStart !== segmentStartIndex) {
+        pathSegmentStartIndicesRef.current.push(segmentStartIndex);
+      }
+    }
+    shouldStartNewPathSegmentRef.current = false;
     pathCoordinatesRef.current.push([latitude, longitude]);
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: 'LOCATION_UPDATE',
         coord: current,
-        path: pathCoordinatesRef.current,
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
+        heading: headingRef.current,
+        forceCenter: previous === null,
       })
     );
 
-    const previous = lastCoordRef.current;
-    if (previous) {
-      distanceKmRef.current += haversine(previous, current);
+    if (decision.type === 'accumulate') {
+      distanceKmRef.current += decision.distanceKm;
       setDistanceKm(distanceKmRef.current);
     }
     lastCoordRef.current = current;
     queueSessionSave();
   }, [queueSessionSave]);
+
+  const recordForegroundLocation = useCallback((position: GeoPosition) => {
+    if (shouldBufferForegroundLocationsRef.current) {
+      pendingForegroundLocationsRef.current.push(position);
+      return;
+    }
+    recordLocation(position);
+  }, [recordLocation]);
+
+  const mergeBackgroundLocations = useCallback((): Promise<void> => {
+    if (Platform.OS !== 'android' || !walkLocationTrackingModule) {
+      if (appStateRef.current === 'active') {
+        pendingForegroundLocationsRef.current
+          .splice(0)
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .forEach(recordLocation);
+        shouldBufferForegroundLocationsRef.current = false;
+      }
+      return Promise.resolve();
+    }
+    if (backgroundMergePromiseRef.current) {
+      return backgroundMergePromiseRef.current;
+    }
+
+    const mergePromise = (async () => {
+      shouldBufferForegroundLocationsRef.current = true;
+      const nativeLocations: GeoPosition[] = [];
+      try {
+        const locations = await walkLocationTrackingModule.getLocations();
+        locations
+          .filter(
+            (location) =>
+              Number.isFinite(location.latitude) &&
+              Number.isFinite(location.longitude) &&
+              Number.isFinite(location.timestamp)
+          )
+          .sort((a, b) => a.timestamp - b.timestamp)
+          .forEach((location) => {
+            nativeLocations.push({
+              coords: {
+                latitude: location.latitude,
+                longitude: location.longitude,
+                accuracy: location.accuracy,
+                heading: -1,
+              },
+              timestamp: location.timestamp,
+            } as GeoPosition);
+          });
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      } catch {
+        // The foreground service is supplemental; foreground tracking remains available.
+      } finally {
+        const mergedLocations = [
+          ...nativeLocations,
+          ...pendingForegroundLocationsRef.current.splice(0),
+        ].sort((a, b) => a.timestamp - b.timestamp);
+        mergedLocations.forEach(recordLocation);
+        shouldBufferForegroundLocationsRef.current =
+          appStateRef.current !== 'active';
+      }
+    })();
+
+    backgroundMergePromiseRef.current = mergePromise;
+    mergePromise
+      .finally(() => {
+        if (backgroundMergePromiseRef.current === mergePromise) {
+          backgroundMergePromiseRef.current = null;
+        }
+      })
+      .catch(() => undefined);
+    return mergePromise;
+  }, [recordLocation]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -277,7 +731,18 @@ export default function WalkActiveScreen() {
           buttonNegative: '취소',
           buttonPositive: '확인',
         });
-        return granted === PermissionsAndroid.RESULTS.GRANTED;
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) return false;
+
+        if (
+          Number(Platform.Version) >= 33 &&
+          PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+        ) {
+          await PermissionsAndroid.request(
+            PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+          );
+        }
+
+        return true;
       }
       return true;
     };
@@ -286,12 +751,84 @@ export default function WalkActiveScreen() {
       const ok = await requestPermission();
       if (!ok || !isActive) return;
 
+      let nativeTrackingStarted = false;
+      if (Platform.OS === 'android' && walkLocationTrackingModule) {
+        try {
+          if (shouldResetBackgroundLocationsRef.current) {
+            await walkLocationTrackingModule.clearLocations();
+          }
+          if (!isActive) return;
+          if (!pauseTrackingRef.current) {
+            await walkLocationTrackingModule.start(
+              walkIdRef.current!,
+              timerStateRef.current.startedAtMs,
+            );
+            console.info('[walk-light] service:started', {
+              walkId: walkIdRef.current,
+              startedAt: new Date(timerStateRef.current.startedAtMs).toISOString(),
+            });
+          }
+          nativeTrackingStarted = !pauseTrackingRef.current;
+        } catch (error) {
+          console.warn('[walk-light] service:start-failed', error);
+          // Foreground location tracking remains available if native tracking cannot start.
+        }
+      }
+
+      await mergeBackgroundLocations();
+      if (!isActive) return;
+
+      if (
+        nativeTrackingStarted &&
+        walkLocationTrackingModule &&
+        shouldResetBackgroundLocationsRef.current
+      ) {
+        try {
+          const isBatteryExempt =
+            await walkLocationTrackingModule.isIgnoringBatteryOptimizations();
+          if (!isBatteryExempt && isActive) {
+            Alert.alert(
+              '배터리 설정 안내',
+              '화면을 끈 상태에서도 산책 경로를 정확히 기록하려면 배터리 사용량을 제한 없음으로 설정해 주세요.',
+              [
+                { text: '나중에', style: 'cancel' },
+                {
+                  text: '설정하기',
+                  onPress: () =>
+                    walkLocationTrackingModule
+                      ?.requestIgnoreBatteryOptimizations()
+                      .catch(() => undefined),
+                },
+              ]
+            );
+          }
+        } catch {
+          // Battery optimization guidance is optional.
+        }
+      }
+
+      if (!isActive) return;
+      Geolocation.getCurrentPosition((pos) => {
+        if (isActive) showInitialLocationPreview(pos);
+      }, () => {}, {
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 60_000,
+      });
+      Geolocation.getCurrentPosition((pos) => {
+        if (isActive) recordForegroundLocation(pos);
+      }, () => {}, {
+        enableHighAccuracy: true,
+        timeout: 15_000,
+        maximumAge: 5_000,
+      });
+
       watchIdRef.current = Geolocation.watchPosition(
         (pos: GeoPosition) => {
-          if (isActive) recordLocation(pos);
+          if (isActive) recordForegroundLocation(pos);
         },
         () => {},
-        { enableHighAccuracy: true, distanceFilter: 1, interval: 2000, fastestInterval: 1000 }
+        { enableHighAccuracy: true, distanceFilter: 5, interval: 2000, fastestInterval: 1000 }
       );
     };
 
@@ -304,7 +841,12 @@ export default function WalkActiveScreen() {
         watchIdRef.current = null;
       }
     };
-  }, [isSessionReady, recordLocation]);
+  }, [
+    isSessionReady,
+    mergeBackgroundLocations,
+    recordForegroundLocation,
+    showInitialLocationPreview,
+  ]);
 
   useEffect(() => {
     if (!isSessionReady) return;
@@ -314,12 +856,19 @@ export default function WalkActiveScreen() {
 
       if (nextState === 'active' && previousState !== 'active') {
         syncElapsedTime();
-        Geolocation.getCurrentPosition(recordLocation, () => {}, {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 5000,
-        });
+        flushLightSamples().catch(() => undefined);
+        const resumeLocationUpdates = async () => {
+          await mergeBackgroundLocations();
+          if (appStateRef.current !== 'active') return;
+          Geolocation.getCurrentPosition(recordForegroundLocation, () => {}, {
+            enableHighAccuracy: true,
+            timeout: 15000,
+            maximumAge: 5000,
+          });
+        };
+        resumeLocationUpdates().catch(() => undefined);
       } else if (nextState === 'background' || nextState === 'inactive') {
+        shouldBufferForegroundLocationsRef.current = true;
         syncElapsedTime();
         queueSessionSave(true);
       }
@@ -328,58 +877,160 @@ export default function WalkActiveScreen() {
     });
 
     return () => subscription.remove();
-  }, [isSessionReady, queueSessionSave, recordLocation, syncElapsedTime]);
+  }, [
+    isSessionReady,
+    flushLightSamples,
+    mergeBackgroundLocations,
+    queueSessionSave,
+    recordForegroundLocation,
+    syncElapsedTime,
+  ]);
 
   const handlePauseToggle = () => {
+    if (!isSessionReady) return;
     const now = Date.now();
     timerStateRef.current = isPaused
       ? resumeWalkTimer(timerStateRef.current, now)
       : pauseWalkTimer(timerStateRef.current, now);
+    if (!isPaused) {
+      shouldStartNewPathSegmentRef.current = true;
+    }
     pauseTrackingRef.current = timerStateRef.current.isPaused;
     setIsPaused(timerStateRef.current.isPaused);
     setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
     queueSessionSave(true);
+
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      const operation = timerStateRef.current.isPaused
+        ? walkLocationTrackingModule.stop()
+        : walkLocationTrackingModule.start(
+          walkIdRef.current!,
+          timerStateRef.current.startedAtMs,
+        );
+      operation.then(() => {
+        if (timerStateRef.current.isPaused) flushLightSamples().catch(() => undefined);
+      }).catch(() => undefined);
+    }
   };
 
-  const handleStop = () => {
+  const handleStop = useCallback(async () => {
+    if (!isSessionReady || isStoppingRef.current) return;
+    isStoppingRef.current = true;
+    await mergeBackgroundLocations();
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      await walkLocationTrackingModule.stop().catch(() => undefined);
+    }
+    flushLightSamples().catch(() => undefined);
     const now = Date.now();
-    timerStateRef.current = pauseWalkTimer(timerStateRef.current, now);
-    setElapsedSeconds(getElapsedSeconds(timerStateRef.current, now));
+    const snapshot = createCompletedWalkSnapshot(now);
+    setCompletedWalk(snapshot);
+    setElapsedSeconds(snapshot.elapsedSeconds);
     setIsPaused(true);
     pauseTrackingRef.current = true;
     queueSessionSave(true);
     setShowConfirmModal(true);
-  };
+    isStoppingRef.current = false;
+  }, [
+    createCompletedWalkSnapshot,
+    flushLightSamples,
+    isSessionReady,
+    mergeBackgroundLocations,
+    queueSessionSave,
+  ]);
+
+  const requestWalkExit = useCallback(() => {
+    if (
+      !isSessionReady ||
+      isStoppingRef.current ||
+      showConfirmModal ||
+      showResultModal
+    ) {
+      return;
+    }
+    handleStop();
+  }, [handleStop, isSessionReady, showConfirmModal, showResultModal]);
+
+  usePreventRemove(isSessionReady && !canLeaveScreen, requestWalkExit);
+
+  useEffect(() => {
+    if (canLeaveScreen) {
+      navigation.goBack();
+    }
+  }, [canLeaveScreen, navigation]);
 
   const handleConfirmNo = () => {
+    if (!isSessionReady) return;
     const now = Date.now();
     timerStateRef.current = resumeWalkTimer(timerStateRef.current, now);
+    setCompletedWalk(null);
     setShowConfirmModal(false);
     setIsPaused(false);
     pauseTrackingRef.current = false;
     queueSessionSave(true);
+    if (Platform.OS === 'android' && walkLocationTrackingModule) {
+      walkLocationTrackingModule.start(
+        walkIdRef.current!,
+        timerStateRef.current.startedAtMs,
+      ).catch(() => undefined);
+    }
   };
 
   const handleConfirmYes = () => {
     setShowConfirmModal(false);
     setShowResultModal(true);
+    setTodaySunlight(null);
+    setSunlightUnavailable(false);
+    const refreshResult = async () => {
+      try {
+        await flushLightSamples();
+      } catch (error) {
+        console.warn('[walk-light] result:upload-failed', error);
+      }
+      try {
+        const sunlight = await getPetTodaySunlight(petId);
+        console.info('[walk-light] result:summary', {
+          sampleCount: sunlight.sample_count,
+          qualifyingMinutes: sunlight.qualifying_minutes,
+          achievedLuxMinutes: sunlight.achieved_lux_minutes,
+        });
+        setTodaySunlight(sunlight);
+      } catch (error) {
+        console.warn('[walk-light] result:summary-failed', error);
+        setSunlightUnavailable(true);
+      }
+    };
+    refreshResult().catch(() => undefined);
   };
 
   const handleResultConfirm = async () => {
     if (isSubmitting) return;
+    const snapshot = completedWalk;
+    if (!snapshot) {
+      Alert.alert('오류', '산책 종료 정보를 준비하지 못했습니다. 다시 시도해 주세요.');
+      return;
+    }
+    const walkId = walkIdRef.current;
+    if (!walkId) {
+      Alert.alert('오류', '진행 중인 산책 기록 ID를 확인하지 못했습니다.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      const finalElapsedSeconds = getElapsedSeconds(timerStateRef.current, Date.now());
-      await createPetWalk(petId, {
-        startTime: startDate.toISOString(),
-        endTime: new Date(startDate.getTime() + finalElapsedSeconds * 1000).toISOString(),
-        distanceKm: Number(distanceKmRef.current.toFixed(3)),
-        pathCoordinates: pathCoordinatesRef.current,
-      });
+      await finishWalkWithPendingLight(petId, walkId, {
+        end_time: snapshot.endTime,
+        distance: snapshot.distanceKm,
+        path_coordinates: snapshot.pathCoordinates,
+      }, Platform.OS === 'android' ? walkLocationTrackingModule : undefined);
+      await saveWalkRouteSegmentStartIndices(
+        walkId,
+        snapshot.pathSegmentStartIndices,
+      ).catch(() => undefined);
       isFinishingRef.current = true;
       await persistQueueRef.current.catch(() => undefined);
       await clearActiveWalkSession().catch(() => undefined);
-      navigation.goBack();
+      await walkLocationTrackingModule?.clearLocations().catch(() => undefined);
+      setCanLeaveScreen(true);
     } catch (error) {
       const message = error instanceof Error ? error.message : '산책 기록 저장에 실패했습니다.';
       Alert.alert('오류', message);
@@ -390,7 +1041,24 @@ export default function WalkActiveScreen() {
 
   const distanceText = useMemo(() => `${distanceKm.toFixed(1)}`, [distanceKm]);
   const timerText = useMemo(() => formatTime(elapsedSeconds), [elapsedSeconds]);
-  const resultDuration = useMemo(() => formatDurationMinutes(elapsedSeconds), [elapsedSeconds]);
+  const resultStartDate = useMemo(
+    () => (completedWalk ? new Date(completedWalk.startTime) : startDate),
+    [completedWalk, startDate]
+  );
+  const resultEndDate = useMemo(
+    () => (completedWalk ? new Date(completedWalk.endTime) : endDate),
+    [completedWalk, endDate]
+  );
+  const resultStartTimeText = useMemo(() => formatClock(resultStartDate), [resultStartDate]);
+  const resultEndTimeText = useMemo(() => formatClock(resultEndDate), [resultEndDate]);
+  const resultDuration = useMemo(
+    () => formatDurationMinutes(completedWalk?.elapsedSeconds ?? elapsedSeconds),
+    [completedWalk, elapsedSeconds]
+  );
+  const resultDistanceText = useMemo(
+    () => `${(completedWalk?.distanceKm ?? distanceKm).toFixed(1)}`,
+    [completedWalk, distanceKm]
+  );
   const kakaoHtml = useMemo(() => {
     const center = initialCoord ?? { lat: 37.5665, lng: 126.9780 };
     return `<!DOCTYPE html>
@@ -401,23 +1069,43 @@ export default function WalkActiveScreen() {
           <style>
             html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
             .current-marker {
-              width: 22px;
-              height: 22px;
-              border-radius: 50%;
-              background: #0081D5;
-              border: 4px solid #FFFFFF;
-              box-shadow: 0 2px 10px rgba(0, 129, 213, 0.55);
+              --heading: 0deg;
+              width: 46px;
+              height: 46px;
               position: relative;
             }
-            .current-marker:after {
-              content: '';
+            .marker-accuracy {
               position: absolute;
-              left: -10px;
-              top: -10px;
-              width: 34px;
-              height: 34px;
+              inset: 2px;
               border-radius: 50%;
+              background: rgba(0, 129, 213, 0.16);
               border: 2px solid rgba(0, 129, 213, 0.35);
+            }
+            .direction-arrow {
+              position: absolute;
+              left: 7px;
+              top: 2px;
+              width: 32px;
+              height: 42px;
+              transform: rotate(var(--heading));
+              transform-origin: 50% 50%;
+              filter: drop-shadow(0 2px 3px rgba(0, 67, 126, 0.35));
+            }
+            .direction-arrow path {
+              fill: #0081D5;
+              stroke: #FFFFFF;
+              stroke-width: 2;
+              stroke-linejoin: round;
+            }
+            .marker-dot {
+              position: absolute;
+              left: 16px;
+              top: 16px;
+              width: 14px;
+              height: 14px;
+              border-radius: 50%;
+              background: #FFFFFF;
+              box-shadow: 0 1px 3px rgba(0, 67, 126, 0.3);
             }
           </style>
           <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false"></script>
@@ -428,7 +1116,8 @@ export default function WalkActiveScreen() {
             (function() {
               var map;
               var marker;
-              var polyline;
+              var markerElement;
+              var polylines = [];
               var hasCentered = false;
 
               function toLatLng(coord) {
@@ -437,11 +1126,19 @@ export default function WalkActiveScreen() {
 
               function ensureMarker(position) {
                 if (!marker) {
+                  markerElement = document.createElement('div');
+                  markerElement.className = 'current-marker';
+                  markerElement.innerHTML =
+                    '<div class="marker-accuracy"></div>' +
+                    '<svg class="direction-arrow" viewBox="0 0 32 42" aria-hidden="true">' +
+                    '<path d="M16 1 L29 34 L16 29 L3 34 Z"></path>' +
+                    '</svg>' +
+                    '<div class="marker-dot"></div>';
                   marker = new kakao.maps.CustomOverlay({
                     position: position,
                     yAnchor: 0.5,
                     xAnchor: 0.5,
-                    content: '<div class="current-marker"></div>'
+                    content: markerElement
                   });
                   marker.setMap(map);
                   return;
@@ -449,29 +1146,48 @@ export default function WalkActiveScreen() {
                 marker.setPosition(position);
               }
 
+              function updateHeading(heading) {
+                if (!markerElement || typeof heading !== 'number' || !isFinite(heading)) return;
+                markerElement.style.setProperty('--heading', (heading % 360) + 'deg');
+              }
+
+              function updateRoute(segments) {
+                segments.forEach(function(segment, index) {
+                  var linePath = segment.map(function(point) {
+                    return new kakao.maps.LatLng(point[0], point[1]);
+                  });
+                  if (!polylines[index]) {
+                    polylines[index] = new kakao.maps.Polyline({
+                      map: map,
+                      path: linePath,
+                      strokeWeight: 5,
+                      strokeColor: '#0081D5',
+                      strokeOpacity: 0.9,
+                      strokeStyle: 'solid'
+                    });
+                  } else {
+                    polylines[index].setPath(linePath);
+                  }
+                });
+                while (polylines.length > segments.length) {
+                  polylines.pop().setMap(null);
+                }
+              }
+
               function updateLocation(payload) {
                 if (!map || !payload || !payload.coord) return;
                 var position = toLatLng(payload.coord);
                 ensureMarker(position);
+                updateHeading(payload.heading);
 
-                var linePath = (payload.path || []).map(function(point) {
-                  return new kakao.maps.LatLng(point[0], point[1]);
-                });
+                var pathSegments = payload.pathSegments ||
+                  (payload.path && payload.path.length ? [payload.path] : []);
+                var pointCount = pathSegments.reduce(function(total, segment) {
+                  return total + segment.length;
+                }, 0);
+                updateRoute(pathSegments);
 
-                if (!polyline) {
-                  polyline = new kakao.maps.Polyline({
-                    map: map,
-                    path: linePath,
-                    strokeWeight: 5,
-                    strokeColor: '#0081D5',
-                    strokeOpacity: 0.9,
-                    strokeStyle: 'solid'
-                  });
-                } else {
-                  polyline.setPath(linePath);
-                }
-
-                if (!hasCentered || linePath.length % 5 === 0) {
+                if (payload.forceCenter || !hasCentered || pointCount % 5 === 0) {
                   map.setCenter(position);
                   hasCentered = true;
                 }
@@ -482,13 +1198,26 @@ export default function WalkActiveScreen() {
                   center: new kakao.maps.LatLng(${center.lat}, ${center.lng}),
                   level: 4
                 });
+                map.setDraggable(true);
+                map.setZoomable(true);
               });
 
+              function handleMessage(payload) {
+                if (!payload) return;
+                if (payload.type === 'HEADING_UPDATE') {
+                  updateHeading(payload.heading);
+                  return;
+                }
+                if (payload.type === 'LOCATION_UPDATE') {
+                  updateLocation(payload);
+                }
+              }
+
               document.addEventListener('message', function(event) {
-                try { updateLocation(JSON.parse(event.data)); } catch (e) {}
+                try { handleMessage(JSON.parse(event.data)); } catch (e) {}
               });
               window.addEventListener('message', function(event) {
-                try { updateLocation(JSON.parse(event.data)); } catch (e) {}
+                try { handleMessage(JSON.parse(event.data)); } catch (e) {}
               });
             })();
           </script>
@@ -496,13 +1225,18 @@ export default function WalkActiveScreen() {
       </html>`;
   }, [initialCoord]);
 
-  const pushCurrentLocationToMap = () => {
+  const pushCurrentLocationToMap = (forceCenter = false) => {
     if (!currentCoord) return;
     webViewRef.current?.postMessage(
       JSON.stringify({
         type: 'LOCATION_UPDATE',
         coord: currentCoord,
-        path: pathCoordinatesRef.current,
+        pathSegments: splitPathBySegmentStartIndices(
+          pathCoordinatesRef.current,
+          pathSegmentStartIndicesRef.current,
+        ),
+        heading: headingRef.current,
+        forceCenter,
       })
     );
   };
@@ -510,14 +1244,14 @@ export default function WalkActiveScreen() {
   return (
     <View style={styles.container}>
       {mapLoadError ? (
-        <View style={[styles.mapBackground, styles.mapFallback]} />
+        <View style={[styles.mapBackground, styles.mapViewport, { bottom: 338 + insets.bottom }, styles.mapFallback]} />
       ) : (
         <WebView
           ref={webViewRef}
           key="walk-active-map"
           originWhitelist={['*']}
           source={{ html: kakaoHtml }}
-          style={styles.mapBackground}
+          style={[styles.mapBackground, styles.mapViewport, { bottom: 338 + insets.bottom }]}
           javaScriptEnabled
           domStorageEnabled
           cacheEnabled={false}
@@ -538,11 +1272,24 @@ export default function WalkActiveScreen() {
         />
       )}
 
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="내 위치로 이동"
+        activeOpacity={0.8}
+        onPress={() => pushCurrentLocationToMap(true)}
+        style={[styles.recenterButton, { top: insets.top + 12 }]}
+      >
+        <View style={styles.recenterTarget}>
+          <View style={styles.recenterDot} />
+        </View>
+      </TouchableOpacity>
+
       <Animated.View style={[styles.statusBadge, { opacity: badgeAnim }]}>
         <Text style={styles.statusBadgeText}>{`${petName}와(과) 산책 중입니다`}</Text>
       </Animated.View>
 
-      <View style={[styles.bottomSheet, { height: 250 + insets.bottom, paddingBottom: 24 + insets.bottom }]}>
+      <View style={[styles.bottomSheet, { height: 338 + insets.bottom, paddingBottom: 8 + insets.bottom }]}>
+        <SunlightProgressCard data={todaySunlight} lastMeasuredLux={lastMeasuredLux} isUnavailable={sunlightUnavailable} />
         <View style={styles.metricsRow}>
           <View style={styles.metricBox}><Text style={styles.metricValue}>{distanceText}</Text><Text style={styles.metricLabel}>거리(km)</Text></View>
           <View style={styles.metricDivider} />
@@ -573,9 +1320,12 @@ export default function WalkActiveScreen() {
             <View style={[styles.resultSection, styles.resultSectionSpacing]}>
               <Text style={styles.resultSubtitle}>산책 기록</Text>
               <View style={styles.resultTexts}>
-                <Text style={styles.resultInfoText}>{dateLabel} {startPeriod} {startTimeText} ~ {endPeriod} {endTimeText}</Text>
-                <Text style={styles.resultInfoText}>{distanceText}km, {resultDuration}</Text>
+                <Text style={styles.resultInfoText}>{formatDateLabel(resultStartDate)} {formatPeriod(resultStartTimeText)} {resultStartTimeText} ~ {formatPeriod(resultEndTimeText)} {resultEndTimeText}</Text>
+                <Text style={styles.resultInfoText}>{resultDistanceText}km, {resultDuration}</Text>
               </View>
+            </View>
+            <View style={styles.resultSunlightSection}>
+              <SunlightProgressCard data={todaySunlight} lastMeasuredLux={lastMeasuredLux} isUnavailable={sunlightUnavailable} />
             </View>
             <View style={styles.resultButtonContainer}><CustomButton text={isSubmitting ? '저장 중...' : '확인'} onPress={handleResultConfirm} width={230} disabled={isSubmitting} /></View>
           </View>
@@ -586,13 +1336,27 @@ export default function WalkActiveScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#E5E7EB' }, mapBackground: { flex: 1, backgroundColor: '#DCE2EA' }, mapFallback: { backgroundColor: '#E9ECEF' },
+  sunlightCard: { borderWidth: 1, borderColor: '#EAECEE', borderRadius: 16, padding: 14, backgroundColor: '#FFF', marginBottom: 18 },
+  sunlightCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  sunlightCardTitle: { color: '#3C4144', fontSize: 14, fontWeight: '600' },
+  sunlightCardPercent: { color: '#7B7C7D', fontSize: 13, fontWeight: '600' },
+  sunlightCardAmount: { color: '#7B7C7D', fontSize: 13, marginTop: 10 },
+  sunlightCardAchieved: { color: '#F4B844', fontWeight: '700' },
+  sunlightProgressTrack: { height: 8, borderRadius: 4, backgroundColor: '#F2F4F7', marginTop: 12, overflow: 'hidden' },
+  sunlightProgressFill: { height: 8, backgroundColor: '#FFC94D' },
+  sunlightCardFooter: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 10 },
+  sunlightCardNote: { color: '#7B7C7D', fontSize: 12, flexShrink: 1 },
+  sunlightCardLastLux: { color: '#7B7C7D', fontSize: 12, marginLeft: 8 },
+  resultSunlightSection: { marginTop: 16 },
+  container: { flex: 1, backgroundColor: '#E5E7EB' }, mapBackground: { backgroundColor: '#DCE2EA' }, mapViewport: { position: 'absolute', top: 0, left: 0, right: 0 }, mapFallback: { backgroundColor: '#E9ECEF' },
+  recenterButton: { position: 'absolute', right: 16, width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFF', alignItems: 'center', justifyContent: 'center', elevation: 4, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 5, shadowOffset: { width: 0, height: 2 } },
+  recenterTarget: { width: 22, height: 22, borderWidth: 2, borderColor: '#0081D5', borderRadius: 11, alignItems: 'center', justifyContent: 'center' }, recenterDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#0081D5' },
   statusBadge: { position: 'absolute', top: 70, alignSelf: 'center', width: 180, height: 32, borderRadius: 12, backgroundColor: '#7B7C7D', alignItems: 'center', justifyContent: 'center' },
   statusBadgeText: { color: '#FFF', fontSize: 12, fontWeight: '500' },
-  bottomSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#FFF', paddingTop: 34, paddingHorizontal: 24 },
+  bottomSheet: { position: 'absolute', left: 0, right: 0, bottom: 0, borderTopLeftRadius: 20, borderTopRightRadius: 20, backgroundColor: '#FFF', paddingTop: 24, paddingHorizontal: 24 },
   metricsRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginHorizontal: 12 },
   metricBox: { flex: 1, alignItems: 'center' }, metricValue: { color: '#3C4144', fontSize: 32, fontWeight: '500' }, metricValuePaused: { color: '#EF5F5F' }, metricLabel: { marginTop: 8, color: '#7B7C7D', fontSize: 14, fontWeight: '500' }, metricDivider: { width: 1, height: 56, backgroundColor: '#EAECEE', marginHorizontal: 12 },
-  buttonRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 18, gap: 28 }, controlButton: { width: 82, height: 82, resizeMode: 'contain' },
+  buttonRow: { flexDirection: 'row', justifyContent: 'center', alignItems: 'center', marginTop: 14, gap: 28 }, controlButton: { width: 72, height: 72, resizeMode: 'contain' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20 },
   confirmModal: { width: 290, paddingVertical: 30, paddingHorizontal: 30, borderRadius: 16, backgroundColor: '#FFF', alignItems: 'center' }, confirmText: { color: '#000', fontSize: 20, fontWeight: '700', textAlign: 'center' }, confirmButtons: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', marginTop: 24 },
   confirmNoButton: { width: 110, height: 55, alignItems: 'center', justifyContent: 'center', borderRadius: 12, backgroundColor: '#E1E1E1' }, confirmNoText: { fontSize: 18, fontWeight: '600', color: '#7B7C7D' },

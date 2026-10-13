@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
@@ -8,12 +8,15 @@ import {
   TextInput,
   Alert,
   Image,
+  Modal,
 } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { PhysicalResult, HealthSummary, OverallCondition } from '../types/health';
+import { getMyPets, PetListItem } from '../api/pets';
 
 /* ─── 상수 ─── */
 const EXAM_TYPES = [
@@ -84,8 +87,13 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckInput'>;
 const HealthCheckInputScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
+  const insets = useSafeAreaInsets();
   const { petId, petName } = route.params;
 
+  const [pets, setPets] = useState<PetListItem[]>([]);
+  const [selectedPetId, setSelectedPetId] = useState(petId);
+  const [selectedPetName, setSelectedPetName] = useState(petName);
+  const [isPetSelectorVisible, setPetSelectorVisible] = useState(false);
   const [checkupDate, setCheckupDate] = useState(todayString());
   const [hospitalName, setHospitalName] = useState('');
   const [selectedExamTypes, setSelectedExamTypes] = useState<string[]>([]);
@@ -96,6 +104,28 @@ const HealthCheckInputScreen = () => {
   const [weight, setWeight] = useState('');
   const [heartRate, setHeartRate] = useState('');
   const [temperature, setTemperature] = useState('');
+
+  useEffect(() => {
+    let isMounted = true;
+
+    getMyPets()
+      .then((petList) => {
+        if (!isMounted) return;
+        setPets(petList);
+
+        const selectedPet = petList.find((pet) => pet.id === petId);
+        if (selectedPet?.name) {
+          setSelectedPetName(selectedPet.name);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setPets([]);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [petId]);
 
   /* ─── 핸들러 ─── */
   const toggleExamType = (type: string) => {
@@ -115,7 +145,7 @@ const HealthCheckInputScreen = () => {
       .map(([k]) => k);
 
     const summary: HealthSummary = {
-      petId,
+      petId: selectedPetId,
       checkupDate,
       hospitalName: hospitalName.trim() || undefined,
       examTypes: selectedExamTypes,
@@ -129,14 +159,32 @@ const HealthCheckInputScreen = () => {
       temperature: parseNumber(temperature),
     };
 
-    navigation.navigate('HealthCheckResult', { petId, petName, summary });
+    navigation.navigate('HealthCheckResult', {
+      petId: selectedPetId,
+      petName: selectedPetName,
+      summary,
+    });
+  };
+
+  const handleSelectPet = (pet: PetListItem) => {
+    setSelectedPetId(pet.id);
+    setSelectedPetName(pet.name || '이름 없음');
+    setPetSelectorVisible(false);
   };
 
   /* ─── 렌더 ─── */
   return (
     <View style={styles.screen}>
       {/* NavBar */}
-      <View style={styles.navBar}>
+      <View
+        style={[
+          styles.navBar,
+          {
+            height: 56 + insets.top,
+            paddingTop: insets.top,
+          },
+        ]}
+      >
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
           <Image
             source={require('../assets/icon_navBack.png')}
@@ -159,13 +207,18 @@ const HealthCheckInputScreen = () => {
         <Text style={styles.sectionTitle}>기본 정보</Text>
 
         {/* 반려동물 이름 */}
-        <View style={styles.inputBox}>
-          <Text style={styles.inputValue}>{petName}</Text>
+        <TouchableOpacity
+          style={styles.inputBox}
+          activeOpacity={pets.length > 1 ? 0.75 : 1}
+          disabled={pets.length <= 1}
+          onPress={() => setPetSelectorVisible(true)}
+        >
+          <Text style={styles.inputValue}>{selectedPetName}</Text>
           <Image
             source={require('../assets/icon_arrowDown.png')}
             style={styles.dropdownIcon}
           />
-        </View>
+        </TouchableOpacity>
 
         {/* 날짜 */}
         <View style={styles.inputBox}>
@@ -332,7 +385,12 @@ const HealthCheckInputScreen = () => {
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={styles.bottomBtns}>
+      <View
+        style={[
+          styles.bottomBtns,
+          { paddingBottom: Math.max(insets.bottom, 16) + 12 },
+        ]}
+      >
         <TouchableOpacity
           style={styles.cancelBtn}
           onPress={() => navigation.goBack()}
@@ -343,6 +401,41 @@ const HealthCheckInputScreen = () => {
           <Text style={styles.submitBtnText}>다음</Text>
         </TouchableOpacity>
       </View>
+
+      <Modal
+        transparent
+        visible={isPetSelectorVisible}
+        animationType="fade"
+        onRequestClose={() => setPetSelectorVisible(false)}
+      >
+        <View style={styles.petModalOverlay}>
+          <TouchableOpacity
+            style={styles.petModalDismissArea}
+            activeOpacity={1}
+            onPress={() => setPetSelectorVisible(false)}
+          />
+          <View style={styles.petModalContent}>
+            <Text style={styles.petModalTitle}>반려동물 선택</Text>
+            <ScrollView showsVerticalScrollIndicator={pets.length > 4}>
+              {pets.map((pet) => {
+                const isSelected = pet.id === selectedPetId;
+                return (
+                  <TouchableOpacity
+                    key={pet.id}
+                    style={[styles.petOption, isSelected && styles.petOptionSelected]}
+                    activeOpacity={0.8}
+                    onPress={() => handleSelectPet(pet)}
+                  >
+                    <Text style={[styles.petOptionText, isSelected && styles.petOptionTextSelected]}>
+                      {pet.name || '이름 없음'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 };
@@ -430,6 +523,46 @@ const styles = StyleSheet.create({
     width: 14,
     height: 14,
     tintColor: '#aaa',
+  },
+  petModalOverlay: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.35)',
+    paddingHorizontal: 32,
+  },
+  petModalDismissArea: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  petModalContent: {
+    width: '100%',
+    maxHeight: 320,
+    borderRadius: 16,
+    backgroundColor: '#FFFFFF',
+    padding: 20,
+  },
+  petModalTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#040505',
+    marginBottom: 12,
+  },
+  petOption: {
+    minHeight: 52,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+    borderRadius: 10,
+  },
+  petOptionSelected: {
+    backgroundColor: '#EEF7FD',
+  },
+  petOptionText: {
+    fontSize: 16,
+    color: '#333333',
+  },
+  petOptionTextSelected: {
+    color: '#0081D5',
+    fontWeight: '700',
   },
 
   /* 측정 수치 */

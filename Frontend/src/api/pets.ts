@@ -1,10 +1,11 @@
 import { Platform } from 'react-native';
 import {
   getStoredAccessToken,
-  getStoredRefreshToken,
-  storeAuthTokens,
+  getAuthSession,
+  assertAuthSession,
 } from '../storage/tokenStorage';
-import { refreshAuthToken } from './auth';
+import { refreshSessionAccessToken } from './refreshSession';
+import { getResponseErrorMessage } from './responseError';
 import { resolveImageUri } from '../utils/imageUri';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
@@ -97,14 +98,6 @@ const parseJsonSafe = async (response: Response) => {
   }
 };
 
-const readErrorBody = async (response: Response) => {
-  try {
-    return await response.text();
-  } catch {
-    return '';
-  }
-};
-
 const buildAuthHeaders = (accessToken: string) => ({
   Authorization: `Bearer ${accessToken}`,
   Accept: 'application/json',
@@ -129,7 +122,9 @@ const authorizedFetch = async (
   input: string,
   init?: RequestInit
 ): Promise<Response> => {
+  const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
+  assertAuthSession(session);
 
   if (!accessToken) {
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
@@ -154,16 +149,9 @@ const authorizedFetch = async (
     return response;
   }
 
-  const refreshToken = await getStoredRefreshToken();
-
-  if (!refreshToken) {
-    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
-  }
-
   try {
-    const newTokens = await refreshAuthToken(refreshToken);
-    await storeAuthTokens(newTokens);
-    accessToken = newTokens.accessToken;
+    accessToken = await refreshSessionAccessToken(session, accessToken);
+    assertAuthSession(session);
     response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -257,13 +245,10 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -316,13 +301,10 @@ export const getPetDetail = async (id: number): Promise<PetListItem> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -341,13 +323,10 @@ export const createPet = async (
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 등록에 실패했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 등록에 실패했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -369,13 +348,10 @@ export const updatePetFull = async (
   );
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -397,13 +373,10 @@ export const updatePetPartial = async (
   );
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -424,13 +397,10 @@ export const deletePet = async (id: number): Promise<void> => {
   }
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `반려동물 정보를 삭제하지 못했습니다. (HTTP ${response.status})`
+    );
 
     throw new Error(message);
   }
@@ -485,13 +455,14 @@ export const requestUrineDiagnosis = async (
     return idFromLocation ? { submissionId: idFromLocation } : null;
   }
 
-  const errorText = await readErrorBody(response);
+  const message = await getResponseErrorMessage(
+    response,
+    `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
+  );
   console.log('[diagnosis] upload:urine:error', {
     status: response.status,
     statusText: response.statusText,
-    message: errorText,
+    message,
   });
-  throw new Error(
-    errorText || `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
-  );
+  throw new Error(message);
 };

@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,7 +14,19 @@ import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { WebView } from 'react-native-webview';
 import { RootStackParamList } from '../../App';
-import { deleteWalk, endPetWalk, getWalkDetail, WalkCoordinate, WalkRecordDto } from '../api/walks';
+import {
+  deleteWalk,
+  getPetTodaySunlight,
+  getWalkDetail,
+  SunlightTodayResponse,
+  WalkCoordinate,
+  WalkRecordDto,
+} from '../api/walks';
+import {
+  clearWalkRouteSegmentStartIndices,
+  loadWalkRouteSegmentStartIndices,
+} from '../storage/walkSessionStorage';
+import { splitPathBySegmentStartIndices } from '../utils/walkLocation';
 
 type WalkLogDetailRouteProp = RouteProp<RootStackParamList, 'WalkLogDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -95,9 +107,11 @@ export default function WalkLogDetailScreen() {
   const { record } = route.params;
   const pulseAnim = useRef(new Animated.Value(0.6)).current;
   const [walkDetail, setWalkDetail] = useState<WalkRecordDto | null>(null);
+  const [pathSegmentStartIndices, setPathSegmentStartIndices] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [isEnding, setIsEnding] = useState(false);
+  const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
+  const [isSunlightLoading, setIsSunlightLoading] = useState(false);
 
   const loadDetail = useCallback(async () => {
     if (!record.id) return;
@@ -116,6 +130,54 @@ export default function WalkLogDetailScreen() {
     loadDetail();
   }, [loadDetail]);
 
+  useEffect(() => {
+    let isMounted = true;
+    setPathSegmentStartIndices([]);
+    if (!record.id) return () => {
+      isMounted = false;
+    };
+
+    loadWalkRouteSegmentStartIndices(record.id).then((indices) => {
+      if (isMounted) setPathSegmentStartIndices(indices);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [record.id]);
+
+  const petId = record.petId;
+  const walkDate = formatDateFromIso(walkDetail?.start_time ?? walkDetail?.startTime) || record.date;
+  const now = new Date();
+  const todayDate = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
+  const showTodaySunlight = !!petId && walkDate !== '' && walkDate === todayDate;
+
+  useEffect(() => {
+    let isMounted = true;
+    if (!showTodaySunlight || !petId) {
+      setTodaySunlight(null);
+      setIsSunlightLoading(false);
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    setIsSunlightLoading(true);
+    getPetTodaySunlight(petId)
+      .then((summary) => {
+        if (isMounted) setTodaySunlight(summary);
+      })
+      .catch(() => {
+        if (isMounted) setTodaySunlight(null);
+      })
+      .finally(() => {
+        if (isMounted) setIsSunlightLoading(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [petId, showTodaySunlight]);
+
   const resolved = useMemo(() => {
     const startIso = walkDetail?.start_time ?? walkDetail?.startTime;
     const endIso = walkDetail?.end_time ?? walkDetail?.endTime;
@@ -124,7 +186,7 @@ export default function WalkLogDetailScreen() {
 
     const date = formatDateFromIso(startIso) || record.date;
     const startTime = formatClockFromIso(startIso) || record.startTime || '00:00';
-    const endTime = formatClockFromIso(endIso) || record.endTime || addDurationToTime(startTime, record.duration);
+    const endTime = formatClockFromIso(endIso ?? undefined) || record.endTime || addDurationToTime(startTime, record.duration);
 
     return {
       date,
@@ -136,18 +198,20 @@ export default function WalkLogDetailScreen() {
     };
   }, [record, walkDetail]);
 
-  const hasEnded = Boolean(walkDetail?.end_time ?? walkDetail?.endTime ?? record.endTime);
-  const canEndWalk = Boolean(record.petId) && Boolean(record.id) && !hasEnded;
-
   const pathPoints = useMemo(() => {
     const detailPath = walkDetail?.path_coordinates ?? walkDetail?.pathCoordinates;
     return normalizePathCoordinates(detailPath?.length ? detailPath : record.pathCoordinates);
   }, [record.pathCoordinates, walkDetail]);
 
+  const pathSegments = useMemo(
+    () => splitPathBySegmentStartIndices(pathPoints, pathSegmentStartIndices),
+    [pathPoints, pathSegmentStartIndices],
+  );
+
   const kakaoMapHtml = useMemo(() => {
     const fallbackCenter = { lat: 37.5665, lng: 126.9780 };
     const center = pathPoints[0] ?? fallbackCenter;
-    const serializedPath = JSON.stringify(pathPoints);
+    const serializedPathSegments = JSON.stringify(pathSegments);
 
     return `<!DOCTYPE html>
       <html>
@@ -163,7 +227,9 @@ export default function WalkLogDetailScreen() {
           <div id="map"></div>
           <script>
             (function() {
-              var path = ${serializedPath};
+              var pathSegments = ${serializedPathSegments};
+              var path = [].concat.apply([], pathSegments);
+
               kakao.maps.load(function() {
                 var map = new kakao.maps.Map(document.getElementById('map'), {
                   center: new kakao.maps.LatLng(${center.lat}, ${center.lng}),
@@ -174,24 +240,28 @@ export default function WalkLogDetailScreen() {
 
                 if (path.length > 0) {
                   var bounds = new kakao.maps.LatLngBounds();
-                  var linePath = path.map(function(point) {
+                  var allPositions = path.map(function(point) {
                     var latLng = new kakao.maps.LatLng(point.lat, point.lng);
                     bounds.extend(latLng);
                     return latLng;
                   });
 
-                  new kakao.maps.Polyline({
-                    map: map,
-                    path: linePath,
-                    strokeWeight: 5,
-                    strokeColor: '#0081D5',
-                    strokeOpacity: 0.9,
-                    strokeStyle: 'solid'
+                  pathSegments.forEach(function(segment) {
+                    new kakao.maps.Polyline({
+                      map: map,
+                      path: segment.map(function(point) {
+                        return new kakao.maps.LatLng(point.lat, point.lng);
+                      }),
+                      strokeWeight: 5,
+                      strokeColor: '#0081D5',
+                      strokeOpacity: 0.9,
+                      strokeStyle: 'solid'
+                    });
                   });
 
-                  new kakao.maps.Marker({ map: map, position: linePath[0] });
-                  if (linePath.length > 1) {
-                    new kakao.maps.Marker({ map: map, position: linePath[linePath.length - 1] });
+                  new kakao.maps.Marker({ map: map, position: allPositions[0] });
+                  if (allPositions.length > 1) {
+                    new kakao.maps.Marker({ map: map, position: allPositions[allPositions.length - 1] });
                     map.setBounds(bounds);
                   }
                 }
@@ -200,7 +270,7 @@ export default function WalkLogDetailScreen() {
           </script>
         </body>
       </html>`;
-  }, [pathPoints]);
+  }, [pathPoints, pathSegments]);
 
   const handleDelete = () => {
     const walkId = record.id;
@@ -218,6 +288,7 @@ export default function WalkLogDetailScreen() {
           setIsDeleting(true);
           try {
             await deleteWalk(walkId);
+            await clearWalkRouteSegmentStartIndices(walkId).catch(() => undefined);
             navigation.goBack();
           } catch (error) {
             const message = error instanceof Error ? error.message : '산책 기록을 삭제하지 못했습니다.';
@@ -228,30 +299,6 @@ export default function WalkLogDetailScreen() {
         },
       },
     ]);
-  };
-
-  const handleEndWalk = async () => {
-    const walkId = record.id;
-    if (isEnding) return;
-    if (!walkId) {
-      Alert.alert('오류', '산책 기록 ID가 없어 종료할 수 없습니다.');
-      return;
-    }
-    if (!canEndWalk) {
-      Alert.alert('안내', '이미 종료된 산책이거나 종료할 수 없습니다.');
-      return;
-    }
-    setIsEnding(true);
-    try {
-      const endedWalk = await endPetWalk(record.petId, walkId);
-      setWalkDetail(endedWalk);
-      Alert.alert('완료', '산책 종료 처리가 완료되었습니다.');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '산책 종료 처리에 실패했습니다.';
-      Alert.alert('오류', message);
-    } finally {
-      setIsEnding(false);
-    }
   };
 
   const startPeriod = useMemo(() => getPeriodLabel(resolved.startTime), [resolved.startTime]);
@@ -334,12 +381,37 @@ export default function WalkLogDetailScreen() {
             </Text>
             <Text style={styles.durationClock}>{resolved.durationClock}</Text>
           </View>
-          {canEndWalk && (
-            <TouchableOpacity style={styles.endWalkButton} onPress={handleEndWalk} disabled={isEnding}>
-              <Text style={styles.endWalkButtonText}>{isEnding ? '종료 처리 중' : '산책 종료 처리'}</Text>
-            </TouchableOpacity>
-          )}
         </View>
+
+        {showTodaySunlight && (
+          <View style={[styles.section, styles.sunlightSection]}>
+            <Text style={styles.subtitle}>오늘의 누적 일광 노출</Text>
+            {isSunlightLoading ? (
+              <ActivityIndicator style={styles.sunlightLoading} color="#0081D5" />
+            ) : todaySunlight ? (
+              <View style={styles.sunlightCard}>
+                <View style={styles.sunlightSummaryRow}>
+                  <Text style={styles.sunlightAmount}>
+                    {todaySunlight.achieved_lux_minutes.toLocaleString()}
+                    <Text style={styles.sunlightTarget}> / {todaySunlight.target_lux_minutes.toLocaleString()} Lux·min</Text>
+                  </Text>
+                  <Text style={styles.sunlightPercent}>{Math.round(todaySunlight.progress_percent)}%</Text>
+                </View>
+                <View style={styles.sunlightProgressTrack}>
+                  <View style={[styles.sunlightProgressFill, {
+                    width: `${Math.max(0, Math.min(100, todaySunlight.progress_percent))}%`,
+                  }]} />
+                </View>
+                <Text style={styles.sunlightNote}>
+                  {todaySunlight.qualifying_minutes}분 달성 · 측정 {todaySunlight.sample_count}회
+                  {'\n'}오늘 산책 전체 누적값입니다.
+                </Text>
+              </View>
+            ) : (
+              <Text style={styles.sunlightUnavailable}>오늘의 조도 기록을 불러오지 못했습니다.</Text>
+            )}
+          </View>
+        )}
       </View>
     </View>
   );
@@ -452,19 +524,61 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 8,
   },
-  endWalkButton: {
-    width: 180,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: '#0081D5',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 12,
+  sunlightSection: {
+    marginTop: 16,
+    marginRight: 20,
     marginBottom: 24,
   },
-  endWalkButtonText: {
-    color: '#FFFFFF',
-    fontSize: 15,
+  sunlightLoading: {
+    marginTop: 16,
+    alignSelf: 'flex-start',
+  },
+  sunlightCard: {
+    marginTop: 8,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: '#F5F7F9',
+  },
+  sunlightSummaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sunlightAmount: {
+    color: '#F4B844',
+    fontSize: 14,
     fontWeight: '700',
+  },
+  sunlightTarget: {
+    color: '#7B7C7D',
+    fontWeight: '500',
+  },
+  sunlightPercent: {
+    color: '#7B7C7D',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sunlightProgressTrack: {
+    height: 7,
+    marginTop: 10,
+    borderRadius: 4,
+    backgroundColor: '#E4E7EB',
+    overflow: 'hidden',
+  },
+  sunlightProgressFill: {
+    height: '100%',
+    borderRadius: 4,
+    backgroundColor: '#FFC94D',
+  },
+  sunlightNote: {
+    marginTop: 8,
+    color: '#7B7C7D',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  sunlightUnavailable: {
+    marginTop: 8,
+    color: '#7B7C7D',
+    fontSize: 13,
   },
 });

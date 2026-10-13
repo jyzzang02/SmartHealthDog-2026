@@ -1,9 +1,10 @@
 import {
   getStoredAccessToken,
-  getStoredRefreshToken,
-  storeAuthTokens,
+  getAuthSession,
+  assertAuthSession,
 } from '../storage/tokenStorage';
-import { refreshAuthToken } from './auth';
+import { refreshSessionAccessToken } from './refreshSession';
+import { getResponseErrorMessage } from './responseError';
 import { resolveImageUri } from '../utils/imageUri';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
@@ -35,14 +36,6 @@ const parseJsonSafe = async (response: Response) => {
     return await response.json();
   } catch {
     return null;
-  }
-};
-
-const readErrorBody = async (response: Response) => {
-  try {
-    return await response.text();
-  } catch {
-    return '';
   }
 };
 
@@ -90,7 +83,9 @@ const authorizedFetch = async (
   input: string,
   init?: RequestInit
 ): Promise<Response> => {
+  const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
+  assertAuthSession(session);
   if (!accessToken) {
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
@@ -109,15 +104,9 @@ const authorizedFetch = async (
     return response;
   }
 
-  const refreshToken = await getStoredRefreshToken();
-  if (!refreshToken) {
-    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
-  }
-
   try {
-    const newTokens = await refreshAuthToken(refreshToken);
-    await storeAuthTokens(newTokens);
-    accessToken = newTokens.accessToken;
+    accessToken = await refreshSessionAccessToken(session, accessToken);
+    assertAuthSession(session);
     response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -136,13 +125,10 @@ export const getMyProfile = async (): Promise<UserProfile> => {
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `프로필 정보를 불러오지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `프로필 정보를 불러오지 못했습니다. (HTTP ${response.status})`
+    );
     throw new Error(message);
   }
 
@@ -176,13 +162,10 @@ export const updateMyProfile = async (
   });
 
   if (!response.ok) {
-    const errorText = await readErrorBody(response);
-    const data = await parseJsonSafe(response);
-    const message =
-      data?.error ||
-      data?.message ||
-      errorText ||
-      `프로필 정보를 저장하지 못했습니다. (HTTP ${response.status})`;
+    const message = await getResponseErrorMessage(
+      response,
+      `프로필 정보를 저장하지 못했습니다. (HTTP ${response.status})`
+    );
     throw new Error(message);
   }
 
