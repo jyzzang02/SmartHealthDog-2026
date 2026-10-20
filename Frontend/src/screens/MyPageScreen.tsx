@@ -444,26 +444,28 @@ const styles = StyleSheet.create({
 
   /* ────── 건강검진 정보 입력 ────── */
   healthInputBtn: {
+    width: "90%",
+    alignSelf: "center",
     marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: "#EEF7FD",
+    backgroundColor: "#FFF6D8",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#0081D5",
+    borderColor: "#F4B844",
   },
   healthInputBtnText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#0081D5",
+    color: "#F4B844",
   },
   healthInputBtnArrow: {
     width: 14,
     height: 14,
-    tintColor: "#0081D5",
+    tintColor: "#F4B844",
   },
 
   sectionTitle: {

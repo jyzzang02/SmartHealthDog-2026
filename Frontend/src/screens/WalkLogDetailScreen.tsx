@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -27,6 +27,7 @@ import {
   loadWalkRouteSegmentStartIndices,
 } from '../storage/walkSessionStorage';
 import { splitPathBySegmentStartIndices } from '../utils/walkLocation';
+import { getSeoulDateKey } from '../utils/walkWeek';
 
 type WalkLogDetailRouteProp = RouteProp<RootStackParamList, 'WalkLogDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -106,29 +107,31 @@ export default function WalkLogDetailScreen() {
   const route = useRoute<WalkLogDetailRouteProp>();
   const { record } = route.params;
   const pulseAnim = useRef(new Animated.Value(0.6)).current;
-  const [walkDetail, setWalkDetail] = useState<WalkRecordDto | null>(null);
+  const [detailResult, setDetailResult] = useState<{ walkId: number; data: WalkRecordDto | null } | null>(null);
+  const walkDetail = detailResult && detailResult.walkId === record.id ? detailResult.data : null;
   const [pathSegmentStartIndices, setPathSegmentStartIndices] = useState<number[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [todaySunlight, setTodaySunlight] = useState<SunlightTodayResponse | null>(null);
+  const [sunlightResult, setSunlightResult] = useState<{
+    petId: number; date: string; data: SunlightTodayResponse;
+  } | null>(null);
   const [isSunlightLoading, setIsSunlightLoading] = useState(false);
 
-  const loadDetail = useCallback(async () => {
-    if (!record.id) return;
-    setIsLoading(true);
-    try {
-      const detail = await getWalkDetail(record.id);
-      setWalkDetail(detail);
-    } catch {
-      setWalkDetail(null);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [record.id]);
-
   useEffect(() => {
-    loadDetail();
-  }, [loadDetail]);
+    let isMounted = true;
+    const walkId = record.id;
+    setDetailResult(null);
+    if (!walkId) {
+      setIsLoading(false);
+      return () => { isMounted = false; };
+    }
+    setIsLoading(true);
+    getWalkDetail(walkId)
+      .then(data => { if (isMounted) setDetailResult({ walkId, data }); })
+      .catch(() => { if (isMounted) setDetailResult({ walkId, data: null }); })
+      .finally(() => { if (isMounted) setIsLoading(false); });
+    return () => { isMounted = false; };
+  }, [record.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -146,37 +149,38 @@ export default function WalkLogDetailScreen() {
   }, [record.id]);
 
   const petId = record.petId;
-  const walkDate = formatDateFromIso(walkDetail?.start_time ?? walkDetail?.startTime) || record.date;
-  const now = new Date();
-  const todayDate = `${now.getFullYear()}.${String(now.getMonth() + 1).padStart(2, '0')}.${String(now.getDate()).padStart(2, '0')}`;
-  const showTodaySunlight = !!petId && walkDate !== '' && walkDate === todayDate;
+  const startedAt = walkDetail?.start_time ?? walkDetail?.startTime;
+  const startDate = startedAt ? new Date(startedAt) : null;
+  const fallbackDate = record.date.replace(/\s/g, '').replace(/\./g, '-');
+  const fallbackTime = new Date(fallbackDate + 'T00:00:00Z');
+  const sunlightDate = startDate && Number.isFinite(startDate.getTime())
+    ? getSeoulDateKey(startDate)
+    : /^\d{4}-\d{2}-\d{2}$/.test(fallbackDate) && Number.isFinite(fallbackTime.getTime()) &&
+      fallbackTime.toISOString().slice(0, 10) === fallbackDate ? fallbackDate : null;
+  const isTodaySunlight = sunlightDate === getSeoulDateKey();
+  const showSunlight = !!petId && sunlightDate !== null;
+  const isDetailReady = !record.id || detailResult?.walkId === record.id;
+  const todaySunlight = sunlightResult?.petId === petId && sunlightResult.date === sunlightDate
+    ? sunlightResult.data : null;
 
   useEffect(() => {
     let isMounted = true;
-    if (!showTodaySunlight || !petId) {
-      setTodaySunlight(null);
-      setIsSunlightLoading(false);
-      return () => {
-        isMounted = false;
-      };
+    setSunlightResult(null);
+    if (!showSunlight || !sunlightDate || !isDetailReady) {
+      setIsSunlightLoading(showSunlight && !isDetailReady);
+      return () => { isMounted = false; };
     }
-
     setIsSunlightLoading(true);
-    getPetTodaySunlight(petId)
+    getPetTodaySunlight(petId, isTodaySunlight ? undefined : sunlightDate)
       .then((summary) => {
-        if (isMounted) setTodaySunlight(summary);
+        if (isMounted && summary.date === sunlightDate) {
+          setSunlightResult({ petId, date: sunlightDate, data: summary });
+        }
       })
-      .catch(() => {
-        if (isMounted) setTodaySunlight(null);
-      })
-      .finally(() => {
-        if (isMounted) setIsSunlightLoading(false);
-      });
-
-    return () => {
-      isMounted = false;
-    };
-  }, [petId, showTodaySunlight]);
+      .catch(() => { if (isMounted) setSunlightResult(null); })
+      .finally(() => { if (isMounted) setIsSunlightLoading(false); });
+    return () => { isMounted = false; };
+  }, [petId, sunlightDate, isTodaySunlight, showSunlight, isDetailReady]);
 
   const resolved = useMemo(() => {
     const startIso = walkDetail?.start_time ?? walkDetail?.startTime;
@@ -383,9 +387,9 @@ export default function WalkLogDetailScreen() {
           </View>
         </View>
 
-        {showTodaySunlight && (
+        {showSunlight && (
           <View style={[styles.section, styles.sunlightSection]}>
-            <Text style={styles.subtitle}>오늘의 누적 일광 노출</Text>
+            <Text style={styles.subtitle}>{isTodaySunlight ? '오늘의 누적 일광 노출' : '해당 날짜의 누적 일광 노출'}</Text>
             {isSunlightLoading ? (
               <ActivityIndicator style={styles.sunlightLoading} color="#0081D5" />
             ) : todaySunlight ? (
@@ -404,11 +408,11 @@ export default function WalkLogDetailScreen() {
                 </View>
                 <Text style={styles.sunlightNote}>
                   {todaySunlight.qualifying_minutes}분 달성 · 측정 {todaySunlight.sample_count}회
-                  {'\n'}오늘 산책 전체 누적값입니다.
+                  {'\n'}{isTodaySunlight ? '오늘 산책 전체 누적값입니다.' : '해당 날짜 산책 전체 누적값입니다.'}
                 </Text>
               </View>
             ) : (
-              <Text style={styles.sunlightUnavailable}>오늘의 조도 기록을 불러오지 못했습니다.</Text>
+              <Text style={styles.sunlightUnavailable}>{isTodaySunlight ? '오늘의 조도 기록을 불러오지 못했습니다.' : '해당 날짜의 조도 기록을 불러오지 못했습니다.'}</Text>
             )}
           </View>
         )}

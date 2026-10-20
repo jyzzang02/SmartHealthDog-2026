@@ -19,6 +19,11 @@ const getSeoulCalendarDate = (date: Date) => {
   };
 };
 
+export const getSeoulDateKey = (date = new Date()) => {
+  const { year, month, day } = getSeoulCalendarDate(date);
+  return String(year).padStart(4, '0') + '-' + String(month).padStart(2, '0') + '-' + String(day).padStart(2, '0');
+};
+
 export const getCurrentSeoulWeekBounds = (referenceDate = new Date()) => {
   const { year, month, day } = getSeoulCalendarDate(referenceDate);
   const seoulCalendarTimestamp = Date.UTC(year, month - 1, day);
