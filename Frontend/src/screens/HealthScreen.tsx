@@ -2,6 +2,7 @@ import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
@@ -116,10 +117,15 @@ const HealthScreen: React.FC = () => {
               <TouchableOpacity
                 style={styles.petSelectButton}
                 activeOpacity={0.8}
+                accessibilityRole="button"
                 onPress={() => setShowPetModal(true)}
               >
-                <Text style={styles.petSelectButtonText}>{currentPet.name}</Text>
-                <Text style={styles.petSelectChevron}>⌄</Text>
+                <Text style={styles.petSelectButtonText} numberOfLines={1}>{currentPet.name}</Text>
+                <Image
+                  source={require('../assets/icon_arrowDown.png')}
+                  style={styles.petSelectChevron}
+                  accessible={false}
+                />
               </TouchableOpacity>
             )}
           </View>
@@ -258,18 +264,29 @@ const styles = StyleSheet.create({
   petSelectButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    maxWidth: '55%',
+    minHeight: 30,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    gap: 6,
+    borderRadius: 15,
+    backgroundColor: '#EDF6FF',
+    borderWidth: 1,
+    borderColor: '#D8EBFA',
   },
 
   petSelectButtonText: {
+    flexShrink: 1,
     fontSize: 14,
     fontWeight: '600',
     color: '#0081D5',
   },
 
   petSelectChevron: {
-    fontSize: 16,
-    color: '#0081D5',
+    width: 12,
+    height: 12,
+    tintColor: '#0081D5',
+    resizeMode: 'contain',
   },
 
   healthInfoRow: {

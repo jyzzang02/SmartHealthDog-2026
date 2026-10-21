@@ -617,11 +617,10 @@ export default function WalkScreen() {
       >
         <View style={styles.sunlightModalOverlay}>
           <View style={styles.sunlightModal}>
-            <Text style={styles.sunlightModalTitle}>햇빛 산책을 측정할게요</Text>
-            <Text style={styles.sunlightModalDescription}>• 오전 8시 ~ 오후 5시 산책 중 일광 노출을 측정해요</Text>
+            <Text style={styles.sunlightModalTitle}><Text style={styles.sunlightModalHighlight}>햇빛</Text> 산책을 측정할게요</Text>
+            <Text style={styles.sunlightModalDescription}>• 오전 8시 ~ 오후 6시 산책 중 일광 노출을 측정해요</Text>
             <Text style={styles.sunlightModalDescription}>• 10분 평균 조도가 2,000 lux 이상이면 20,000 Lux·min이 적립돼요</Text>
             <Text style={styles.sunlightModalDescription}>• 하루 최대 60,000 Lux·min까지 적립할 수 있어요</Text>
-            <Text style={styles.sunlightModalDescription}>• 일광 기록 기능은 현재 준비 중이에요</Text>
             <View style={styles.sunlightModalActions}>
               <TouchableOpacity
                 style={[styles.sunlightModalButton, styles.sunlightCancelButton]}
@@ -644,6 +643,7 @@ const styles = StyleSheet.create({
   sunlightModalOverlay: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, backgroundColor: 'rgba(0,0,0,0.6)' },
   sunlightModal: { padding: 24, borderRadius: 20, backgroundColor: '#FFF' },
   sunlightModalTitle: { color: '#0081D5', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  sunlightModalHighlight: { color: '#FFC94D' },
   sunlightModalDescription: { color: '#7B7C7D', fontSize: 14, lineHeight: 22, marginBottom: 8 },
   sunlightModalActions: { flexDirection: 'row', gap: 12, marginTop: 12 },
   sunlightModalButton: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },

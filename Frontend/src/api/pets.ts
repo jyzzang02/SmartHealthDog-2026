@@ -48,6 +48,7 @@ export interface UpdatePetRequestFull {
   breed?: string;
   gender: PetGender;
   birthday?: string;
+  birthDate?: string;
   neutered: boolean;
   weightKg?: number;
 }
@@ -295,9 +296,9 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
   return enriched;
 };
 
-export const getPetDetail = async (id: number): Promise<PetListItem> => {
+export const getPetDetail = async (id: number, signal?: AbortSignal): Promise<PetListItem> => {
   const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${id}`, {
-    method: 'GET',
+    method: 'GET', signal,
   });
 
   if (!response.ok) {
@@ -384,7 +385,7 @@ export const updatePetPartial = async (
   const data = await parseJsonSafe(response);
 
 
-  return data as PetListItem;
+  return normalizePet(data as PetListItem);
 };
 
 export const deletePet = async (id: number): Promise<void> => {
@@ -424,15 +425,6 @@ export const requestUrineDiagnosis = async (
   const mimeType = image.type || getMimeTypeFromUri(image.uri) || 'image/jpeg';
   const fileName = image.fileName || normalizeFileName(image.uri) || 'urine.jpg';
 
-  console.log('[diagnosis] upload:urine:start', {
-    petId,
-    uploadUrl,
-    uri: image.uri,
-    fileName,
-    mimeType,
-    fileSize: image.fileSize,
-  });
-
   formData.append('image', {
     uri: image.uri,
     type: mimeType,
@@ -459,10 +451,5 @@ export const requestUrineDiagnosis = async (
     response,
     `소변키트 진단 요청에 실패했습니다. (HTTP ${response.status})`
   );
-  console.log('[diagnosis] upload:urine:error', {
-    status: response.status,
-    statusText: response.statusText,
-    message,
-  });
   throw new Error(message);
 };

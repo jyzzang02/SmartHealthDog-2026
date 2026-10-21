@@ -13,7 +13,7 @@ import {
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
-import { getMyPets, getPetDetail, PetListItem } from "../api/pets";
+import { getMyPets, PetListItem } from "../api/pets";
 import { getMyProfile, UserProfile } from "../api/users";
 import { resolveImageUri } from "../utils/imageUri";
 import { getStoredAccessToken } from "../storage/tokenStorage";
@@ -40,8 +40,10 @@ const MyPageScreen = () => {
   const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const isMountedRef = useRef(true);
+  const petLoadGeneration = useRef(0);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -84,6 +86,8 @@ const MyPageScreen = () => {
   };
 
   const loadData = useCallback(async () => {
+    const generation = ++petLoadGeneration.current;
+    const isCurrent = () => isMountedRef.current && generation === petLoadGeneration.current;
     setIsPetsLoading(true);
     setPetsError(null);
 
@@ -92,42 +96,17 @@ const MyPageScreen = () => {
         getMyProfile(),
         getMyPets(),
       ]);
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setUser(profileData);
       setPetList(petsData);
 
-      const petsNeedingImage = petsData.filter(
-        (pet) => !resolveImageUri(pet.profilePicture) && Boolean(pet.id)
-      );
-
-      if (petsNeedingImage.length > 0) {
-        Promise.all(
-          petsData.map(async (pet) => {
-            const hasImage = Boolean(resolveImageUri(pet.profilePicture));
-            if (hasImage || !pet.id) return pet;
-            try {
-              const detail = await getPetDetail(pet.id);
-              return {
-                ...pet,
-                ...detail,
-                profilePicture: detail.profilePicture || pet.profilePicture,
-              };
-            } catch {
-              return pet;
-            }
-          })
-        ).then((enriched) => {
-          if (!isMountedRef.current) return;
-          setPetList(enriched);
-        });
-      }
     } catch (error) {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       const message =
         error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
       setPetsError(message);
     } finally {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setIsPetsLoading(false);
     }
   }, []);
@@ -135,6 +114,7 @@ const MyPageScreen = () => {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      return () => { petLoadGeneration.current += 1; };
     }, [loadData])
   );
 
@@ -302,8 +282,8 @@ const MyPageScreen = () => {
               }}
               scrollEventThrottle={16}
             >
-              {petCards.map((pet, idx) => (
-                <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
+              {petCards.map((pet) => (
+                <View key={pet.id} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
                   <PetProfileCard
                     {...pet}
                     onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
