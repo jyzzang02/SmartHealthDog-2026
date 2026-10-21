@@ -19,7 +19,7 @@ import { RootStackParamList } from '../../App';
 import Header from '../components/Header';
 import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
-import { openNaverHospital as openNaverMap } from '../utils/openNaverHospital';
+import { openNaverMap } from '../utils/openNaverMap';
 import ShelterNearbyMap from '../components/ShelterNearbyMap';
 import { useNearbyShelters } from '../hooks/useNearbyShelters';
 import {

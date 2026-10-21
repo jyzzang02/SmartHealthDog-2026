@@ -3,7 +3,7 @@ import { Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, Touchab
 import type { HospitalItem } from '../api/hospitals';
 import HospitalCard from './HospitalCard';
 import BlueButton from './BlueButton';
-import { openNaverHospital } from '../utils/openNaverHospital';
+import { openNaverMap } from '../utils/openNaverMap';
 
 interface Props {
   hospitals: readonly HospitalItem[];
@@ -54,7 +54,7 @@ export default function HospitalSearchResults({ hospitals, total, page, onPageCh
           distanceMeters={item.distance_m}
           distanceOrigin={distanceOrigin}
           onPress={() => setSelected(item)}
-          onMapPress={() => { launch(() => openNaverHospital(item)); }}
+          onMapPress={() => { launch(() => openNaverMap(item)); }}
         />
       ))}
       {hospitals.length === 0 && <Text style={styles.empty}>표시할 병원이 없습니다.</Text>}

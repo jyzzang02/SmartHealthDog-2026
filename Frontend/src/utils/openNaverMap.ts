@@ -1,5 +1,8 @@
 import { Linking, Platform } from 'react-native';
-import type { HospitalItem } from '../api/hospitals';
+interface NaverMapPlace {
+  name: string;
+  address: string | null;
+}
 
 // Keep these identifiers in sync with the Android and iOS build settings.
 const APP_NAMES = {
@@ -7,7 +10,7 @@ const APP_NAMES = {
   ios: 'org.reactjs.native.example.SmartHealthDog',
 };
 
-const shelterAddressRegion = (address: string | null): string => {
+const getAddressRegion = (address: string | null): string => {
   const [province, district] = (address ?? '').replace(/\([^)]*\)/g, ' ').trim().split(/\s+/);
   const shortProvinces = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
     '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
@@ -16,14 +19,14 @@ const shelterAddressRegion = (address: string | null): string => {
   return `${province.replace(/(?:특별자치시|특별시|광역시)$/, '')} ${district}`;
 };
 
-export const openNaverHospital = async (
-  hospital: Pick<HospitalItem, 'name' | 'address'>,
+export const openNaverMap = async (
+  place: NaverMapPlace,
   options: { includeRegion?: boolean } = {},
 ): Promise<void> => {
-  const name = hospital.name.trim();
-  if (!name) throw new Error('Missing hospital name');
+  const name = place.name.trim();
+  if (!name) throw new Error('Missing place name');
   const normalizedName = name.replace(/\s+/g, ' ');
-  const region = options.includeRegion ? shelterAddressRegion(hospital.address) : '';
+  const region = options.includeRegion ? getAddressRegion(place.address) : '';
   const query = region ? `${normalizedName} ${region}` : normalizedName;
   const encoded = encodeURIComponent(query);
   const webUrl = `https://map.naver.com/p/search/${encoded}`;
