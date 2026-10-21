@@ -9,7 +9,7 @@ import { searchAllShelters, getShelterDetail, ShelterSearchResponse } from '../a
 jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));
 
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn() }),
+  useNavigation: () => ({ navigate: jest.fn(), addListener: jest.fn(() => jest.fn()) }),
   useFocusEffect: (callback: () => void) => {
     const { useEffect } = jest.requireActual('react');
     useEffect(callback, [callback]);

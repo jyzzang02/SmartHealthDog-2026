@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ import HospitalSearchMap from '../components/HospitalSearchMap';
 import HospitalSearchControls from '../components/HospitalSearchControls';
 import HospitalSearchResults from '../components/HospitalSearchResults';
 import { useHospitalSearch } from '../hooks/useHospitalSearch';
+import { useTabScrollToTop } from '../hooks/useTabScrollToTop';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
@@ -31,6 +32,9 @@ const emptyHospitalCenter = { lat: 37.5665, lng: 126.9780 };
 const HealthScreen: React.FC = () => {
 
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+
+  const scrollRef = useRef<ScrollView>(null);
+  useTabScrollToTop(scrollRef);
 
   const [showPetModal, setShowPetModal] = useState(false);
 
@@ -67,7 +71,7 @@ const HealthScreen: React.FC = () => {
   const hasHealthData = Boolean(currentSummary);
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
 
       {/* HEADER */}
       <View style={styles.headerContainer}>

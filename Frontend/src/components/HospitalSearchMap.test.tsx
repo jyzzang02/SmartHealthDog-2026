@@ -218,3 +218,10 @@ it('does not reuse a previous failed map when the same results are revisited', (
   act(() => { jest.advanceTimersByTime(20000); });
   expect(tree.root.findAllByType(WebView)).toHaveLength(1);
 });
+
+it.each([[999, '999m'], [1000, '1km'], [1134, '1.1km'], [2012, '2km'], [2313, '2.3km']])
+('formats the selected marker distance %s as %s', (distance, expected) => {
+  renderMap([{ ...hospitals[0], distance_m: distance as number }]);
+  sendMessage('{"type":"hospital-select","index":0}');
+  expect(texts().map(value => [value].flat().join(''))).toContain('현재 위치에서 ' + expected);
+});

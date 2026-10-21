@@ -8,7 +8,7 @@ import HospitalSearchResults from '../components/HospitalSearchResults';
 import { searchHospitals } from '../api/hospitals';
 
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn() }),
+  useNavigation: () => ({ navigate: jest.fn(), addListener: jest.fn(() => jest.fn()) }),
   useFocusEffect: (callback: () => void) => {
     const { useEffect } = jest.requireActual('react');
     useEffect(callback, [callback]);

@@ -1,3 +1,4 @@
+import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -205,7 +206,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             <Text style={styles.name}>{selectedHospital.name}</Text>
             <Text style={styles.description}>{selectedHospital.address || '주소 정보 없음'}</Text>
             {typeof selectedHospital.distance_m === 'number' && Number.isFinite(selectedHospital.distance_m) && selectedHospital.distance_m >= 0 && (
-              <Text style={styles.distance}>{searchLocation ? '검색 기준 위치' : '현재 위치'}에서 {selectedHospital.distance_m.toLocaleString()}m</Text>
+              <Text style={styles.distance}>{searchLocation ? '검색 기준 위치' : '현재 위치'}에서 {formatDistanceMeters(selectedHospital.distance_m)}</Text>
             )}
           </>
         ) : (

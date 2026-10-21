@@ -1,3 +1,4 @@
+import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity } from 'react-native';
 
@@ -39,7 +40,7 @@ const HospitalCard: React.FC<Props> = ({ name, rating, address, distanceMeters, 
         {/* 주소 */}
         <Text style={styles.address}>{address || '주소 정보 없음'}</Text>
         {typeof distanceMeters === 'number' && Number.isFinite(distanceMeters) && distanceMeters >= 0 && (
-          <Text style={styles.distance}>{distanceOrigin}에서 {distanceMeters.toLocaleString()}m</Text>
+          <Text style={styles.distance}>{distanceOrigin}에서 {formatDistanceMeters(distanceMeters)}</Text>
         )}
 
 

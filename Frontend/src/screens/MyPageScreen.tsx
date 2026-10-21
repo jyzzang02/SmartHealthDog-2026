@@ -22,6 +22,7 @@ import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
 import { healthStore } from "../store/healthStore";
 import type { HealthSummary } from "../types/health";
+import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
@@ -30,6 +31,9 @@ const SPACING = 16;
 const MyPageScreen = () => {
   type MyPageNavProp = StackNavigationProp<RootStackParamList, "MyPage">;
   const navigation = useNavigation<MyPageNavProp>();
+
+  const scrollRef = useRef<ScrollView>(null);
+  useTabScrollToTop(scrollRef);
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -172,6 +176,7 @@ const MyPageScreen = () => {
     <View style={styles.container}>
       <Header />
       <ScrollView
+        ref={scrollRef}
         style={styles.pageScroll}
         contentContainerStyle={styles.pageScrollContent}
         showsVerticalScrollIndicator={false}

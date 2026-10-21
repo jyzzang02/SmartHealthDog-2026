@@ -8,7 +8,7 @@ const mockFocus = jest.fn((callback: () => void | (() => void)) => {
   const { useEffect } = jest.requireActual('react');
   useEffect(callback, [callback]);
 });
-jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn() }),
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: jest.fn(), addListener: jest.fn(() => jest.fn()) }),
   useFocusEffect: (callback: () => void | (() => void)) => mockFocus(callback) }));
 jest.mock('../components/Header', () => 'Header');
 jest.mock('../components/PetProfileCard', () => 'PetProfileCard');

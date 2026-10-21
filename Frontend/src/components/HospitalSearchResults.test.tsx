@@ -161,3 +161,18 @@ it('reports failure if both the NAVER app and web search cannot open', async () 
   await act(async () => { tree.root.findByType(HospitalCard).props.onMapPress(); });
   expect(alert).toHaveBeenCalledWith('연결 실패', '연결할 수 없습니다. 다시 시도해 주세요.');
 });
+
+it.each([[0, '0m'], [999, '999m'], [1000, '1km'], [1134, '1.1km'], [2012, '2km'], [2313, '2.3km'], [10000, '10km']])
+('formats distance %s as %s in both the list and details', (distance, expected) => {
+  render([{ ...item(1), distance_m: distance as number }]);
+  const distanceTexts = () => texts().map(value => [value].flat().join(''))
+    .filter(value => value === '현재 위치에서 ' + expected);
+  expect(distanceTexts()).toHaveLength(1);
+  openDetails();
+  expect(distanceTexts()).toHaveLength(2);
+});
+
+it.each([null, undefined, -1, NaN, Infinity])('keeps an unavailable distance hidden: %s', distance => {
+  render([{ ...item(1), distance_m: distance as number | null }]); openDetails();
+  expect(texts().some(value => [value].flat().join('').startsWith('현재 위치에서 '))).toBe(false);
+});

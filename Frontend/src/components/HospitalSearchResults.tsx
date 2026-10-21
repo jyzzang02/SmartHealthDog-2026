@@ -1,3 +1,4 @@
+import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React, { useRef, useState } from 'react';
 import { Alert, Linking, Modal, Pressable, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import type { HospitalItem } from '../api/hospitals';
@@ -77,7 +78,7 @@ export default function HospitalSearchResults({ hospitals, total, page, onPageCh
               <Text style={styles.title}>{hospital?.name}</Text>
               <Text style={styles.description}>{hospital?.address || '주소 정보 없음'}</Text>
               {typeof hospital?.distance_m === 'number' && Number.isFinite(hospital.distance_m) && hospital.distance_m >= 0 && (
-                <Text style={styles.distance}>{distanceOrigin}에서 {hospital.distance_m.toLocaleString()}m</Text>
+                <Text style={styles.distance}>{distanceOrigin}에서 {formatDistanceMeters(hospital.distance_m)}</Text>
               )}
               {!!hospital?.website_url && <Text selectable style={styles.description}>{hospital.website_url}</Text>}
               <BlueButton text="홈페이지" backgroundColor="#FFC94D" disabled={!website} onPress={() => { if (website) launch(() => Linking.openURL(website)); }} style={styles.actionButton} />

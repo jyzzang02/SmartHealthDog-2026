@@ -22,6 +22,7 @@ import CustomButton from '../components/CustomButton';
 import { openNaverMap } from '../utils/openNaverMap';
 import ShelterNearbyMap from '../components/ShelterNearbyMap';
 import { useNearbyShelters } from '../hooks/useNearbyShelters';
+import { useTabScrollToTop } from '../hooks/useTabScrollToTop';
 import {
   searchAllShelters,
   getShelterDetail,
@@ -88,6 +89,7 @@ const PET_TYPES = ['모두', '강아지', '고양이'];
 export default function AdoptScreen() {
   const navigation = useNavigation<NavigationProp>();
   const contentScrollRef = useRef<ScrollView>(null);
+  useTabScrollToTop(contentScrollRef);
   const mapLaunching = useRef(false);
   const detailRequest = useRef<AbortController | null>(null);
   useEffect(() => () => detailRequest.current?.abort(), []);
