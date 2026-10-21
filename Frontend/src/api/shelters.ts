@@ -8,10 +8,11 @@ import { refreshSessionAccessToken } from './refreshSession';
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
 export interface ShelterSearchParams {
+  province?: string;
+  district?: string;
   location?: string;
   lat?: number;
   lng?: number;
-  radius_km?: number;
   sort_by?: 'distance' | 'rating' | 'review_count';
   limit?: number;
   offset?: number;
@@ -23,17 +24,15 @@ export interface ShelterListItem {
   address: string;
   phone_number?: string;
   location?: { lat: number; lng: number };
-  distance_m?: number;
-  rating?: number;
-  review_count?: number;
+  distance_m?: number | null;
+  rating?: number | null;
+  review_count?: number | null;
   website_url?: string;
   place_url?: string;
   open_now?: boolean;
 }
 
 export interface ShelterSearchResponse {
-  center?: { lat: number; lng: number };
-  radius_km?: number;
   sort_by?: string;
   total?: number;
   items: ShelterListItem[];
@@ -51,8 +50,8 @@ export interface ShelterDetail {
   longitude?: number;
   website_url?: string;
   contact_email?: string;
-  rating?: number;
-  review_count?: number;
+  rating?: number | null;
+  review_count?: number | null;
 }
 
 export interface PetDetail {
@@ -194,16 +193,42 @@ const handleShelterError = async (
   throw new Error(message);
 };
 
+const requestShelterJson = async (
+  url: string,
+  fallbackMessage: (status: number) => string,
+  signal?: AbortSignal
+) => {
+  const response = await authorizedFetch(url, { method: 'GET', signal });
+  if (!response.ok) {
+    await handleShelterError(response, fallbackMessage(response.status));
+  }
+  return parseJsonSafe(response);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+const isShelter = (value: unknown): value is ShelterListItem =>
+  isRecord(value) && Number.isSafeInteger(value.shelter_id) && (value.shelter_id as number) > 0
+    && typeof value.name === 'string' && typeof value.address === 'string';
+
 export const searchShelters = async (
-  params: ShelterSearchParams
+  params: ShelterSearchParams,
+  signal?: AbortSignal
 ): Promise<ShelterSearchResponse> => {
   const query = new URLSearchParams();
 
+  const province = params.province?.trim();
+  const district = params.district?.trim();
+  if (province) query.append('province', province);
+  if (district) query.append('district', district);
   if (params.location) query.append('location', params.location);
-  if (params.lat !== undefined) query.append('lat', String(params.lat));
-  if (params.lng !== undefined) query.append('lng', String(params.lng));
-  if (params.radius_km !== undefined) {
-    query.append('radius_km', String(params.radius_km));
+  const hasCoordinates = typeof params.lat === 'number' && Number.isFinite(params.lat)
+    && Math.abs(params.lat) <= 90 && typeof params.lng === 'number'
+    && Number.isFinite(params.lng) && Math.abs(params.lng) <= 180;
+  if (hasCoordinates) {
+    query.append('lat', String(params.lat));
+    query.append('lng', String(params.lng));
   }
   if (params.sort_by) query.append('sort_by', params.sort_by);
   if (params.limit !== undefined) query.append('limit', String(params.limit));
@@ -213,54 +238,74 @@ export const searchShelters = async (
     query.toString() ? `?${query.toString()}` : ''
   }`;
 
-  const response = await authorizedFetch(url, {
-    method: 'GET',
-  });
+  const data = await requestShelterJson(url,
+    status => `보호소 목록을 불러오지 못했습니다. (HTTP ${status})`, signal);
 
-  if (!response.ok) {
-    await handleShelterError(
-      response,
-      `보호소 목록을 불러오지 못했습니다. (HTTP ${response.status})`
-    );
+  if (!isRecord(data) || !Array.isArray(data.items) || !data.items.every(isShelter)
+    || !Number.isSafeInteger(data.total) || (data.total as number) < data.items.length) {
+    throw new Error('보호소 정보를 불러오지 못했습니다.');
   }
 
-  const data = await parseJsonSafe(response);
-
   return {
-    center: data?.center,
-    radius_km: data?.radius_km,
-    sort_by: data?.sort_by,
-    total: data?.total,
-    items: Array.isArray(data?.items) ? data.items : [],
-    page: data?.page,
+    sort_by: data.sort_by as string | undefined,
+    total: data.total as number,
+    items: data.items,
+    page: data.page as ShelterSearchResponse["page"],
   };
 };
 
-export const getShelterDetail = async (
-  shelterId: number
-): Promise<ShelterDetail> => {
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/shelters/${shelterId}`,
-    {
-      method: 'GET',
+export const searchAllShelters = async (
+  params: ShelterSearchParams,
+  signal?: AbortSignal
+): Promise<ShelterSearchResponse> => {
+  const items: ShelterListItem[] = [];
+  const seen = new Set<number>();
+  let expectedTotal: number | undefined;
+  // Bound requests and reject incomplete results instead of displaying a partial list.
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const response = await searchShelters({ ...params, limit: 1000, offset: items.length }, signal);
+    const total = response.total;
+    if (typeof total !== 'number' || !Number.isSafeInteger(total) || total < 0
+      || (expectedTotal !== undefined && expectedTotal !== total)
+      || response.items.length > 1000 || items.length + response.items.length > total
+      || (response.page && response.page.offset !== items.length)
+      || (response.items.length === 0 && items.length < total)) {
+      throw new Error('보호소 목록을 모두 확인하지 못했습니다. 다시 시도해 주세요.');
     }
+    expectedTotal = total;
+    for (const item of response.items) {
+      if (seen.has(item.shelter_id)) {
+        throw new Error('보호소 목록을 모두 확인하지 못했습니다. 다시 시도해 주세요.');
+      }
+      seen.add(item.shelter_id);
+      items.push(item);
+    }
+    if (items.length === total) return { sort_by: response.sort_by, total, items };
+  }
+  throw new Error('보호소 목록을 모두 확인하지 못했습니다. 다시 시도해 주세요.');
+};
+
+export const getShelterDetail = async (
+  shelterId: number,
+  signal?: AbortSignal
+): Promise<ShelterDetail> => {
+  const data = await requestShelterJson(
+    `${API_BASE_URL}/api/shelters/${shelterId}`,
+    status => `보호소 정보를 불러오지 못했습니다. (HTTP ${status})`, signal
   );
 
-  if (!response.ok) {
-    await handleShelterError(
-      response,
-      `보호소 정보를 불러오지 못했습니다. (HTTP ${response.status})`
-    );
+  const detail = data?.shelter ?? data;
+  if (!isShelter(detail) || detail.shelter_id !== shelterId) {
+    throw new Error('보호소 정보를 불러오지 못했습니다.');
   }
-
-  const data = await parseJsonSafe(response);
-
-  return (data as { shelter?: ShelterDetail })?.shelter ?? (data as ShelterDetail);
+  return detail as ShelterDetail;
 };
 
 export const getShelterPets = async (
   shelterId: number,
-  params: ShelterPetsParams = {}
+  params: ShelterPetsParams = {},
+  signal?: AbortSignal
 ): Promise<ShelterPetsResponse> => {
   const query = new URLSearchParams();
 
@@ -272,27 +317,28 @@ export const getShelterPets = async (
     query.toString() ? `?${query.toString()}` : ''
   }`;
 
-  const response = await authorizedFetch(url, {
-    method: 'GET',
-  });
-
-  if (!response.ok) {
-    await handleShelterError(
-      response,
-      `입양 동물 목록을 불러오지 못했습니다. (HTTP ${response.status})`
-    );
-  }
-
-  const data = await parseJsonSafe(response);
+  const data = await requestShelterJson(url,
+    status => `입양 동물 목록을 불러오지 못했습니다. (HTTP ${status})`, signal);
 
   const items = Array.isArray(data?.items)
     ? data.items
     : Array.isArray(data?.pets)
       ? data.pets
-      : [];
+      : null;
+  if (!items || !items.every((pet: unknown) => isRecord(pet)
+    && Number.isSafeInteger(pet.pet_id) && (pet.pet_id as number) > 0
+    && typeof pet.name === 'string' && typeof pet.species === 'string')) {
+    throw new Error('입양 동물 정보를 불러오지 못했습니다.');
+  }
 
   return {
-    items,
+    items: items.map((pet: PetDetail & { image_url?: string | null }) => ({
+      ...pet,
+      shelter_id: shelterId,
+      images: typeof pet.image_url === 'string' && pet.image_url.trim()
+        ? [pet.image_url.trim()]
+        : pet.images,
+    })),
     total: data?.total,
     page: data?.page,
   };
@@ -302,21 +348,10 @@ export const getShelterPetDetail = async (
   shelterId: number,
   petId: number
 ): Promise<PetDetail> => {
-  const response = await authorizedFetch(
+  const data = await requestShelterJson(
     `${API_BASE_URL}/api/shelters/${shelterId}/pets/${petId}`,
-    {
-      method: 'GET',
-    }
+    status => `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${status})`
   );
-
-  if (!response.ok) {
-    await handleShelterError(
-      response,
-      `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${response.status})`
-    );
-  }
-
-  const data = await parseJsonSafe(response);
 
   return (data as { pet?: PetDetail })?.pet ?? (data as PetDetail);
 };
