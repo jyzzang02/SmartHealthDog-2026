@@ -67,3 +67,25 @@ it('searches only the hospital name even when the full address is provided', asy
   });
   expect(new URL(open.mock.calls[0][0]).searchParams.get('query')).toBe('헬릭스동물메디컬센터 일산');
 });
+
+it.each([
+  ['고양시동물보호센터', '경기도 고양시 덕양구 고양대로 1695 (원흥동, 고양시 농업기술센터) 고양시동물보호센터', '고양시동물보호센터 경기도 고양시'],
+  ['홍익동물병원', '서울특별시 마포구 독막로 45 (합정동)', '홍익동물병원 서울 마포구'],
+  ['늘푸른동물병원', ' 인천광역시   부평구 경인로 100 늘푸른동물병원 ', '늘푸른동물병원 인천 부평구'],
+])('searches %s by name followed by its physical address region', async (name, address, expected) => {
+  await openNaverHospital({ name, address }, { includeRegion: true });
+  expect(new URL(open.mock.calls[0][0]).searchParams.get('query')).toBe(expected);
+});
+
+it('uses the same name and region for the web fallback without a street or repeated name', async () => {
+  open.mockRejectedValueOnce(new Error('No app'));
+  await openNaverHospital({ name: '구로댕냥이네', address: '서울특별시 구로구 경인로 472 (구로동) 구로댕냥이네' }, { includeRegion: true });
+  const shelterQuery = '구로댕냥이네 서울 구로구';
+  expect(new URL(open.mock.calls[0][0]).searchParams.get('query')).toBe(shelterQuery);
+  expect(open.mock.calls[1][0]).toBe('https://map.naver.com/p/search/' + encodeURIComponent(shelterQuery));
+});
+
+it.each([null, '', '경인로 100', '지역 정보 없음'])('does not treat an unavailable address region as a search location: %s', async address => {
+  await openNaverHospital({ name: '보호소', address }, { includeRegion: true });
+  expect(new URL(open.mock.calls[0][0]).searchParams.get('query')).toBe('보호소');
+});

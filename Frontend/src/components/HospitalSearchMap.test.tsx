@@ -6,6 +6,7 @@ import HospitalSearchMap from './HospitalSearchMap';
 import type { HospitalMapItem } from './HospitalSearchMap';
 
 jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));
+jest.mock('./MapRecenterButton', () => 'MapRecenterButton');
 
 const { runInNewContext } = jest.requireActual<{
   runInNewContext: (code: string, context: Record<string, unknown>) => unknown;

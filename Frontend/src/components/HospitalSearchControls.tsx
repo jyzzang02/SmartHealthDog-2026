@@ -71,14 +71,14 @@ export default function HospitalSearchControls({ onSearch, loading = false }: Pr
         <DropdownButton style={styles.districtFilterButton} labelStyle={styles.filterLabel} numberOfLines={1} label={district ? '군/구 지정' : '군/구'} disabled={!region} onPress={() => openLocation('district')} />
         <DropdownButton style={styles.radiusFilterButton} labelStyle={styles.filterLabel} numberOfLines={1} label={`반경 ${radiusKm}km`} onPress={() => setSelector('radius')} />
       </View>
-      <View style={styles.locationRow}>
-        <Text style={styles.location}>{[region, district].filter(Boolean).join(' ') || '현재 위치'}</Text>
-        {!!region && <TouchableOpacity accessibilityRole="button" onPress={() => {
+      {!!region && <View style={styles.locationRow}>
+        <Text style={styles.location}>{[region, district].filter(Boolean).join(' ')}</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => {
           setRegion(''); setDistrict(''); setPreview(null);
         }} style={styles.resetButton}>
           <Text style={styles.resetText}>현재 위치</Text>
-        </TouchableOpacity>}
-      </View>
+        </TouchableOpacity>
+      </View>}
       <BlueButton text="병원 검색" disabled={loading} onPress={submitSearch} style={styles.previewButton} />
       {preview && <View style={styles.preview} accessibilityLiveRegion="polite">
         <Text style={styles.previewText}>{preview}</Text>

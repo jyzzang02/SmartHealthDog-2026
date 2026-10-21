@@ -12,9 +12,6 @@ import {
   Dimensions,
   Alert,
   Clipboard,
-  PermissionsAndroid,
-  Platform,
-  Easing,
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -22,14 +19,16 @@ import { RootStackParamList } from '../../App';
 import Header from '../components/Header';
 import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
-import WebView from 'react-native-webview';
-import Geolocation from 'react-native-geolocation-service';
+import { openNaverHospital as openNaverMap } from '../utils/openNaverHospital';
+import ShelterNearbyMap from '../components/ShelterNearbyMap';
+import { useNearbyShelters } from '../hooks/useNearbyShelters';
 import {
-  searchShelters,
+  searchAllShelters,
   getShelterDetail,
   getShelterPets,
   PetDetail,
   ShelterListItem,
+  ShelterSearchParams,
 } from '../api/shelters';
 
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -39,17 +38,14 @@ type TabType = '보호소 소개' | '입양 홍보';
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const INITIAL_BOTTOM_SHEET_HEIGHT = SCREEN_HEIGHT - 210;
 const MAX_BOTTOM_SHEET_HEIGHT = SCREEN_HEIGHT - 100;
-const KAKAO_APP_KEY = 'e65e93f752b1590bf9b8be83566dd5b6';
 
 interface ShelterInfo {
   shelterId?: number;
   name: string;
-  rating: number;
+  rating: number | null;
+  distanceM?: number;
   address: string;
   phone: string;
-  image: any;
-  region: string;
-  district: string;
   openStatus: string;
   openHours: string;
 }
@@ -88,41 +84,13 @@ const DISTRICTS: { [key: string]: string[] } = {
 // 반려동물 타입 데이터
 const PET_TYPES = ['모두', '강아지', '고양이'];
 
-// 지역별 좌표 매핑 (지역명 location 검색이 작동하지 않을 경우 lat/lng 기반 검색 사용)
-const LOCATION_COORDS: { [key: string]: { [key: string]: { lat: number; lng: number } } } = {
-  '서울특별시': {
-    '양천구': { lat: 37.5173, lng: 126.8553 },
-    '강남구': { lat: 37.4979, lng: 127.0276 },
-    '서초구': { lat: 37.4830, lng: 127.0326 },
-    '구로구': { lat: 37.4954, lng: 126.8874 },
-    '마포구': { lat: 37.5630, lng: 126.9018 },
-  },
-  '경기도': {
-    '성남시': { lat: 37.4392, lng: 127.1068 },
-    '용인시': { lat: 37.2397, lng: 127.1705 },
-    '수원시': { lat: 37.2636, lng: 127.0086 },
-    '파주시': { lat: 37.7561, lng: 126.7676 },
-    '고양시': { lat: 37.6582, lng: 126.8224 },
-    '안성시': { lat: 37.0086, lng: 127.2705 },
-  },
-  '인천광역시': {
-    '미추홀구': { lat: 37.3881, lng: 126.6623 },
-    '연수구': { lat: 37.4038, lng: 126.7200 },
-    '부평구': { lat: 37.4891, lng: 126.7236 },
-  },
-  '부산광역시': {
-    '해운대구': { lat: 35.1595, lng: 129.1607 },
-    '부산진구': { lat: 35.1596, lng: 129.0544 },
-  },
-  '대구광역시': {
-    '수성구': { lat: 35.8544, lng: 128.6151 },
-    '달서구': { lat: 35.8242, lng: 128.5362 },
-  },
-};
 
 export default function AdoptScreen() {
   const navigation = useNavigation<NavigationProp>();
   const contentScrollRef = useRef<ScrollView>(null);
+  const mapLaunching = useRef(false);
+  const detailRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => detailRequest.current?.abort(), []);
   const [activeTab, setActiveTab] = useState<TabType>('보호소 소개');
   const [selectedRegion, setSelectedRegion] = useState<string>('');
   const [selectedDistrict, setSelectedDistrict] = useState<string>('');
@@ -135,19 +103,12 @@ export default function AdoptScreen() {
   const [isShelterLoading, setIsShelterLoading] = useState(false);
   const [shelterError, setShelterError] = useState<string | null>(null);
   const [showAllShelters, setShowAllShelters] = useState(false);
+  const [shelterSearchVersion, setShelterSearchVersion] = useState(0);
   const [adoptPets, setAdoptPets] = useState<AnimalInfo[]>([]);
   const [isAdoptLoading, setIsAdoptLoading] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
   const [showBottomSheet, setShowBottomSheet] = useState(false);
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number }>({
-    lat: 37.5665,
-    lng: 126.9780,
-  });
-  const [mapLoaded, setMapLoaded] = useState(false);
-  const [mapReady, setMapReady] = useState(false);
-  const [, setMapError] = useState<string | null>(null);
-  const webViewRef = useRef<WebView>(null);
-  const pulseAnim = useRef(new Animated.Value(0.6)).current;
+  const nearby = useNearbyShelters();
   
   const bottomSheetY = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
@@ -159,45 +120,6 @@ export default function AdoptScreen() {
       setSelectedPetType('모두');
     }, [])
   );
-
-  // 안드로이드 위치 권한 요청 + 현재 위치 가져오기
-  useEffect(() => {
-    const requestLocationPermission = async () => {
-      if (Platform.OS !== 'android') return;
-      try {
-        const granted = await PermissionsAndroid.request(
-          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
-          {
-            title: '위치 권한 요청',
-            message: '현재 위치를 표시하려면 위치 권한이 필요합니다.',
-            buttonPositive: '확인',
-          }
-        );
-
-        if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-          Geolocation.getCurrentPosition(
-            (position: { coords: { latitude: number; longitude: number } }) => {
-              setCurrentLocation({
-                lat: position.coords.latitude,
-                lng: position.coords.longitude,
-              });
-            },
-            () => {},
-            {
-              enableHighAccuracy: true,
-              timeout: 10000,
-              maximumAge: 30000,
-              forceRequestLocation: true,
-            }
-          );
-        }
-      } catch {
-        return;
-      }
-    };
-
-    requestLocationPermission();
-  }, []);
 
   const mapSpeciesToType = useCallback((species?: string): '강아지' | '고양이' => {
     if (!species) return '강아지';
@@ -239,153 +161,118 @@ export default function AdoptScreen() {
 
   const mapToShelterInfo = useCallback(
     (item: ShelterListItem): ShelterInfo => {
-      const [region, district] = (item.address || '').split(' ');
       const isOpen = item.open_now === true;
       const isClosed = item.open_now === false;
 
       return {
         shelterId: item.shelter_id,
         name: item.name,
-        rating: item.rating ?? 0,
+        rating: typeof item.rating === 'number' && Number.isFinite(item.rating) ? item.rating : null,
+        distanceM: typeof item.distance_m === 'number' && Number.isFinite(item.distance_m)
+          && item.distance_m >= 0 ? item.distance_m : undefined,
         address: item.address,
         phone: item.phone_number ?? '',
-        image: require('../assets/adopt_placeholder.png'),
-        region: region || selectedRegion || '',
-        district: district || selectedDistrict || '',
         openStatus: isOpen ? '영업중' : isClosed ? '영업종료' : '정보없음',
-        openHours: item.open_now === undefined ? '운영시간 정보 없음' : '운영시간 정보 없음',
+        openHours: '운영시간 정보 없음',
       };
     },
-    [selectedDistrict, selectedRegion]
+    []
   );
 
-    const fetchShelters = useCallback(async () => {
-    let params: any = {
-      lat: currentLocation.lat,
-      lng: currentLocation.lng,
-      radius_km: 100,
-      sort_by: 'distance' as const,
+  useEffect(() => {
+    let isActive = true;
+    const controller = new AbortController();
+    if (!selectedRegion && !showAllShelters) {
+      setShelters([]);
+      setShelterError(null);
+      setIsShelterLoading(false);
+      return;
+    }
+
+    const params: ShelterSearchParams = {
+      province: selectedRegion || undefined,
+      district: selectedRegion ? selectedDistrict || undefined : undefined,
+      // Region membership comes from province/district; GPS is only a distance origin.
+      ...(nearby.center ? {
+        lat: nearby.center.lat,
+        lng: nearby.center.lng,
+        sort_by: 'distance' as const,
+      } : {}),
+      limit: 1000, offset: 0,
     };
 
-    // If user selected region/district, try to use coordinates from LOCATION_COORDS
-    if (selectedDistrict && selectedRegion) {
-      const districtCoords = LOCATION_COORDS[selectedRegion]?.[selectedDistrict];
-      if (districtCoords) {
-        params = {
-          lat: districtCoords.lat,
-          lng: districtCoords.lng,
-          radius_km: 100,
-          sort_by: 'distance',
-        };
-      }
-    } else if (selectedRegion) {
-      // If only region selected, use a center coordinate (e.g., first district)
-      const firstDistrict = DISTRICTS[selectedRegion]?.[0];
-      const regionCoords = firstDistrict ? LOCATION_COORDS[selectedRegion]?.[firstDistrict] : null;
-      if (regionCoords) {
-        params = {
-          lat: regionCoords.lat,
-          lng: regionCoords.lng,
-          radius_km: 100,
-          sort_by: 'distance',
-        };
-      }
-    }
-
-    setIsShelterLoading(true);
-    setShelterError(null);
-    try {
-      const response = await searchShelters(params);
-      let mapped = (response.items || []).map(mapToShelterInfo);
-
-      setShelters(mapped);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '보호소 정보를 불러오지 못했습니다.';
-
-      setShelterError(message);
+    const fetchShelters = async () => {
+      setIsShelterLoading(true);
+      setShelterError(null);
       setShelters([]);
-    } finally {
-      setIsShelterLoading(false);
-    }
-  }, [currentLocation.lat, currentLocation.lng, mapToShelterInfo, selectedDistrict, selectedRegion]);
+      try {
+        const response = await searchAllShelters(params, controller.signal);
+        if (isActive) setShelters(response.items.map(mapToShelterInfo));
+      } catch (error) {
+        if (!isActive) return;
+        const fallback = showAllShelters ? '전체 보호소 정보를 불러오지 못했습니다.' : '보호소 정보를 불러오지 못했습니다.';
+        setShelterError(error instanceof Error ? error.message : fallback);
+        setShelters([]);
+      } finally {
+        if (isActive) setIsShelterLoading(false);
+      }
+    };
 
-  const fetchAdoptPets = useCallback(async () => {
-    if (activeTab !== '입양 홍보') return;
-
-    const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
-    if (shelterSources.length === 0) {
-      setAdoptPets([]);
-      return;
-    }
-
-    setIsAdoptLoading(true);
-    setAdoptError(null);
-    try {
-      const petResults = await Promise.all(
-        shelterSources.map(async (shelter) => {
-          const response = await getShelterPets(shelter.shelterId as number, {
-            limit: 20,
-            offset: 0,
-          });
-          const animals = response.items.map((pet) =>
-            mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
-          );
-          return animals;
-        })
-      );
-      let merged = petResults.flat();
-
-      setAdoptPets(merged);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
-
-      setAdoptError(message);
-      setAdoptPets([]);
-    } finally {
-      setIsAdoptLoading(false);
-    }
-  }, [activeTab, shelters, mapPetToAnimalInfo]);
-
-  useEffect(() => {
-    // Only fetch shelters if user selected filters or clicked "all shelters"
-    if (!selectedRegion && !selectedDistrict && !showAllShelters) {
-      setShelters([]);
-      return;
-    }
     fetchShelters();
-  }, [fetchShelters, selectedRegion, selectedDistrict, showAllShelters]);
-
-  const fetchAllShelters = useCallback(async () => {
-    setIsShelterLoading(true);
-    setShelterError(null);
-    try {
-      const res = await searchShelters({
-        lat: currentLocation.lat,
-        lng: currentLocation.lng,
-        radius_km: 1000,
-        limit: 1000,
-        offset: 0,
-      });
-      const mapped = (res.items || []).map(mapToShelterInfo);
-
-      setShelters(mapped);
-      setShowAllShelters(true);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '전체 보호소 정보를 불러오지 못했습니다.';
-      setShelterError(message);
-      setShelters([]);
-    } finally {
-      setIsShelterLoading(false);
-    }
-  }, [currentLocation.lat, currentLocation.lng, mapToShelterInfo]);
+    // Ignore results after filters change, reset, or unmount.
+    return () => { isActive = false; controller.abort(); };
+  }, [nearby.center, mapToShelterInfo, selectedDistrict, selectedRegion, showAllShelters, shelterSearchVersion]);
 
   useEffect(() => {
+    if (activeTab !== '입양 홍보') return;
+    let active = true;
+    const controller = new AbortController();
+    const fetchAdoptPets = async () => {
+
+      const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
+      if (shelterSources.length === 0) {
+        setAdoptPets([]);
+        setAdoptError(null);
+        setIsAdoptLoading(false);
+        return;
+      }
+
+      setIsAdoptLoading(true);
+      setAdoptError(null);
+      try {
+        const petResults = await Promise.all(
+          shelterSources.map(async (shelter) => {
+            const response = await getShelterPets(shelter.shelterId as number, {
+              limit: 20,
+              offset: 0,
+            }, controller.signal);
+            const animals = response.items.map((pet) =>
+              mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
+            );
+            return animals;
+          })
+        );
+        if (active) setAdoptPets(petResults.flat());
+      } catch (error) {
+        if (!active) return;
+        const message =
+          error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
+
+        setAdoptError(message);
+        setAdoptPets([]);
+      } finally {
+        if (active) setIsAdoptLoading(false);
+      }
+    };
     fetchAdoptPets();
-  }, [fetchAdoptPets]);
+    return () => { active = false; controller.abort(); };
+  }, [activeTab, shelters, mapPetToAnimalInfo]);
 
   // 바텀시트 열기
   const openBottomSheet = async (shelter: ShelterInfo) => {
+    detailRequest.current?.abort();
+    const controller = new AbortController();
+    detailRequest.current = controller;
     setSelectedShelter(shelter);
     setShowBottomSheet(true);
     bottomSheetY.setValue(SCREEN_HEIGHT);
@@ -397,9 +284,10 @@ export default function AdoptScreen() {
 
     if (!shelter.shelterId) return;
     try {
-      const detail = await getShelterDetail(shelter.shelterId);
+      const detail = await getShelterDetail(shelter.shelterId, controller.signal);
+      if (controller.signal.aborted) return;
       setSelectedShelter((prev) => {
-        if (!prev) return prev;
+        if (!prev || prev.shelterId !== shelter.shelterId) return prev;
         return {
           ...prev,
           name: detail.name || prev.name,
@@ -415,6 +303,7 @@ export default function AdoptScreen() {
 
   // 바텀시트 닫기
   const closeBottomSheet = () => {
+    detailRequest.current?.abort();
     Animated.timing(bottomSheetY, {
       toValue: SCREEN_HEIGHT,
       duration: 300,
@@ -476,12 +365,13 @@ export default function AdoptScreen() {
     }
   };
 
-  useEffect(() => {
-    setMapLoaded(false);
-    setMapError(null);
-  }, [currentLocation.lat, currentLocation.lng]);
-
-  const filteredShelters = useMemo(() => shelters, [shelters]);
+  const openShelterMap = async (shelter: ShelterInfo) => {
+    if (mapLaunching.current) return;
+    mapLaunching.current = true;
+    try { await openNaverMap({ name: shelter.name, address: shelter.address }, { includeRegion: true }); }
+    catch { Alert.alert('연결 실패', '연결할 수 없습니다. 다시 시도해 주세요.'); }
+    finally { mapLaunching.current = false; }
+  };
 
   const handleResetFilters = useCallback(() => {
     setSelectedRegion('');
@@ -502,63 +392,6 @@ export default function AdoptScreen() {
         : adoptPets.filter((animal) => animal.type === selectedPetType);
     return list;
   }, [adoptPets, selectedPetType]);
-
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, {
-          toValue: 1,
-          duration: 800,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnim, {
-          toValue: 0.6,
-          duration: 800,
-          easing: Easing.inOut(Easing.ease),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [pulseAnim]);
-
-  const mapHtml = useMemo(
-    () => `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="UTF-8" />
-          <meta name="viewport" content="initial-scale=1, maximum-scale=1" />
-          <style>
-            html, body { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
-            #map { width: 100%; height: 100%; }
-          </style>
-          <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_APP_KEY}&autoload=false"></script>
-        </head>
-        <body>
-          <div id="map"></div>
-          <script>
-            (function() {
-              kakao.maps.load(function() {
-                var center = new kakao.maps.LatLng(${currentLocation.lat}, ${currentLocation.lng});
-                var map = new kakao.maps.Map(document.getElementById('map'), {
-                  center: center,
-                  level: 3
-                });
-                new kakao.maps.Marker({
-                  position: center,
-                  map: map
-                });
-              });
-            })();
-          </script>
-        </body>
-      </html>
-    `,
-    [currentLocation.lat, currentLocation.lng]
-  );
 
   return (
     <View style={styles.container}>
@@ -618,65 +451,31 @@ export default function AdoptScreen() {
             {/* 하위 메뉴 1: 나와 가까운 보호소 */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>나와 가까운 보호소</Text>
-              <View style={styles.miniMapContainer}>
-                <View style={styles.miniMapWrapper}>
-                  <WebView
-                    ref={webViewRef}
-                    originWhitelist={['*']}
-                    source={{ html: mapHtml, baseUrl: 'http://localhost' }}
-                    style={styles.miniMap}
-                    javaScriptEnabled
-                    domStorageEnabled
-                    scrollEnabled={false}
-                    mixedContentMode="always"
-                    cacheEnabled={false}
-                    setSupportMultipleWindows={false}
-                    thirdPartyCookiesEnabled
-                    onLoadStart={() => {
-                      setMapReady(false);
-                      setMapLoaded(false);
-                    }}
-                    onLoadEnd={() => {
-                      setMapReady(true);
-                      setMapLoaded(true);
-                    }}
-                    onError={() => {
-                      if (!mapReady) setMapLoaded(false);
-                    }}
-                    onHttpError={() => {
-                      if (!mapReady) setMapLoaded(false);
-                    }}
-                    renderError={() => {
-                      setMapLoaded(false);
-                      return <View style={styles.miniMapFallback} />;
-                    }}
-                  />
-                  {!mapLoaded && (
-                    <Animated.View
-                      pointerEvents="none"
-                      style={[styles.mapSkeleton, { opacity: pulseAnim }]}
-                    />
-                  )}
-                </View>
-              </View>
+              <ShelterNearbyMap
+                center={nearby.center}
+                shelters={nearby.shelters}
+                loading={nearby.loading}
+                error={nearby.error}
+                onRetry={nearby.retry}
+                onSelect={shelter => openBottomSheet(mapToShelterInfo(shelter))}
+              />
             </View>
 
             {/* 하위 메뉴 2: 지역구별 검색 */}
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>지역구별 검색</Text>
-              <ScrollView
-                style={styles.searchButtonsContainer}
-                contentContainerStyle={styles.searchButtonsContent}
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                scrollEventThrottle={16}
-              >
+              <View style={styles.searchButtonsContainer}>
                 <View style={styles.dropdownGroup}>
                   {/* 지역 버튼 */}
                   <DropdownButton
                     label={selectedRegion || '지역'}
                     onPress={() => setShowRegionModal(true)}
-                    style={{ marginRight: 12 }}
+                    style={StyleSheet.flatten([
+                      styles.filterDropdown,
+                      selectedRegion && styles.filterDropdownSelected,
+                    ])}
+                    labelStyle={styles.filterDropdownLabel}
+                    numberOfLines={1}
                   />
 
                   {/* 군/구 버튼 */}
@@ -688,32 +487,42 @@ export default function AdoptScreen() {
                       }
                     }}
                     disabled={!selectedRegion}
-                    style={{ marginRight: 12 }}
+                    style={StyleSheet.flatten([
+                      styles.filterDropdown,
+                      selectedDistrict && styles.filterDropdownSelected,
+                    ])}
+                    labelStyle={styles.filterDropdownLabel}
+                    numberOfLines={1}
                   />
                 </View>
 
-                {/* 전체 보호소 버튼 */}
-                <TouchableOpacity
-                  style={[styles.allButton, showAllShelters ? styles.allButtonActive : null]}
-                  onPress={() => {
-                    setSelectedRegion('');
-                    setSelectedDistrict('');
-                    setShowRegionModal(false);
-                    setShowDistrictModal(false);
-                    fetchAllShelters();
-                  }}
-                >
-                  <Text style={[styles.allButtonText, showAllShelters ? styles.allButtonTextActive : null]}>전체 보호소</Text>
-                </TouchableOpacity>
+                <View style={styles.searchActions}>
+                  {/* 전체 보호소 버튼 */}
+                  <TouchableOpacity
+                    style={[styles.allButton, showAllShelters ? styles.allButtonActive : null]}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: showAllShelters }}
+                    onPress={() => {
+                      setSelectedRegion('');
+                      setSelectedDistrict('');
+                      setShowRegionModal(false);
+                      setShowDistrictModal(false);
+                      setShowAllShelters(true);
+                      setShelterSearchVersion(version => version + 1);
+                    }}
+                  >
+                    <Text style={[styles.allButtonText, showAllShelters ? styles.allButtonTextActive : null]}>전체 보호소</Text>
+                  </TouchableOpacity>
 
-                {/* 재검색 버튼 */}
-                <TouchableOpacity
-                  style={styles.refreshButton}
-                  onPress={handleResetFilters}
-                >
-                  <Text style={styles.refreshButtonText}>초기화</Text>
-                </TouchableOpacity>
-              </ScrollView>
+                  {/* 재검색 버튼 */}
+                  <TouchableOpacity
+                    style={styles.refreshButton}
+                    onPress={handleResetFilters}
+                  >
+                    <Text style={styles.refreshButtonText}>초기화</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
 
               {/* 보호소 카드 리스트 */}
               <View style={styles.shelterListContainer}>
@@ -721,35 +530,28 @@ export default function AdoptScreen() {
                   <Text style={styles.emptyText}>보호소 정보를 불러오는 중...</Text>
                 ) : shelterError ? (
                   <Text style={styles.emptyText}>{shelterError}</Text>
-                ) : filteredShelters.length === 0 ? (
+                ) : shelters.length === 0 ? (
                   <Text style={styles.emptyText}>선택한 조건에 맞는 보호소가 없어요.</Text>
                 ) : (
-                  filteredShelters.map((shelter) => (
-                    <TouchableOpacity 
-                      key={shelter.shelterId ?? shelter.name}
-                      style={styles.shelterCard}
-                      onPress={() => openBottomSheet(shelter)}
-                      activeOpacity={0.7}
-                    >
-                      {/* 기관 사진 */}
-                      <Image
-                        source={shelter.image}
-                        style={styles.shelterImage}
-                      />
-
+                  shelters.map((shelter) => (
+                    <TouchableOpacity key={shelter.shelterId ?? shelter.name} style={styles.shelterCard}
+                      activeOpacity={0.7} accessibilityRole="button" accessibilityLabel={`${shelter.name} 정보 보기`}
+                      onPress={() => openBottomSheet(shelter)}>
                       {/* 기관 정보 */}
                       <View style={styles.shelterInfo}>
                         {/* 이름 */}
                         <Text style={styles.shelterName}>{shelter.name}</Text>
 
                         {/* 별점 */}
-                        <View style={styles.ratingContainer}>
-                          <Image
-                            source={require('../assets/icon_rating.png')}
-                            style={styles.ratingIcon}
-                          />
-                          <Text style={styles.ratingText}>{shelter.rating.toFixed(1)}</Text>
-                        </View>
+                        {shelter.rating !== null && (
+                          <View style={styles.ratingContainer}>
+                            <Image
+                              source={require('../assets/icon_rating.png')}
+                              style={styles.ratingIcon}
+                            />
+                            <Text style={styles.ratingText}>{shelter.rating.toFixed(1)}</Text>
+                          </View>
+                        )}
 
                         {/* 주소 */}
                         <Text style={styles.shelterAddress}>{shelter.address}</Text>
@@ -964,25 +766,33 @@ export default function AdoptScreen() {
             >
               {selectedShelter && (
                 <>
-                  {/* 보호소 이미지 */}
-                  <View style={styles.bottomSheetImageContainer}>
-                    <Image
-                      source={selectedShelter.image}
-                      style={styles.bottomSheetImage}
-                    />
-                  </View>
-
                   {/* 기관 이름 */}
                   <Text style={styles.bottomSheetName}>{selectedShelter.name}</Text>
+                  <View style={styles.detailMapRow}>
+                    {selectedShelter.distanceM !== undefined ? (
+                      <Text style={styles.nearbyDistance}>직선거리 {selectedShelter.distanceM >= 1000
+                        ? `${(selectedShelter.distanceM / 1000).toFixed(1)}km`
+                        : `${Math.round(selectedShelter.distanceM)}m`}</Text>
+                    ) : <View style={styles.detailMapSpacer} />}
+                    <TouchableOpacity style={styles.detailMapButton} activeOpacity={0.8}
+                      accessibilityRole="link" accessibilityLabel={`${selectedShelter.name} 네이버 지도에서 보기`}
+                      onPress={() => { openShelterMap(selectedShelter); }}>
+                      <Image source={require('../assets/naver_map_icon.png')} style={styles.detailMapIcon}
+                        resizeMode="contain" accessible={false} />
+                      <Text style={styles.detailMapText}>네이버 지도에서 보기</Text>
+                    </TouchableOpacity>
+                  </View>
 
                   {/* 별점 */}
-                  <View style={styles.bottomSheetRating}>
-                    <Image
-                      source={require('../assets/icon_rating.png')}
-                      style={styles.ratingIcon}
-                    />
-                    <Text style={styles.ratingText}>{selectedShelter.rating.toFixed(1)}</Text>
-                  </View>
+                  {selectedShelter.rating !== null && (
+                    <View style={styles.bottomSheetRating}>
+                      <Image
+                        source={require('../assets/icon_rating.png')}
+                        style={styles.ratingIcon}
+                      />
+                      <Text style={styles.ratingText}>{selectedShelter.rating.toFixed(1)}</Text>
+                    </View>
+                  )}
 
                   {/* 구분선 */}
                   <View style={styles.divider} />
@@ -1021,6 +831,8 @@ export default function AdoptScreen() {
                   <View style={styles.bottomSheetButtonContainer}>
                     <CustomButton
                       text="전화하기"
+                      backgroundColor="#FFC94D"
+                      textColor="#FFFFFF"
                       onPress={copyPhoneNumber}
                       disabled={!selectedShelter.phone}
                       width={350}
@@ -1090,72 +902,67 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 10,
   },
-  miniMapContainer: {
-    width: 350,
-    height: 180,
-    borderWidth: 1,
-    borderColor: '#D0D0D0',
-    borderRadius: 4,
-    alignSelf: 'center',
-    overflow: 'hidden',
-  },
-  miniMapWrapper: {
-    flex: 1,
-    position: 'relative',
-  },
-  miniMap: {
-    flex: 1,
-  },
-  miniMapFallback: {
-    flex: 1,
-    backgroundColor: '#E9ECEF',
-  },
-  mapSkeleton: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: '#E9ECEF',
-  },
   searchButtonsContainer: {
     width: '100%',
-  },
-  searchButtonsContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 10,
   },
   dropdownGroup: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
+  },
+  filterDropdown: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    paddingHorizontal: 12,
+  },
+  filterDropdownSelected: {
+    borderColor: '#F4B844',
+    backgroundColor: '#FFF6D8',
+  },
+  filterDropdownLabel: {
+    flexShrink: 1,
+  },
+  searchActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   refreshButton: {
     flexDirection: 'row',
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: '#D7D7D7',
     paddingVertical: 8,
     paddingHorizontal: 16,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 30,
-    backgroundColor: '#0081D5',
+    backgroundColor: '#FFFFFF',
   },
   refreshButtonText: {
-    color: '#FFF',
+    color: '#71727A',
     fontSize: 14,
     fontWeight: '500',
   },
   allButton: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    borderWidth: 1,
+    borderColor: '#F4B844',
     flexDirection: 'row',
     paddingVertical: 8,
     paddingHorizontal: 14,
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 30,
-    backgroundColor: '#F2F3F5',
-    marginRight: 8,
+    backgroundColor: '#FFF6D8',
   },
   allButtonActive: {
-    backgroundColor: '#0081D5',
+    backgroundColor: '#FFC94D',
+    borderColor: '#FFC94D',
   },
   allButtonText: {
     color: '#1F2024',
@@ -1163,7 +970,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   allButtonTextActive: {
-    color: '#FFF',
+    color: '#FFFFFF',
   },
   adoptContent: {
     flex: 1,
@@ -1216,18 +1023,14 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   shelterCard: {
-    width: 350,
+    width: '100%',
     flexDirection: 'row',
     paddingVertical: 16,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: '#EAECEE',
     alignItems: 'center',
   },
-  shelterImage: {
-    width: 100,
-    height: 100,
-    borderRadius: 20,
-  },
   shelterInfo: {
-    marginLeft: 18,
     flex: 1,
     justifyContent: 'space-between',
   },
@@ -1312,21 +1115,22 @@ const styles = StyleSheet.create({
   bottomSheetContent: {
     paddingHorizontal: 20,
   },
-  bottomSheetImageContainer: {
-    width: '100%',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  bottomSheetImage: {
-    width: 350,
-    height: 200,
-    borderRadius: 12,
-  },
   bottomSheetName: {
     fontSize: 24,
     fontWeight: '700',
     color: '#000',
     marginBottom: 10,
+  },
+  detailMapRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  detailMapSpacer: { flex: 1 },
+  detailMapButton: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8,
+    paddingVertical: 6, minHeight: 32, borderRadius: 16, backgroundColor: '#EEF7FD' },
+  detailMapIcon: { width: 16, height: 16 },
+  detailMapText: { fontSize: 12, fontWeight: '600', color: '#0081D5' },
+  nearbyDistance: {
+    flex: 1,
+    color: '#0081D5',
+    fontSize: 14,
   },
   bottomSheetRating: {
     flexDirection: 'row',

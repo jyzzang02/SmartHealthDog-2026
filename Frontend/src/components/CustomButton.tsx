@@ -10,6 +10,8 @@ interface CustomButtonProps {
   onPress: () => void;
   disabled?: boolean;
   width?: number;
+  backgroundColor?: string;
+  textColor?: string;
 }
 
 const CustomButton: React.FC<CustomButtonProps> = ({
@@ -17,18 +19,20 @@ const CustomButton: React.FC<CustomButtonProps> = ({
   onPress,
   disabled = false,
   width = 310,
+  backgroundColor = '#0081D5',
+  textColor = '#FFFFFF',
 }) => {
   return (
     <TouchableOpacity
       style={[
         styles.button,
         { width },
-        disabled ? styles.buttonDisabled : styles.buttonActive,
+        disabled ? styles.buttonDisabled : { backgroundColor },
       ]}
       onPress={onPress}
       disabled={disabled}
     >
-      <Text style={styles.buttonText}>{text}</Text>
+      <Text style={[styles.buttonText, { color: textColor }]}>{text}</Text>
     </TouchableOpacity>
   );
 };
@@ -43,9 +47,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 12,
     overflow: 'hidden',
-  },
-  buttonActive: {
-    backgroundColor: '#0081D5',
   },
   buttonDisabled: {
     backgroundColor: '#E1E1E1',

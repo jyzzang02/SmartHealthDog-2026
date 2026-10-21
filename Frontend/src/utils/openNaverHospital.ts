@@ -7,10 +7,24 @@ const APP_NAMES = {
   ios: 'org.reactjs.native.example.SmartHealthDog',
 };
 
-export const openNaverHospital = async (hospital: Pick<HospitalItem, 'name' | 'address'>): Promise<void> => {
+const shelterAddressRegion = (address: string | null): string => {
+  const [province, district] = (address ?? '').replace(/\([^)]*\)/g, ' ').trim().split(/\s+/);
+  const shortProvinces = ['서울', '부산', '대구', '인천', '광주', '대전', '울산', '세종',
+    '경기', '강원', '충북', '충남', '전북', '전남', '경북', '경남', '제주'];
+  if (!province || !district || (!/[시도]$/.test(province) && !shortProvinces.includes(province))
+    || !/^[가-힣]+[시군구]$/.test(district)) return '';
+  return `${province.replace(/(?:특별자치시|특별시|광역시)$/, '')} ${district}`;
+};
+
+export const openNaverHospital = async (
+  hospital: Pick<HospitalItem, 'name' | 'address'>,
+  options: { includeRegion?: boolean } = {},
+): Promise<void> => {
   const name = hospital.name.trim();
   if (!name) throw new Error('Missing hospital name');
-  const query = name.replace(/\s+/g, ' ');
+  const normalizedName = name.replace(/\s+/g, ' ');
+  const region = options.includeRegion ? shelterAddressRegion(hospital.address) : '';
+  const query = region ? `${normalizedName} ${region}` : normalizedName;
   const encoded = encodeURIComponent(query);
   const webUrl = `https://map.naver.com/p/search/${encoded}`;
   const appName = Platform.OS === 'android' ? APP_NAMES.android : Platform.OS === 'ios' ? APP_NAMES.ios : null;
