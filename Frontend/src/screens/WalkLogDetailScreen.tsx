@@ -19,7 +19,6 @@ import {
   getPetTodaySunlight,
   getWalkDetail,
   SunlightTodayResponse,
-  WalkCoordinate,
   WalkRecordDto,
 } from '../api/walks';
 import {
@@ -28,6 +27,7 @@ import {
 } from '../storage/walkSessionStorage';
 import { splitPathBySegmentStartIndices } from '../utils/walkLocation';
 import { getSeoulDateKey } from '../utils/walkWeek';
+import { parseWalkPathCoordinates } from '../utils/walkPath';
 
 type WalkLogDetailRouteProp = RouteProp<RootStackParamList, 'WalkLogDetail'>;
 type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
@@ -96,11 +96,8 @@ const formatDurationClock = (durationSec?: number) => {
   return `${h}:${m}:${s}`;
 };
 
-const normalizePathCoordinates = (coordinates?: Array<[number, number]> | WalkCoordinate[]) =>
-  (coordinates || [])
-    .filter((point) => Array.isArray(point) && point.length >= 2)
-    .map(([lat, lng]) => ({ lat, lng }))
-    .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+const normalizePathCoordinates = (coordinates: unknown) =>
+  parseWalkPathCoordinates(coordinates).map(([lat, lng]) => ({ lat, lng }));
 
 export default function WalkLogDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
@@ -204,7 +201,8 @@ export default function WalkLogDetailScreen() {
 
   const pathPoints = useMemo(() => {
     const detailPath = walkDetail?.path_coordinates ?? walkDetail?.pathCoordinates;
-    return normalizePathCoordinates(detailPath?.length ? detailPath : record.pathCoordinates);
+    const detailPoints = normalizePathCoordinates(detailPath);
+    return detailPoints.length ? detailPoints : normalizePathCoordinates(record.pathCoordinates);
   }, [record.pathCoordinates, walkDetail]);
 
   const pathSegments = useMemo(

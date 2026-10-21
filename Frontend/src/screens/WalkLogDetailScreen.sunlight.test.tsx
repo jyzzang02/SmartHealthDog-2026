@@ -2,6 +2,7 @@ import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import { Animated, Text } from 'react-native';
 import WalkLogDetailScreen from './WalkLogDetailScreen';
+import { WebView } from 'react-native-webview';
 import { getPetTodaySunlight, getWalkDetail } from '../api/walks';
 import type { SunlightTodayResponse, WalkRecordDto } from '../api/walks';
 import type { RootStackParamList } from '../../App';
@@ -106,4 +107,29 @@ it('ignores a stale detail response and waits for the selected walk date', async
   await act(async () => { oldDetail({ start_time: '2026-09-25T05:00:00Z' }); await flush(); });
   expect(getPetTodaySunlight).toHaveBeenLastCalledWith(19, '2026-09-26');
   expect(texts().some(text => text.includes('20,000'))).toBe(true);
+});
+
+it.each(['[]', '[[37.5,126.9],[37.501,126.901]]'])
+('opens the card with a serialized route path before detail has loaded: %s', async path => {
+  mockRecord = { ...mockRecord, pathCoordinates: path as unknown as Array<[number, number]> };
+  jest.mocked(getWalkDetail).mockImplementation(() => new Promise(() => {}));
+  await mount();
+  const html = tree!.root.findByType(WebView).props.source.html as string;
+  expect(html).toContain(path === '[]' ? 'var pathSegments = [];' :
+    'var pathSegments = [[{"lat":37.5,"lng":126.9},{"lat":37.501,"lng":126.901}]];');
+});
+
+it('keeps a valid route path when the detail path is malformed', async () => {
+  mockRecord = { ...mockRecord, pathCoordinates: [[37.5, 126.9]] };
+  jest.mocked(getWalkDetail).mockResolvedValue({ start_time: '2026-09-25T05:00:00Z',
+    path_coordinates: 'not-json' as unknown as Array<[number, number]> });
+  await mount();
+  expect(tree!.root.findByType(WebView).props.source.html).toContain('var pathSegments = [[{"lat":37.5,"lng":126.9}]];');
+});
+
+it.each([null, {}, 'null', '{"bad":true}', '[null,[91,127],[37,181],["37",127]]'])
+('does not crash on an invalid serialized or non-array route path: %j', async path => {
+  mockRecord = { ...mockRecord, pathCoordinates: path as unknown as Array<[number, number]> };
+  await mount();
+  expect(tree!.root.findByType(WebView).props.source.html).toContain('var pathSegments = [];');
 });

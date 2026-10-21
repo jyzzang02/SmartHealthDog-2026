@@ -4,6 +4,7 @@
   assertAuthSession,
 } from '../storage/tokenStorage';
 import { refreshSessionAccessToken } from './refreshSession';
+import { parseWalkPathCoordinates } from '../utils/walkPath';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
@@ -32,6 +33,15 @@ export interface WalkRecordDto {
   photos?: string[];
   sunlight?: SunlightTodayResponse | null;
 }
+
+const normalizeWalkRecord = (walk: WalkRecordDto): WalkRecordDto => {
+  const coordinates = parseWalkPathCoordinates(walk.path_coordinates ?? walk.pathCoordinates);
+  return {
+    ...walk,
+    path_coordinates: coordinates,
+    ...(walk.pathCoordinates !== undefined ? { pathCoordinates: coordinates } : {}),
+  };
+};
 
 export interface PetWalkListResponse {
   pet_id?: number;
@@ -316,7 +326,7 @@ export const endPetWalk = async (
   }
 
   const data = await parseJsonSafe(response);
-  return (data?.walk || data || {}) as WalkRecordDto;
+  return normalizeWalkRecord((data?.walk || data || {}) as WalkRecordDto);
 };
 
 export const uploadPetLightSamples = async (
@@ -456,6 +466,7 @@ export const getPetWalks = async (
 
   const data = await parseJsonSafe(response);
   const result = (data || {}) as PetWalkListResponse;
+  if (Array.isArray(result.items)) result.items = result.items.map(normalizeWalkRecord);
   console.log('[walk-debug] walk-list:response', {
     petId,
     count: result.items?.length ?? 0,
@@ -482,7 +493,7 @@ export const getMyThisWeekWalks = async (timezone?: string): Promise<WalkRecordD
   }
 
   const data = await parseJsonSafe(response);
-  return (Array.isArray(data) ? data : []) as WalkRecordDto[];
+  return (Array.isArray(data) ? data : []).map(normalizeWalkRecord);
 };
 
 export const getWalkDetail = async (walkId: number): Promise<WalkRecordDto> => {
@@ -496,7 +507,7 @@ export const getWalkDetail = async (walkId: number): Promise<WalkRecordDto> => {
   }
 
   const data = await parseJsonSafe(response);
-  const walk = (data?.walk || data) as WalkRecordDto;
+  const walk = normalizeWalkRecord((data?.walk || data) as WalkRecordDto);
   console.log('[walk-debug] walk-detail:response', {
     requestedWalkId: walkId,
     responseWalkId: walk.walk_id ?? walk.walkId ?? walk.id,
