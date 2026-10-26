@@ -19,14 +19,16 @@ import { RootStackParamList } from '../../App';
 import Header from '../components/Header';
 import DropdownButton from '../components/DropdownButton';
 import CustomButton from '../components/CustomButton';
+import { getAdoptionMock } from '../dev/adoptionMock';
 import { openNaverMap } from '../utils/openNaverMap';
+import { formatAdoptionStatus } from '../utils/formatAdoptionStatus';
 import ShelterNearbyMap from '../components/ShelterNearbyMap';
 import { useNearbyShelters } from '../hooks/useNearbyShelters';
 import { useTabScrollToTop } from '../hooks/useTabScrollToTop';
 import {
   searchAllShelters,
   getShelterDetail,
-  getShelterPets,
+  getAllShelterPets,
   PetDetail,
   ShelterListItem,
   ShelterSearchParams,
@@ -56,12 +58,12 @@ interface AnimalInfo {
   shelterId: number;
   shelterName?: string;
   shelterPhone?: string;
+  shelterAddress?: string;
   name: string;
-  type: '강아지' | '고양이';
+  type: string;
   tags: string[];
   breed: string;
   age: string;
-  location: string;
   image: any;
 }
 
@@ -109,6 +111,7 @@ export default function AdoptScreen() {
   const [adoptPets, setAdoptPets] = useState<AnimalInfo[]>([]);
   const [isAdoptLoading, setIsAdoptLoading] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
+  const [adoptRefreshVersion, setAdoptRefreshVersion] = useState(0);
   const [showBottomSheet, setShowBottomSheet] = useState(false);
   const nearby = useNearbyShelters();
   
@@ -120,26 +123,27 @@ export default function AdoptScreen() {
       setSelectedRegion('');
       setSelectedDistrict('');
       setSelectedPetType('모두');
+      setAdoptRefreshVersion(version => version + 1);
     }, [])
   );
 
-  const mapSpeciesToType = useCallback((species?: string): '강아지' | '고양이' => {
-    if (!species) return '강아지';
-    const normalized = species.toLowerCase();
-    if (normalized.includes('cat') || normalized.includes('고양이')) return '고양이';
-    return '강아지';
+  const mapSpeciesToType = useCallback((species: string): string => {
+    const normalized = species.trim().toLowerCase();
+    if (normalized === 'cat' || normalized === '고양이') return '고양이';
+    if (normalized === 'dog' || normalized === '강아지' || normalized === '개') return '강아지';
+    return normalized;
   }, []);
 
   const mapPetTags = useCallback((pet: PetDetail): string[] => {
     const tags: string[] = [];
-    if (pet.adoption_status) tags.push(pet.adoption_status);
+    if (pet.adoption_status) tags.push(formatAdoptionStatus(pet.adoption_status));
     if (pet.gender) tags.push(pet.gender);
-    if (pet.is_neutered !== undefined) tags.push(pet.is_neutered ? '중성화 O' : '중성화 X');
+    if (typeof pet.is_neutered === 'boolean') tags.push(pet.is_neutered ? '중성화 O' : '중성화 X');
     return tags.length > 0 ? tags : ['공고중'];
   }, []);
 
   const mapPetToAnimalInfo = useCallback(
-    (pet: PetDetail, shelterName?: string, shelterPhone?: string): AnimalInfo => {
+    (pet: PetDetail, shelter: ShelterListItem): AnimalInfo => {
       const imageSource = pet.images?.[0]
         ? { uri: pet.images[0] }
         : require('../assets/adopt_placeholder.png');
@@ -147,14 +151,14 @@ export default function AdoptScreen() {
       return {
         id: pet.pet_id,
         shelterId: pet.shelter_id,
-        shelterName,
-        shelterPhone,
-        name: pet.name || '이름 없음',
+        shelterName: shelter.name,
+        shelterPhone: shelter.phone_number,
+        shelterAddress: shelter.address,
+        name: pet.name.trim() || '이름 없음',
         type: mapSpeciesToType(pet.species),
         tags: mapPetTags(pet),
         breed: pet.breed || pet.species || '',
         age: pet.age || '',
-        location: pet.shelter_contact?.address || '',
         image: imageSource,
       };
     },
@@ -230,37 +234,37 @@ export default function AdoptScreen() {
     let active = true;
     const controller = new AbortController();
     const fetchAdoptPets = async () => {
-
-      const shelterSources = shelters.filter((shelter) => shelter.shelterId !== undefined);
-      if (shelterSources.length === 0) {
-        setAdoptPets([]);
-        setAdoptError(null);
-        setIsAdoptLoading(false);
-        return;
-      }
-
       setIsAdoptLoading(true);
       setAdoptError(null);
+      setAdoptPets([]);
       try {
-        const petResults = await Promise.all(
-          shelterSources.map(async (shelter) => {
-            const response = await getShelterPets(shelter.shelterId as number, {
-              limit: 20,
-              offset: 0,
-            }, controller.signal);
-            const animals = response.items.map((pet) =>
-              mapPetToAnimalInfo(pet, shelter.name, shelter.phone)
-            );
-            return animals;
-          })
-        );
-        if (active) setAdoptPets(petResults.flat());
+        const mock = getAdoptionMock();
+        const filters = {
+          province: selectedRegion || undefined,
+          district: selectedRegion ? selectedDistrict || undefined : undefined,
+        };
+        const response = mock ? mock.searchShelters(filters)
+          : await searchAllShelters(filters, controller.signal);
+        if (!active) return;
+        const results: AnimalInfo[][] = new Array(response.items.length);
+        let nextIndex = 0;
+        const loadNext = async () => {
+          while (nextIndex < response.items.length && !controller.signal.aborted) {
+            const index = nextIndex++;
+            const shelter = response.items[index];
+            const pets = mock ? mock.getPets(shelter.shelter_id)
+              : await getAllShelterPets(shelter.shelter_id, controller.signal);
+            if (!active || controller.signal.aborted) return;
+            results[index] = pets.map(pet => mapPetToAnimalInfo(pet, shelter));
+          }
+        };
+        // Avoid sending one simultaneous request for every shelter nationwide.
+        await Promise.all(Array.from({ length: Math.min(4, response.items.length) }, loadNext));
+        if (active) setAdoptPets(results.flat());
       } catch (error) {
         if (!active) return;
-        const message =
-          error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.';
-
-        setAdoptError(message);
+        controller.abort();
+        setAdoptError(error instanceof Error ? error.message : '입양 동물 정보를 불러오지 못했습니다.');
         setAdoptPets([]);
       } finally {
         if (active) setIsAdoptLoading(false);
@@ -268,7 +272,7 @@ export default function AdoptScreen() {
     };
     fetchAdoptPets();
     return () => { active = false; controller.abort(); };
-  }, [activeTab, shelters, mapPetToAnimalInfo]);
+  }, [activeTab, selectedRegion, selectedDistrict, adoptRefreshVersion, mapPetToAnimalInfo]);
 
   // 바텀시트 열기
   const openBottomSheet = async (shelter: ShelterInfo) => {
@@ -384,6 +388,7 @@ export default function AdoptScreen() {
 
   const handleTabChange = useCallback((tab: TabType) => {
     setActiveTab(tab);
+    if (tab === '입양 홍보') setAdoptRefreshVersion(version => version + 1);
     contentScrollRef.current?.scrollTo({ y: 0, animated: false });
   }, []);
 
@@ -587,13 +592,23 @@ export default function AdoptScreen() {
                 {isAdoptLoading ? (
                   <Text style={styles.emptyText}>입양 동물 정보를 불러오는 중...</Text>
                 ) : adoptError ? (
-                  <Text style={styles.emptyText}>{adoptError}</Text>
+                  <View style={styles.adoptErrorContainer}>
+                    <Text style={styles.emptyText}>{adoptError}</Text>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      style={styles.adoptRetryButton}
+                      activeOpacity={0.8}
+                      onPress={() => setAdoptRefreshVersion(version => version + 1)}
+                    >
+                      <Text style={styles.adoptRetryText}>다시 시도</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : filteredAnimals.length === 0 ? (
                   <Text style={styles.emptyText}>입양 홍보 동물이 없어요.</Text>
                 ) : (
                   filteredAnimals.map((animal) => (
                     <TouchableOpacity
-                      key={animal.id}
+                      key={`${animal.shelterId}:${animal.id}`}
                       style={styles.animalCard}
                       onPress={() => navigation.navigate('AnimalDetail', { animalData: animal })}
                       activeOpacity={0.7}
@@ -606,6 +621,7 @@ export default function AdoptScreen() {
 
                       {/* 동물 정보 */}
                       <View style={styles.animalInfo}>
+                        <Text style={styles.animalName}>{animal.name}</Text>
                         {/* 동물 태그 */}
                         <View style={styles.tagsContainer}>
                           {animal.tags.map((tag, tagIndex) => (
@@ -615,7 +631,7 @@ export default function AdoptScreen() {
                           ))}
                         </View>
 
-                        {/* 품종, 나이, 구조장소 */}
+                        {/* 품종, 나이, 보호소 */}
                         <View style={styles.detailsContainer}>
                           <View style={styles.detailRow}>
                             <Text style={styles.detailLabel}>품종</Text>
@@ -626,8 +642,10 @@ export default function AdoptScreen() {
                             <Text style={styles.detailValue}>{animal.age}</Text>
                           </View>
                           <View style={styles.detailRow}>
-                            <Text style={styles.detailLabel}>구조장소</Text>
-                            <Text style={styles.detailValue}>{animal.location}</Text>
+                            <Text style={styles.detailLabel}>보호소</Text>
+                            <Text style={styles.detailValue}>
+                              {animal.shelterName?.trim() || animal.shelterAddress?.trim() || '정보 없음'}
+                            </Text>
                           </View>
                         </View>
                       </View>
@@ -1175,12 +1193,33 @@ const styles = StyleSheet.create({
     marginBottom: 40,
     alignItems: 'center',
   },
+  adoptErrorContainer: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  adoptRetryButton: {
+    minWidth: 120,
+    minHeight: 44,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFC94D',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adoptRetryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   animalListContainer: {
     alignItems: 'center',
     paddingBottom: 120,
   },
   animalCard: {
-    width: 350,
+    width: '100%',
     flexDirection: 'row',
     paddingVertical: 16,
     alignItems: 'center',
@@ -1195,8 +1234,16 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-between',
   },
+  animalName: {
+    color: '#1F2024',
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
   tagsContainer: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 4,
     marginBottom: 8,
   },
   tag: {
@@ -1231,6 +1278,7 @@ const styles = StyleSheet.create({
     textAlign: 'left',
   },
   detailValue: {
+    flex: 1,
     marginLeft: 16,
     color: '#7B7C7D',
     fontSize: 12,

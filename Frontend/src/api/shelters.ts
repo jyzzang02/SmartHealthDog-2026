@@ -59,22 +59,22 @@ export interface PetDetail {
   shelter_id: number;
   name: string;
   species: string;
-  breed?: string;
-  gender?: string;
-  age?: string;
-  is_neutered?: boolean;
-  adoption_status?: string;
-  description?: string;
-  images?: string[];
-  created_at?: string;
-  updated_at?: string;
-  share_url?: string;
+  breed?: string | null;
+  gender?: string | null;
+  age?: string | null;
+  is_neutered?: boolean | null;
+  adoption_status?: string | null;
+  description?: string | null;
+  images?: string[] | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  share_url?: string | null;
   shelter_contact?: {
-    name?: string;
-    phone_number?: string;
-    address?: string;
-    website_url?: string;
-  };
+    name?: string | null;
+    phone_number?: string | null;
+    address?: string | null;
+    website_url?: string | null;
+  } | null;
 }
 
 export interface ShelterPetsParams {
@@ -302,56 +302,130 @@ export const getShelterDetail = async (
   return detail as ShelterDetail;
 };
 
+const adoptionDataError = () => new Error('입양 동물 정보를 불러오지 못했습니다.');
+
+const isPositiveId = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) > 0;
+
+const normalizeAdoptionPet = (value: unknown, shelterId: number): PetDetail => {
+  if (!isRecord(value) || !isPositiveId(value.pet_id)
+    || typeof value.name !== 'string' || typeof value.species !== 'string'
+    || (value.shelter_id !== undefined && value.shelter_id !== shelterId)) {
+    throw adoptionDataError();
+  }
+  const textFields = ['breed', 'gender', 'age', 'adoption_status', 'description',
+    'created_at', 'updated_at', 'share_url', 'image_url'];
+  if (textFields.some(field => value[field] != null && typeof value[field] !== 'string')
+    || (value.is_neutered != null && typeof value.is_neutered !== 'boolean')
+    || (value.images != null && (!Array.isArray(value.images)
+      || !value.images.every(image => typeof image === 'string')))) {
+    throw adoptionDataError();
+  }
+  if (value.shelter_contact != null) {
+    if (!isRecord(value.shelter_contact)) throw adoptionDataError();
+    const contact = value.shelter_contact;
+    if (['name', 'phone_number', 'address', 'website_url']
+      .some(field => contact[field] != null && typeof contact[field] !== 'string')) {
+      throw adoptionDataError();
+    }
+  }
+  const images = (Array.isArray(value.images) ? value.images as string[] : [])
+    .map(image => image.trim()).filter(Boolean);
+  const imageUrl = typeof value.image_url === 'string' ? value.image_url.trim() : '';
+  return {
+    ...value,
+    shelter_id: shelterId,
+    images: images.length ? images : imageUrl ? [imageUrl] : undefined,
+  } as PetDetail;
+};
+
 export const getShelterPets = async (
   shelterId: number,
   params: ShelterPetsParams = {},
   signal?: AbortSignal
 ): Promise<ShelterPetsResponse> => {
-  const query = new URLSearchParams();
-
-  if (params.status) query.append('status', params.status);
-  if (params.limit !== undefined) query.append('limit', String(params.limit));
-  if (params.offset !== undefined) query.append('offset', String(params.offset));
-
-  const url = `${API_BASE_URL}/api/shelters/${shelterId}/pets${
-    query.toString() ? `?${query.toString()}` : ''
-  }`;
-
-  const data = await requestShelterJson(url,
-    status => `입양 동물 목록을 불러오지 못했습니다. (HTTP ${status})`, signal);
-
-  const items = Array.isArray(data?.items)
-    ? data.items
-    : Array.isArray(data?.pets)
-      ? data.pets
-      : null;
-  if (!items || !items.every((pet: unknown) => isRecord(pet)
-    && Number.isSafeInteger(pet.pet_id) && (pet.pet_id as number) > 0
-    && typeof pet.name === 'string' && typeof pet.species === 'string')) {
-    throw new Error('입양 동물 정보를 불러오지 못했습니다.');
+  const limit = params.limit ?? 20;
+  const offset = params.offset ?? 0;
+  if (!isPositiveId(shelterId) || !Number.isSafeInteger(limit) || limit < 1 || limit > 1000
+    || !Number.isSafeInteger(offset) || offset < 0 || offset > 2147483647) {
+    throw adoptionDataError();
   }
-
+  const query = new URLSearchParams();
+  if (params.status) query.append('status', params.status);
+  query.append('limit', String(limit));
+  query.append('offset', String(offset));
+  const data = await requestShelterJson(
+    `${API_BASE_URL}/api/shelters/${shelterId}/pets?${query.toString()}`,
+    status => `입양 동물 목록을 불러오지 못했습니다. (HTTP ${status})`, signal
+  );
+  if (!isRecord(data) || (data.shelter_id !== undefined && data.shelter_id !== shelterId)) {
+    throw adoptionDataError();
+  }
+  const items = Array.isArray(data.items) ? data.items : Array.isArray(data.pets) ? data.pets : null;
+  const page = isRecord(data.page) ? data.page : undefined;
+  // The current backend puts limit/offset at the response root.
+  const responseLimit = data.limit ?? page?.limit ?? limit;
+  const responseOffset = data.offset ?? page?.offset ?? offset;
+  if (!items || !Number.isSafeInteger(responseLimit) || (responseLimit as number) < 1
+    || (responseLimit as number) > limit || responseOffset !== offset
+    || items.length > (responseLimit as number)
+    || (data.total !== undefined && (!Number.isSafeInteger(data.total)
+      || (data.total as number) < items.length))) {
+    throw adoptionDataError();
+  }
   return {
-    items: items.map((pet: PetDetail & { image_url?: string | null }) => ({
-      ...pet,
-      shelter_id: shelterId,
-      images: typeof pet.image_url === 'string' && pet.image_url.trim()
-        ? [pet.image_url.trim()]
-        : pet.images,
-    })),
-    total: data?.total,
-    page: data?.page,
+    items: items.map(pet => normalizeAdoptionPet(pet, shelterId)),
+    total: data.total as number | undefined,
+    page: { limit: responseLimit as number, offset },
   };
+};
+
+export const getAllShelterPets = async (
+  shelterId: number,
+  signal?: AbortSignal
+): Promise<PetDetail[]> => {
+  const items: PetDetail[] = [];
+  const seen = new Set<number>();
+  let expectedTotal: number | undefined;
+  for (let pageIndex = 0; pageIndex < 100; pageIndex += 1) {
+    if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+    const response = await getShelterPets(shelterId,
+      { status: 'AVAILABLE', limit: 20, offset: items.length }, signal);
+    const total = response.total;
+    // Legacy responses count this page only; a full page needs one more request.
+    if (expectedTotal === undefined && total !== undefined && total > response.items.length) {
+      expectedTotal = total;
+    }
+    if (expectedTotal !== undefined && total !== expectedTotal) throw adoptionDataError();
+    for (const pet of response.items) {
+      if (seen.has(pet.pet_id)) throw adoptionDataError();
+      seen.add(pet.pet_id);
+      items.push(pet);
+    }
+    if (expectedTotal !== undefined) {
+      if (items.length > expectedTotal) throw adoptionDataError();
+      if (items.length === expectedTotal) return items;
+      if (response.items.length === 0) throw adoptionDataError();
+    } else if (response.items.length < response.page!.limit) {
+      return items;
+    }
+  }
+  throw adoptionDataError();
 };
 
 export const getShelterPetDetail = async (
   shelterId: number,
-  petId: number
+  petId: number,
+  signal?: AbortSignal
 ): Promise<PetDetail> => {
+  if (!isPositiveId(shelterId) || !isPositiveId(petId)) throw adoptionDataError();
   const data = await requestShelterJson(
     `${API_BASE_URL}/api/shelters/${shelterId}/pets/${petId}`,
-    status => `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${status})`
+    status => `입양 가능 동물 정보를 불러오지 못했습니다. (HTTP ${status})`, signal
   );
-
-  return (data as { pet?: PetDetail })?.pet ?? (data as PetDetail);
+  const value = isRecord(data) ? data.pet ?? data : data;
+  if (!isRecord(value) || value.pet_id !== petId || value.shelter_id !== shelterId) {
+    throw adoptionDataError();
+  }
+  return normalizeAdoptionPet(value, shelterId);
 };

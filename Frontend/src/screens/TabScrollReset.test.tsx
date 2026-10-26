@@ -17,6 +17,7 @@ const mockNavigation = {
     return () => { mockListeners.delete(event); };
   }),
 };
+jest.mock('../dev/adoptionMock', () => ({ getAdoptionMock: () => null }));
 jest.mock('@react-navigation/native', () => ({
   useNavigation: () => mockNavigation,
   useFocusEffect: jest.fn(),
@@ -46,7 +47,7 @@ jest.mock('../hooks/useHospitalSearch', () => ({ useHospitalSearch: () => ({
 }) }));
 jest.mock('../api/pets', () => ({ getMyPets: jest.fn(async () => []) }));
 jest.mock('../api/users', () => ({ getMyProfile: jest.fn(async () => ({ nickname: 'User' })) }));
-jest.mock('../api/shelters', () => ({ searchAllShelters: jest.fn(), getShelterDetail: jest.fn(), getShelterPets: jest.fn() }));
+jest.mock('../api/shelters', () => ({ searchAllShelters: jest.fn(), getShelterDetail: jest.fn(), getAllShelterPets: jest.fn() }));
 jest.mock('../storage/tokenStorage', () => ({ getStoredAccessToken: jest.fn(async () => null) }));
 jest.mock('../store/healthStore', () => ({ healthStore: { getAll: () => ({}) } }));
 

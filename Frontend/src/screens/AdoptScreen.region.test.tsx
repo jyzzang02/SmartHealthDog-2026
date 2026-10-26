@@ -6,6 +6,7 @@ import { useNearbyShelters } from '../hooks/useNearbyShelters';
 import AdoptScreen from './AdoptScreen';
 import { searchAllShelters, getShelterDetail, ShelterSearchResponse } from '../api/shelters';
 
+jest.mock('../dev/adoptionMock', () => ({ getAdoptionMock: () => null }));
 jest.mock('react-native-webview', () => ({ WebView: 'WebView' }));
 
 jest.mock('@react-navigation/native', () => ({
@@ -17,7 +18,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('../api/shelters', () => ({
   searchAllShelters: jest.fn(),
-  getShelterDetail: jest.fn(), getShelterPets: jest.fn(),
+  getShelterDetail: jest.fn(), getAllShelterPets: jest.fn(),
 }));
 
 jest.mock('../hooks/useNearbyShelters', () => ({

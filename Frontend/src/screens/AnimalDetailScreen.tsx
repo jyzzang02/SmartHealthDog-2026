@@ -1,4 +1,4 @@
-import React, { useMemo, useEffect, useState } from 'react';
+import React, { useMemo, useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -6,11 +6,15 @@ import {
   Image,
   ScrollView,
   TouchableOpacity,
+  Linking,
+  Alert,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
+import { getAdoptionMock } from '../dev/adoptionMock';
+import { formatAdoptionStatus } from '../utils/formatAdoptionStatus';
 import { getShelterPetDetail, PetDetail } from '../api/shelters';
 
 type AnimalDetailRouteProp = RouteProp<RootStackParamList, 'AnimalDetail'>;
@@ -20,9 +24,11 @@ export default function AnimalDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<AnimalDetailRouteProp>();
   const { animalData } = route.params;
+  const callInFlight = useRef(false);
   const [petDetail, setPetDetail] = useState<PetDetail | null>(null);
   const [petError, setPetError] = useState<string | null>(null);
   const [isPetLoading, setIsPetLoading] = useState(false);
+  const [detailRefreshVersion, setDetailRefreshVersion] = useState(0);
 
   useEffect(() => {
     const shelterId = animalData.shelterId;
@@ -30,12 +36,16 @@ export default function AnimalDetailScreen() {
     if (shelterId === undefined || petId === undefined) return;
 
     let isActive = true;
+    const controller = new AbortController();
 
     const fetchPetDetail = async () => {
+      setPetDetail(null);
       setIsPetLoading(true);
       setPetError(null);
       try {
-        const detail = await getShelterPetDetail(shelterId, petId);
+        const mock = getAdoptionMock();
+        const detail = mock ? mock.getPetDetail(shelterId, petId)
+          : await getShelterPetDetail(shelterId, petId, controller.signal);
         if (!isActive) return;
         setPetDetail(detail);
       } catch (error) {
@@ -54,8 +64,9 @@ export default function AnimalDetailScreen() {
 
     return () => {
       isActive = false;
+      controller.abort();
     };
-  }, [animalData.id, animalData.shelterId]);
+  }, [animalData.id, animalData.shelterId, detailRefreshVersion]);
 
   const imageSource = useMemo(() => {
     if (petDetail?.images?.[0]) {
@@ -72,17 +83,29 @@ export default function AnimalDetailScreen() {
   const summaryText = useMemo(() => {
     const parts: string[] = [];
     if (petDetail?.gender) parts.push(petDetail.gender);
-    if (petDetail?.is_neutered !== undefined) {
+    if (typeof petDetail?.is_neutered === 'boolean') {
       parts.push(petDetail.is_neutered ? '중성화 O' : '중성화 X');
     }
     if (petDetail?.age) parts.push(petDetail.age);
     return parts.length > 0 ? parts.join(' / ') : '정보 없음';
   }, [petDetail?.age, petDetail?.gender, petDetail?.is_neutered]);
 
+  const animalName = petDetail?.name?.trim() || animalData.name?.trim() || '이름 없음';
   const breedText = petDetail?.breed || animalData.breed || '품종 정보 없음';
-  const adoptionStatus = petDetail?.adoption_status || '정보 없음';
+  const adoptionStatus = formatAdoptionStatus(petDetail?.adoption_status);
   const description = petDetail?.description || '정보 없음';
-  const shelterAddress = petDetail?.shelter_contact?.address || animalData.location || '정보 없음';
+  const shelterAddress = petDetail?.shelter_contact?.address || animalData.shelterAddress || '정보 없음';
+
+  const dialNumber = /^[+\d\s()-]+$/.test(shelterPhone)
+    ? shelterPhone.replace(/[\s()-]/g, '') : '';
+  const canCall = /^\+?\d{3,15}$/.test(dialNumber);
+  const handleCall = async () => {
+    if (!canCall || callInFlight.current) return;
+    callInFlight.current = true;
+    try { await Linking.openURL(`tel:${dialNumber}`); }
+    catch { Alert.alert('연결 실패', '연결할 수 없습니다. 다시 시도해 주세요.'); }
+    finally { callInFlight.current = false; }
+  };
 
   return (
     <View style={styles.container}>
@@ -121,6 +144,8 @@ export default function AnimalDetailScreen() {
           />
         </View>
 
+        <Text style={styles.animalName}>{animalName}</Text>
+
         {/* 품종 */}
         <Text style={styles.breedText}>{breedText}</Text>
 
@@ -133,7 +158,19 @@ export default function AnimalDetailScreen() {
         {isPetLoading && (
           <Text style={styles.loadingText}>동물 정보를 불러오는 중...</Text>
         )}
-        {petError && <Text style={styles.errorText}>{petError}</Text>}
+        {petError && (
+          <View style={styles.errorContainer}>
+            <Text style={styles.errorText}>{petError}</Text>
+            <TouchableOpacity
+              accessibilityRole="button"
+              style={styles.retryButton}
+              activeOpacity={0.8}
+              onPress={() => setDetailRefreshVersion(version => version + 1)}
+            >
+              <Text style={styles.retryText}>다시 시도</Text>
+            </TouchableOpacity>
+          </View>
+        )}
 
         {/* 상세 정보 */}
         <View style={styles.detailsSection}>
@@ -167,9 +204,9 @@ export default function AnimalDetailScreen() {
         <View style={styles.buttonContainer}>
           <CustomButton
             text="전화하기"
-            onPress={() => {}}
+            onPress={handleCall}
             width={350}
-            disabled={!shelterPhone}
+            disabled={!canCall}
           />
         </View>
       </ScrollView>
@@ -227,11 +264,18 @@ const styles = StyleSheet.create({
     height: 250,
     borderRadius: 12,
   },
-  breedText: {
+  animalName: {
     fontSize: 24,
     fontWeight: '700',
     color: '#000',
-    marginLeft: 20,
+    marginHorizontal: 20,
+    marginBottom: 8,
+  },
+  breedText: {
+    fontSize: 16,
+    fontWeight: '500',
+    color: '#7B7C7D',
+    marginHorizontal: 20,
     marginBottom: 8,
   },
   summaryText: {
@@ -253,6 +297,26 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 10,
+  },
+  errorContainer: {
+    alignItems: 'center',
+    marginHorizontal: 20,
+    marginBottom: 16,
+  },
+  retryButton: {
+    minWidth: 120,
+    minHeight: 44,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#FFC94D',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  retryText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
   errorText: {
     textAlign: 'center',

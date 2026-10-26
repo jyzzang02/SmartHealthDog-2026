@@ -102,14 +102,15 @@ export type RootStackParamList = {
   AnimalDetail: {
     animalData: {
       id?: number;
+      name?: string;
       shelterId?: number;
       shelterName?: string;
       shelterPhone?: string;
+      shelterAddress?: string;
       type: string;
       tags: string[];
       breed: string;
       age: string;
-      location: string;
       image: any;
     };
   };
