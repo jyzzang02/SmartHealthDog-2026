@@ -99,13 +99,13 @@ const HealthScreen: React.FC = () => {
           onPress={() => navigation.navigate('EyeDiagnosis')}   // ★ 이동 추가
         />
 
-        {/* 소변키트 진단 → 다른 화면으로 이동 */}
+        {/* 반려동물 자가진단 → SelfCheck로 이동 */}
         <DiagnosisCard
-          title="소변키트 진단"
-          description="소변키트 촬영을 통해 10종 항목 진단"
+          title={'반려동물\n자가진단'}
+          description="반려동물의 상태를 분석해 이상 징후 점수 제공"
           image={urineDog}
           imageType="urine"
-          onPress={() => navigation.navigate('UrineDiagnosis')}    // ★ 이동 추가
+          onPress={() => navigation.navigate('SelfCheck')}
         />
 
       </View>

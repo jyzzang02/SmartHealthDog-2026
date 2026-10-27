@@ -44,6 +44,7 @@ import HealthDetailScreen from './src/screens/HealthDetailScreen';
 import BreedDetailScreen from './src/screens/BreedDetailScreen';
 import PetQnaSelectScreen from './src/screens/PetQnaSelectScreen';
 import PetQnaListScreen from './src/screens/PetQnaListScreen';
+import SelfCheckScreen from './src/screens/SelfCheckScreen';
 import type { HealthSummary } from './src/types/health';
 import type { PetSpecies } from './src/data/petQna';
 
@@ -170,6 +171,8 @@ export type RootStackParamList = {
   PetQnaList: {
     species: PetSpecies;
   };
+
+  SelfCheck: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -260,6 +263,9 @@ function AppNavigator() {
         {/* Pet Q&A */}
         <Stack.Screen name="PetQnaSelect" component={PetQnaSelectScreen} />
         <Stack.Screen name="PetQnaList" component={PetQnaListScreen} />
+
+        {/* Self Check */}
+        <Stack.Screen name="SelfCheck" component={SelfCheckScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
