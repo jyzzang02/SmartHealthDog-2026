@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import {
+  BackHandler,
   View,
   Text,
   StyleSheet,
@@ -8,7 +9,8 @@ import {
   TouchableOpacity,
   Image,
 } from "react-native";
-import { NavigationProp, useNavigation } from "@react-navigation/native";
+import { NavigationProp, useFocusEffect, useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import CustomButton from "../components/CustomButton";
 import { RootStackParamList } from "../../App";
 
@@ -332,18 +334,18 @@ const QUIZ_QUESTIONS: Question[] = [
 ];
 
 const QUESTION_IMAGES = [
-  require("../assets/game_q1.png"),
-  require("../assets/game_q2.png"),
-  require("../assets/game_q3.png"),
-  require("../assets/game_q4.png"),
-  require("../assets/game_q5.png"),
-  require("../assets/game_q6.png"),
-  require("../assets/game_q7.png"),
-  require("../assets/game_q8.png"),
-  require("../assets/game_q9.png"),
-  require("../assets/game_q10.png"),
-  require("../assets/game_q11.png"),
-  require("../assets/game_q12.png"),
+  require("../assets/game_q1_hd.png"),
+  require("../assets/game_q2_hd.png"),
+  require("../assets/game_q3_hd.png"),
+  require("../assets/game_q4_hd.png"),
+  require("../assets/game_q5_hd.png"),
+  require("../assets/game_q6_hd.png"),
+  require("../assets/game_q7_hd.png"),
+  require("../assets/game_q8_hd.png"),
+  require("../assets/game_q9_hd.png"),
+  require("../assets/game_q10_hd.png"),
+  require("../assets/game_q11_hd.png"),
+  require("../assets/game_q12_hd_v2.png"),
 ];
 
 const initialScores: Record<BreedInfo["id"], number> = BREED_RESULTS.reduce(
@@ -356,26 +358,21 @@ const initialScores: Record<BreedInfo["id"], number> = BREED_RESULTS.reduce(
 
 const GameScreen = () => {
   const navigation = useNavigation<NavigationProp<RootStackParamList>>();
+  const insets = useSafeAreaInsets();
   const [step, setStep] = useState<"intro" | "quiz" | "result">("intro");
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [scores, setScores] = useState<Record<BreedInfo["id"], number>>(initialScores);
+  const [answers, setAnswers] = useState<Array<"A" | "B">>([]);
 
   const currentQuestion = QUIZ_QUESTIONS[currentIndex];
 
   const handleStart = () => {
     setStep("quiz");
     setCurrentIndex(0);
-    setScores({ ...initialScores });
+    setAnswers([]);
   };
 
   const handleAnswer = (choice: "A" | "B") => {
-    const updatedScores = { ...scores };
-
-    currentQuestion.options[choice].score.forEach((breedId) => {
-      updatedScores[breedId] = (updatedScores[breedId] || 0) + 1;
-    });
-
-    setScores(updatedScores);
+    setAnswers((previous) => [...previous.slice(0, currentIndex), choice]);
 
     if (currentIndex + 1 < QUIZ_QUESTIONS.length) {
       setCurrentIndex((prev) => prev + 1);
@@ -387,13 +384,37 @@ const GameScreen = () => {
   const handleRestart = () => {
     setStep("intro");
     setCurrentIndex(0);
-    setScores({ ...initialScores });
+    setAnswers([]);
   };
 
   const handleGoHome = () => {
     navigation.navigate("Main" as never);
   };
 
+  useFocusEffect(useCallback(() => {
+    if (step !== "quiz") return;
+
+    const subscription = BackHandler.addEventListener("hardwareBackPress", () => {
+      if (currentIndex === 0) {
+        setStep("intro");
+      } else {
+        setCurrentIndex((previous) => previous - 1);
+      }
+      return true;
+    });
+
+    return () => subscription.remove();
+  }, [step, currentIndex]));
+
+  const scores = useMemo(() => {
+    const totals = { ...initialScores };
+    answers.forEach((choice, index) => {
+      QUIZ_QUESTIONS[index].options[choice].score.forEach((breedId) => {
+        totals[breedId] += 1;
+      });
+    });
+    return totals;
+  }, [answers]);
   const topBreed = useMemo(() => {
     const highest = Object.entries(scores).reduce(
       (acc, [breedId, value]) => {
@@ -411,7 +432,7 @@ const GameScreen = () => {
   return (
     <SafeAreaView style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.contentContainer}
+        contentContainerStyle={[styles.contentContainer, step !== "intro" && { paddingBottom: 24 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         {step === "intro" && (
@@ -427,7 +448,7 @@ const GameScreen = () => {
             </Text>
 
             <Image
-              source={require("../assets/game_title.png")}
+              source={require("../assets/game_title_hd.png")}
               style={styles.heroImage}
               resizeMode="contain"
             />
@@ -457,7 +478,9 @@ const GameScreen = () => {
             </View>
 
             <View style={styles.quizContent}>
-              <Text style={styles.questionText}>{currentQuestion.question}</Text>
+              <View style={styles.questionHeader}>
+                <Text style={styles.questionText}>{currentQuestion.question}</Text>
+              </View>
 
               <Image
                 source={QUESTION_IMAGES[currentIndex]}
@@ -613,6 +636,11 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     paddingTop: 10,
   },
+  questionHeader: {
+    minHeight: 96,
+    justifyContent: "center",
+    marginBottom: 40,
+  },
   questionText: {
     fontSize: 24,
     fontWeight: "700",
@@ -620,13 +648,13 @@ const styles = StyleSheet.create({
     lineHeight: 32,
     fontFamily: "Pretendard-Bold",
     textAlign: "center",
-    marginBottom: 90,
   },
   optionList: {
     width: "100%",
     alignItems: "center",
   },
   optionButton: {
+    minHeight: 72,
     borderWidth: 1,
     borderColor: "#E1E1E1",
     borderRadius: 12,
