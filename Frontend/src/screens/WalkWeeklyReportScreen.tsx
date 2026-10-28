@@ -219,8 +219,12 @@ export default function WalkWeeklyReportScreen() {
         <View style={[styles.card, styles.cardGraph]}>
           <Text style={styles.cardTitle}>
             지난주 대비 산책 거리 {' '}
-            <Text style={styles.highlightText}>{distancePct === null || distancePct === undefined ? '-' : `${Math.round(Math.abs(distancePct))}%`}</Text>{' '}
-            {distancePct === null || distancePct === undefined ? '비교 불가' : distancePct >= 0 ? '증가' : '감소'}
+            {selectedSummary?.previousWeekSummary?.totalWalks === 0 ? '기록 없음' : (
+              <>
+                <Text style={styles.highlightText}>{distancePct === null || distancePct === undefined ? '-' : `${Math.round(Math.abs(distancePct))}%`}</Text>{' '}
+                {distancePct === null || distancePct === undefined ? '비교 불가' : distancePct >= 0 ? '증가' : '감소'}
+              </>
+            )}
           </Text>
 
           <View style={styles.graphContainer}>
