@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { healthStore } from '../store/healthStore';
 import { CONDITION_COLORS } from '../types/health';
 
@@ -11,6 +12,7 @@ type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckResult'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckResult'>;
 
 const HealthCheckResultScreen = () => {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { petId, petName, summary } = route.params;
@@ -27,7 +29,7 @@ const HealthCheckResultScreen = () => {
   return (
     <View style={styles.screen}>
       {/* NavBar */}
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { height: 56 + insets.top, paddingTop: insets.top }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
           <Image
             source={require('../assets/icon_navBack.png')}
@@ -70,7 +72,7 @@ const HealthCheckResultScreen = () => {
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={styles.bottomBtns}>
+      <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity style={styles.editBtn} onPress={() => navigation.goBack()}>
           <Text style={styles.editBtnText}>수정하기</Text>
         </TouchableOpacity>

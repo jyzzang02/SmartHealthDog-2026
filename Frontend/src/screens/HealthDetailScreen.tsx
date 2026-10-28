@@ -4,6 +4,7 @@ import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/nativ
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import { CONDITION_COLORS } from '../types/health';
@@ -70,6 +71,7 @@ const mapGenderSuffix = (sex?: string) => {
 };
 
 const HealthDetailScreen = () => {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { petId, petName } = route.params;
@@ -122,7 +124,7 @@ const HealthDetailScreen = () => {
   return (
     <View style={styles.screen}>
       {/* NavBar */}
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { height: 56 + insets.top, paddingTop: insets.top }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
           <Image source={require('../assets/icon_navBack.png')} style={styles.backIcon} />
           <Text style={styles.navTitle}>건강 상세</Text>
