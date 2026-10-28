@@ -6,7 +6,8 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Modal
+  Modal,
+  useWindowDimensions
 } from 'react-native';
 
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
@@ -26,12 +27,17 @@ import type { HealthSummary } from '../types/health';
 
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
+const selfCheckDog = require('../assets/selfCheckDog.png');
 
 const emptyHospitalCenter = { lat: 37.5665, lng: 126.9780 };
 
 const HealthScreen: React.FC = () => {
 
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { width: screenWidth } = useWindowDimensions();
+  // 진단 카드 폭/간격: 기존 2열 배치(48% / 4%)와 동일하게 유지
+  const cardWidth = (screenWidth - 40) * 0.48;
+  const cardGap = (screenWidth - 40) * 0.04;
 
   const scrollRef = useRef<ScrollView>(null);
   useTabScrollToTop(scrollRef);
@@ -88,27 +94,43 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       {/* 진단 기능 버튼 */}
       {/* ============================ */}
-      <View style={styles.cardRow}>
-        
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={[styles.cardRow, { gap: cardGap }]}
+      >
+
         {/* 안구질환 진단 → EyeDiagnosis로 이동 */}
         <DiagnosisCard
           title="안구질환 진단"
           description="강아지, 고양이의 안구 질환을 간단하게 진단"
           image={eyeDog}
           imageType="eye"
+          style={{ width: cardWidth }}
           onPress={() => navigation.navigate('EyeDiagnosis')}   // ★ 이동 추가
+        />
+
+        {/* 소변키트 진단 → 다른 화면으로 이동 */}
+        <DiagnosisCard
+          title="소변키트 진단"
+          description="소변키트 촬영을 통해 10종 항목 진단"
+          image={urineDog}
+          imageType="urine"
+          style={{ width: cardWidth }}
+          onPress={() => navigation.navigate('UrineDiagnosis')}    // ★ 이동 추가
         />
 
         {/* 반려동물 자가진단 → SelfCheck로 이동 */}
         <DiagnosisCard
           title={'반려동물\n자가진단'}
           description="반려동물의 상태를 분석해 이상 징후 점수 제공"
-          image={urineDog}
-          imageType="urine"
+          image={selfCheckDog}
+          imageType="eye"
+          style={{ width: cardWidth }}
           onPress={() => navigation.navigate('SelfCheck')}
         />
 
-      </View>
+      </ScrollView>
 
       {/* ============================ */}
       {/* 보건 정보 */}
@@ -233,7 +255,8 @@ const styles = StyleSheet.create({
 
   subtitle: { color: '#000', fontSize: 32, fontWeight: '600', lineHeight: 40, marginTop: 2 },
 
-  cardRow: { flexDirection: 'row', paddingHorizontal: 20, marginTop: 32, justifyContent: 'space-between' },
+  // 가로 스크롤 시 카드 그림자가 잘리지 않도록 상하 여백 확보 (marginTop으로 기존 간격 보정)
+  cardRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 8, marginTop: 24 },
 
   healthInfoCard: {
     backgroundColor: '#FFFFFF',
