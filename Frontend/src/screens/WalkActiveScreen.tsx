@@ -1019,6 +1019,7 @@ export default function WalkActiveScreen() {
     try {
       await finishWalkWithPendingLight(petId, walkId, {
         end_time: snapshot.endTime,
+        active_duration_seconds: snapshot.elapsedSeconds,
         distance: snapshot.distanceKm,
         path_coordinates: snapshot.pathCoordinates,
       }, Platform.OS === 'android' ? walkLocationTrackingModule : undefined);

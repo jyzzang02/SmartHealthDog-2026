@@ -1122,8 +1122,8 @@ const styles = StyleSheet.create({
     borderStyle: 'dashed',
   },
   urineGuideBox: {
-    width: 260,
-    height: 180,
+    width: 180,
+    height: 260,
     borderRadius: 18,
     borderWidth: 2,
     borderColor: '#0081D5',

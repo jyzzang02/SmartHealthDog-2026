@@ -1,5 +1,6 @@
 import { endPetWalk, getMyThisWeekWalks, getPetWalks, getWalkDetail } from './walks';
 import { parseWalkPathCoordinates } from '../utils/walkPath';
+import { createWalkTimer, pauseWalkTimer, resumeWalkTimer, completeWalkTimer } from '../utils/walkTimer';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 const coordinates: Array<[number, number]> = [[37.5, 126.9], [37.501, 126.901]];
@@ -45,11 +46,19 @@ it.each([coordinates, JSON.stringify(coordinates), '[]', null])('normalizes deta
   const result = await getWalkDetail(81);
   expect(result.path_coordinates).toEqual(value === null || value === '[]' ? [] : coordinates);
 });
-it('keeps the end-walk request contract and normalizes only the returned path', async () => {
-  respond({ walk: { walk_id: 81, path_coordinates: JSON.stringify(coordinates) } });
-  const payload = { end_time: '2026-10-21T10:00:00Z', distance: 1, path_coordinates: coordinates };
+it('sends active seconds excluding a pause while preserving the actual end time', async () => {
+  const startedAt = Date.parse('2026-10-21T09:45:00Z');
+  const paused = pauseWalkTimer(createWalkTimer(startedAt), startedAt + 5 * 60_000);
+  const resumed = resumeWalkTimer(paused, startedAt + 10 * 60_000);
+  const completed = completeWalkTimer(resumed, startedAt + 15 * 60_000);
+  respond({ walk: { walk_id: 81, duration: 600, path_coordinates: JSON.stringify(coordinates) } });
+  const payload = { end_time: new Date(completed.endedAtMs).toISOString(),
+    active_duration_seconds: completed.elapsedSeconds, distance: 1, path_coordinates: coordinates };
   const result = await endPetWalk(19, 81, payload);
   expect(result.path_coordinates).toEqual(coordinates);
+  expect(result.duration).toBe(600);
+  expect(payload.active_duration_seconds).toBe(600);
+  expect(payload.end_time).toBe('2026-10-21T10:00:00.000Z');
   expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
   expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual(payload);
 });

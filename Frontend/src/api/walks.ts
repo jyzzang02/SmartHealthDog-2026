@@ -68,6 +68,7 @@ export interface StartWalkRequest {
 
 export interface EndWalkRequest {
   end_time: string;
+  active_duration_seconds?: number;
   distance: number;
   path_coordinates: WalkCoordinate[];
 }
