@@ -515,6 +515,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       navigation.navigate(resultRouteName, {
         petId,
         ...(submissionId ? { submissionId } : {}),
+        petName: selectedPet?.name,
         origin: 'upload',
       });
     } catch (error) {
@@ -543,6 +544,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     requestDiagnosis,
     resultRouteName,
     resolveLatestSubmissionId,
+    selectedPet?.name,
     selectedPetId,
     type,
   ]);
@@ -599,6 +601,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       navigation.navigate(resultRouteName, {
         petId,
         ...(submissionId ? { submissionId } : {}),
+        petName: selectedPet?.name,
         origin: 'upload',
       });
     } catch (error) {
@@ -623,6 +626,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     requestDiagnosis,
     resultRouteName,
     resolveLatestSubmissionId,
+    selectedPet?.name,
     selectedPetId,
     type,
   ]);

@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useRef } from 'react';
 import {
+  Animated,
   View,
   Text,
   Image,
@@ -10,7 +11,8 @@ import {
   useWindowDimensions
 } from 'react-native';
 
-import { useNavigation, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useFocusEffect, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 
@@ -38,8 +40,23 @@ const HealthScreen: React.FC = () => {
   // 진단 카드 폭/간격: 기존 2열 배치(48% / 4%)와 동일하게 유지
   const cardWidth = (screenWidth - 40) * 0.48;
   const cardGap = (screenWidth - 40) * 0.04;
+  const cardScrollX = useRef(new Animated.Value(0)).current;
+  const cardScrollRange = Math.max(3 * cardWidth + 2 * cardGap + 40 - screenWidth, 1);
 
+  const route = useRoute<RouteProp<{ '건강': { openHospitalSearch?: boolean } | undefined }, '건강'>>();
   const scrollRef = useRef<ScrollView>(null);
+  const hospitalY = useRef<number | null>(null);
+  const [petsReady, setPetsReady] = useState(false);
+  const moveToHospital = useCallback(() => {
+    if (petsReady && route.params?.openHospitalSearch && hospitalY.current !== null) {
+      scrollRef.current?.scrollTo({ y: hospitalY.current, animated: false });
+      navigation.setParams({ openHospitalSearch: undefined } as never);
+    }
+  }, [navigation, petsReady, route.params?.openHospitalSearch]);
+  useFocusEffect(useCallback(() => {
+    const frame = requestAnimationFrame(moveToHospital);
+    return () => cancelAnimationFrame(frame);
+  }, [moveToHospital]));
   useTabScrollToTop(scrollRef);
 
   const [showPetModal, setShowPetModal] = useState(false);
@@ -66,7 +83,8 @@ const HealthScreen: React.FC = () => {
           if (!mounted) return;
           setPetList([]);
           setSelectedPetId(null);
-        });
+        })
+        .finally(() => { if (mounted) setPetsReady(true); });
       setHealthData(healthStore.getAll());
       return () => { mounted = false; };
     }, [])
@@ -94,9 +112,11 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       {/* 진단 기능 버튼 */}
       {/* ============================ */}
-      <ScrollView
+      <Animated.ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { x: cardScrollX } } }], { useNativeDriver: true })}
+        scrollEventThrottle={16}
         contentContainerStyle={[styles.cardRow, { gap: cardGap }]}
       >
 
@@ -130,7 +150,12 @@ const HealthScreen: React.FC = () => {
           onPress={() => navigation.navigate('SelfCheck')}
         />
 
-      </ScrollView>
+      </Animated.ScrollView>
+      <View style={styles.cardScrollTrack} accessible={false}>
+        <Animated.View style={[styles.cardScrollThumb, { transform: [{ translateX: cardScrollX.interpolate({
+          inputRange: [0, cardScrollRange], outputRange: [0, 40], extrapolate: 'clamp',
+        }) }] }]} />
+      </View>
 
       {/* ============================ */}
       {/* 보건 정보 */}
@@ -189,7 +214,7 @@ const HealthScreen: React.FC = () => {
       {/* ============================ */}
       {/* 동물병원 검색 */}
       {/* ============================ */}
-      <View style={styles.whiteSection}>
+      <View style={styles.whiteSection} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
         <HospitalSearchControls onSearch={hospitalSearch.search} loading={hospitalSearch.loading} />
 
@@ -257,6 +282,8 @@ const styles = StyleSheet.create({
 
   // 가로 스크롤 시 카드 그림자가 잘리지 않도록 상하 여백 확보 (marginTop으로 기존 간격 보정)
   cardRow: { flexDirection: 'row', paddingHorizontal: 20, paddingVertical: 8, marginTop: 24 },
+  cardScrollTrack: { width: 72, height: 4, borderRadius: 2, backgroundColor: '#DDE3E8', alignSelf: 'center', marginTop: 4 },
+  cardScrollThumb: { width: 32, height: 4, borderRadius: 2, backgroundColor: '#0081D5' },
 
   healthInfoCard: {
     backgroundColor: '#FFFFFF',

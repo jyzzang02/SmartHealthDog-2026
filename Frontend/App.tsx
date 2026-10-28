@@ -8,6 +8,7 @@
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -71,7 +72,7 @@ export type RootStackParamList = {
     profileImage?: string | null;
   };
 
-  Main: undefined;
+  Main: NavigatorScreenParams<{ '건강': { openHospitalSearch?: boolean } | undefined }> | undefined;
 
   EyeDiagnosis: undefined;
   EyeCamera: undefined;
