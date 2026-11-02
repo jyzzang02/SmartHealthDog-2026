@@ -81,7 +81,8 @@ const buildAuthHeaders = (accessToken: string) => ({
 
 const authorizedFetch = async (
   input: string,
-  init?: RequestInit
+  init?: RequestInit,
+  preserveRefreshError = false
 ): Promise<Response> => {
   const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
@@ -108,7 +109,8 @@ const authorizedFetch = async (
     accessToken = await refreshSessionAccessToken(session, accessToken);
     assertAuthSession(session);
     response = await doFetch(accessToken);
-  } catch {
+  } catch (error) {
+    if (preserveRefreshError) throw error;
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
 
@@ -119,10 +121,10 @@ const authorizedFetch = async (
   return response;
 };
 
-export const getMyProfile = async (): Promise<UserProfile> => {
+export const getMyProfile = async (options?: { preserveRefreshError?: boolean }): Promise<UserProfile> => {
   const response = await authorizedFetch(`${API_BASE_URL}/api/users/me/profile`, {
     method: 'GET',
-  });
+  }, options?.preserveRefreshError);
 
   if (!response.ok) {
     const message = await getResponseErrorMessage(

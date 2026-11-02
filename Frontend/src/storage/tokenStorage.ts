@@ -78,28 +78,34 @@ export const storeRefreshedAuthTokens = (
   assertAuthSession(session);
 });
 
-export const getStoredRefreshToken = async () => {
+export const getStoredRefreshToken = async (strict = false) => {
   if (hasMemorySession) return memoryStore.refreshToken ?? null;
   const storage = getStorage();
   if (storage) {
     try {
       const token = await storage.getItem(REFRESH_TOKEN_KEY);
       return hasMemorySession ? memoryStore.refreshToken ?? null : token;
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
     }
+  } else if (strict) {
+    throw new Error('Token storage unavailable');
   }
   return memoryStore.refreshToken ?? null;
 };
 
-export const getStoredAccessToken = async () => {
+export const getStoredAccessToken = async (strict = false) => {
   if (hasMemorySession) return memoryStore.accessToken ?? null;
   const storage = getStorage();
   if (storage) {
     try {
       const token = await storage.getItem(ACCESS_TOKEN_KEY);
       return hasMemorySession ? memoryStore.accessToken ?? null : token;
-    } catch {
+    } catch (error) {
+      if (strict) throw error;
     }
+  } else if (strict) {
+    throw new Error('Token storage unavailable');
   }
   return memoryStore.accessToken ?? null;
 };

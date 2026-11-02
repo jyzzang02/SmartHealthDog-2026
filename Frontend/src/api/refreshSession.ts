@@ -4,6 +4,8 @@ import {
   storeRefreshedAuthTokens,
 } from '../storage/tokenStorage';
 
+export class MissingRefreshTokenError extends Error {}
+
 const pendingRefreshes = new Map<symbol, Promise<string>>();
 
 export const refreshSessionAccessToken = (
@@ -22,9 +24,9 @@ export const refreshSessionAccessToken = (
     if (currentAccessToken && currentAccessToken !== rejectedAccessToken) {
       return currentAccessToken;
     }
-    const refreshToken = await getStoredRefreshToken();
+    const refreshToken = await getStoredRefreshToken(true);
     assertAuthSession(session);
-    if (!refreshToken) throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+    if (!refreshToken) throw new MissingRefreshTokenError('세션이 만료되었습니다. 다시 로그인해 주세요.');
     const tokens = await refreshAuthToken(refreshToken);
     await storeRefreshedAuthTokens(tokens, refreshToken, session);
     assertAuthSession(session);

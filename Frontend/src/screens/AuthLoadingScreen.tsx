@@ -1,13 +1,16 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   ActivityIndicator,
   StyleSheet,
   Text,
+  TouchableOpacity,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { getStoredAccessToken, clearAuthTokens } from '../storage/tokenStorage';
+import { getStoredAccessToken, clearAuthTokens, getAuthSession, assertAuthSession } from '../storage/tokenStorage';
+import { isApiError } from '../api/auth';
+import { MissingRefreshTokenError } from '../api/refreshSession';
 import { getMyProfile } from '../api/users';
 
 type AuthLoadingNavigationProp = NativeStackNavigationProp<any>;
@@ -15,48 +18,65 @@ type AuthLoadingNavigationProp = NativeStackNavigationProp<any>;
 const AuthLoadingScreen: React.FC = () => {
   const navigation = useNavigation<AuthLoadingNavigationProp>();
 
-  useEffect(() => {
-    const bootstrapAsync = async () => {
-      try {
-        const accessToken = await getStoredAccessToken();
+  const [failed, setFailed] = useState(false);
+  const mounted = useRef(true);
+  const inFlight = useRef(false);
 
-        if (!accessToken) {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-          return;
-        }
+  const bootstrapAsync = useCallback(async () => {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setFailed(false);
+    const session = getAuthSession();
 
-        try {
-          await getMyProfile();
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Main' }],
-          });
-        } catch {
-          await clearAuthTokens();
-          navigation.reset({
-            index: 0,
-            routes: [{ name: 'Login' }],
-          });
-        }
-      } catch {
-        navigation.reset({
-          index: 0,
-          routes: [{ name: 'Login' }],
-        });
+    try {
+      const accessToken = await getStoredAccessToken(true);
+      assertAuthSession(session);
+      if (!mounted.current) return;
+      if (!accessToken) {
+        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+        return;
       }
-    };
 
-    bootstrapAsync();
+      await getMyProfile({ preserveRefreshError: true });
+      assertAuthSession(session);
+      if (mounted.current) navigation.reset({ index: 0, routes: [{ name: 'Main' }] });
+    } catch (error) {
+      if (!mounted.current) return;
+      try { assertAuthSession(session); } catch { return; }
+      const expired = error instanceof MissingRefreshTokenError ||
+        (isApiError(error) && error.status === 401 && error.codes.includes('INVALID_JWT'));
+      if (expired) {
+        await clearAuthTokens();
+        if (mounted.current) navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      } else {
+        setFailed(true);
+      }
+    } finally {
+      inFlight.current = false;
+    }
   }, [navigation]);
 
+  useEffect(() => {
+    mounted.current = true;
+    bootstrapAsync();
+    return () => { mounted.current = false; };
+  }, [bootstrapAsync]);
   return (
     <View style={styles.container}>
       <View style={styles.inner}>
-        <Text style={styles.loadingText}>앱을 시작하는 중입니다...</Text>
-        <ActivityIndicator size="large" color="#0081D5" style={styles.spinner} />
+        {failed ? (
+          <>
+            <Text style={styles.loadingText}>연결을 확인한 후 다시 시도해 주세요.</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={bootstrapAsync} accessibilityRole="button">
+              <Text style={styles.retryText}>다시 시도</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <Text style={styles.loadingText}>앱을 시작하는 중입니다...</Text>
+            <ActivityIndicator size="large" color="#0081D5" style={styles.spinner} />
+          </>
+        )}
       </View>
     </View>
   );
@@ -79,6 +99,8 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     fontWeight: '600',
   },
+  retryButton: { backgroundColor: '#0081D5', borderRadius: 10, paddingHorizontal: 24, paddingVertical: 12, marginTop: 10 },
+  retryText: { color: '#FFFFFF', fontSize: 16, fontWeight: '600' },
   spinner: {
     marginTop: 10,
   },
