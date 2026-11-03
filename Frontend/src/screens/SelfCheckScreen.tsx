@@ -1,15 +1,18 @@
-import React, { useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useRoute } from '@react-navigation/native';
+import type { RouteProp } from '@react-navigation/native';
+import { getMyPets, PetListItem } from '../api/pets';
+import { createSelfCheck, getSelfCheck, SelfCheckRecord } from '../api/selfCheck';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { SPECIES_META, PetSpecies } from '../data/petQna';
-import { SELF_CHECK, SCALE, STAGES, STAGE_BAR_COLOR, judgeArea, CheckStage } from '../data/selfCheck';
+import { SELF_CHECK, SCALE, STAGES, STAGE_BAR_COLOR } from '../data/selfCheck';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'SelfCheck'>;
 
-const SPECIES_LIST: PetSpecies[] = ['dog', 'cat'];
+
 
 // 응답 버튼 선택 시 색상 (없음 / 가끔 / 반복 / 심함)
 const SCALE_TONE = [
@@ -22,11 +25,48 @@ const SCALE_TONE = [
 const SelfCheckScreen = () => {
   const navigation = useNavigation<NavProp>();
   const scrollRef = useRef<ScrollView>(null);
+  const route = useRoute<RouteProp<RootStackParamList, 'SelfCheck'>>();
+  const [pets, setPets] = useState<PetListItem[]>([]);
+  const [petId, setPetId] = useState<number | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [savedRecord, setSavedRecord] = useState<SelfCheckRecord | null>(null);
+  const busy = useRef(false);
+  const mounted = useRef(true);
+  const [reload, setReload] = useState(0);
 
   const [species, setSpecies] = useState<PetSpecies>('dog');
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number[]>>({});
   const [showResult, setShowResult] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    mounted.current = true;
+    setLoading(true);
+    setLoadError(false);
+    (async () => {
+      try {
+        const all = await getMyPets();
+        const supported = all.filter(pet => typeof pet?.species === 'string' && ['dog', 'cat'].includes(pet.species.toLowerCase()));
+        const selected = supported.find(pet => pet.id === route.params?.petId) ?? supported[0];
+        if (!active) return;
+        setPets(supported);
+        setPetId(selected?.id ?? null);
+        if (selected) setSpecies(selected.species.toLowerCase() as PetSpecies);
+        if (route.params?.recordId && selected) {
+          const record = await getSelfCheck(selected.id, route.params.recordId);
+          if (!active) return;
+          setSavedRecord(record);
+          setShowResult(true);
+        }
+      } catch {
+        if (active) setLoadError(true);
+      } finally { if (active) setLoading(false); }
+    })();
+    return () => { active = false; mounted.current = false; };
+  }, [route.params?.petId, route.params?.recordId, reload]);
 
   const areas = SELF_CHECK[species];
   const area = areas[step];
@@ -38,12 +78,13 @@ const SelfCheckScreen = () => {
 
   const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: false });
 
-  const changeSpecies = (next: PetSpecies) => {
-    if (next === species) return;
-    setSpecies(next);
+  const changePet = (pet: PetListItem) => {
+    if (saving) return;
+    setPetId(pet.id);
+    setSpecies(pet.species.toLowerCase() as PetSpecies);
     setAnswers({});
+    setSavedRecord(null);
   };
-
   const setAnswer = (index: number, value: number) =>
     setAnswers((prev) => {
       const next = [...(prev[area.id] ?? [])];
@@ -51,29 +92,45 @@ const SelfCheckScreen = () => {
       return { ...prev, [area.id]: next };
     });
 
-  const goNext = () => {
-    if (isLast) setShowResult(true);
-    else setStep(step + 1);
-    scrollToTop();
+  const goNext = async () => {
+    if (busy.current || petId === null) return;
+    if (!isLast) { setStep(step + 1); scrollToTop(); return; }
+    if (!areas.every(item => item.questions.every((_, i) => Number.isInteger(answers[item.id]?.[i]) && answers[item.id][i] >= 0 && answers[item.id][i] <= 3))) return;
+    busy.current = true;
+    setSaving(true);
+    try {
+      const record = await createSelfCheck(petId, species, answers);
+      if (mounted.current) { setSavedRecord(record); setShowResult(true); scrollToTop(); }
+    } catch (error) {
+      if (mounted.current) Alert.alert('저장 확인 필요', `${error instanceof Error ? error.message : '저장하지 못했습니다.'}\n응답을 받지 못했더라도 저장됐을 수 있습니다. 과거 기록을 확인한 후 다시 시도해 주세요.`);
+    } finally {
+      busy.current = false;
+      if (mounted.current) setSaving(false);
+    }
   };
-
   const handleBack = () => {
-    if (showResult) setShowResult(false);
+    if (saving) return;
+    if (route.params?.recordId) { navigation.goBack(); return; }
+    if (showResult) { setShowResult(false); setSavedRecord(null); }
     else if (step > 0) setStep(step - 1);
     else navigation.goBack();
     scrollToTop();
   };
 
   const reset = () => {
+    if (route.params?.recordId) { navigation.push('SelfCheck', { petId: petId ?? undefined }); return; }
+    setSavedRecord(null);
     setAnswers({});
     setStep(0);
     setShowResult(false);
     scrollToTop();
   };
 
-  const results = areas.map((item) => ({ area: item, ...judgeArea(item, answers[item.id] ?? []) }));
-  const overallStage = Math.max(...results.map((result) => result.stage)) as CheckStage;
-  const overall = STAGES[overallStage];
+  const results = savedRecord?.areas.map(item => ({
+    area: { id: item.areaKey, title: item.areaTitle }, score: item.score, stage: item.stage, urgentHit: item.urgentHit,
+    flagged: item.answers.filter(answer => route.params?.recordId || answer.answerValue > 0).map(answer => ({ q: answer.questionText, value: answer.answerValue, weight: answer.questionWeight })),
+  })) ?? [];
+  const overallStage = savedRecord?.overallStage ?? 1;  const overall = STAGES[overallStage];
   const attentionAreas = results.filter((result) => result.stage >= 2).map((result) => result.area.title);
 
   return (
@@ -86,7 +143,13 @@ const SelfCheckScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {!showResult ? (
+      {petId !== null && <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('SelfCheckHistory', { petId, petName: pets.find(pet => pet.id === petId)?.name ?? '' })} disabled={saving}>
+        <Text style={styles.historyText}>과거 자가진단 기록</Text>
+      </TouchableOpacity>}
+      {loading || loadError || petId === null ? <View style={styles.content}>
+        <Text>{loading ? '불러오는 중입니다.' : loadError ? '정보를 불러오지 못했습니다.' : '자가진단할 반려동물을 먼저 등록해주세요.'}</Text>
+        {!loading && <TouchableOpacity onPress={() => setReload(value => value + 1)}><Text style={styles.historyText}>다시 시도</Text></TouchableOpacity>}
+      </View> : !showResult ? (
         <>
           {/* 진행 상태 */}
           <View style={styles.progressBox}>
@@ -116,21 +179,11 @@ const SelfCheckScreen = () => {
           >
             {step === 0 && (
               <View style={styles.speciesRow}>
-                {SPECIES_LIST.map((item) => {
-                  const selected = species === item;
-                  return (
-                    <TouchableOpacity
-                      key={item}
-                      style={[styles.speciesChip, selected && styles.speciesChipActive]}
-                      activeOpacity={0.8}
-                      onPress={() => changeSpecies(item)}
-                    >
-                      <Image source={SPECIES_META[item].image} style={styles.speciesChipImage} />
-                      <Text style={[styles.speciesChipText, selected && styles.speciesChipTextActive]}>
-                        {SPECIES_META[item].label}
-                      </Text>
-                    </TouchableOpacity>
-                  );
+                {pets.map((item) => {
+                  const selected = petId === item.id;
+                  return <TouchableOpacity key={item.id} style={[styles.speciesChip, selected && styles.speciesChipActive]} onPress={() => changePet(item)}>
+                    <Text style={[styles.speciesChipText, selected && styles.speciesChipTextActive]}>{item.name}</Text>
+                  </TouchableOpacity>;
                 })}
               </View>
             )}
@@ -159,7 +212,7 @@ const SelfCheckScreen = () => {
                             selected && { backgroundColor: tone.bg, borderColor: tone.border },
                           ]}
                           activeOpacity={0.8}
-                          onPress={() => setAnswer(index, value)}
+                          disabled={saving} onPress={() => setAnswer(index, value)}
                         >
                           <Text style={[styles.scaleBtnText, selected && { color: tone.text }]}>{label}</Text>
                         </TouchableOpacity>
@@ -176,11 +229,11 @@ const SelfCheckScreen = () => {
             <TouchableOpacity
               style={[styles.primaryBtn, remaining > 0 && styles.primaryBtnDisabled]}
               activeOpacity={0.8}
-              disabled={remaining > 0}
+              disabled={remaining > 0 || saving}
               onPress={goNext}
             >
               <Text style={styles.primaryBtnText}>
-                {remaining > 0
+                {saving ? '저장 중입니다...' : remaining > 0
                   ? `${remaining}개 문항이 남았어요`
                   : isLast
                     ? '결과 확인하기'
@@ -196,6 +249,7 @@ const SelfCheckScreen = () => {
           contentContainerStyle={styles.resultContent}
           showsVerticalScrollIndicator={false}
         >
+          <Text style={styles.historyText}>{pets.find(pet => pet.id === petId)?.name} · {savedRecord ? new Date(savedRecord.createdAt).toLocaleString('ko-KR') : ''}</Text>
           {/* 종합 결과 */}
           <View style={[styles.heroCard, { backgroundColor: overall.bg }]}>
             <View style={[styles.heroBadge, { backgroundColor: STAGE_BAR_COLOR[overallStage] }]}>
@@ -272,7 +326,7 @@ const SelfCheckScreen = () => {
             <TouchableOpacity
               style={[styles.primaryBtn, styles.resultPrimaryBtn]}
               activeOpacity={0.8}
-              onPress={() => navigation.goBack()}
+              onPress={() => overallStage >= 3 ? navigation.navigate('Main', { screen: '건강', params: { openHospitalSearch: true } }) : navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: '건강' } }] })}
             >
               <Text style={styles.primaryBtnText}>
                 {overallStage >= 3 ? '주변 동물병원 찾기' : '건강탭으로'}
@@ -288,6 +342,8 @@ const SelfCheckScreen = () => {
 export default SelfCheckScreen;
 
 const styles = StyleSheet.create({
+  historyButton: { alignSelf: 'flex-start', marginHorizontal: 20, marginVertical: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#EEF7FD' },
+  historyText: { color: '#0081D5', fontWeight: '600' },
   screen: { flex: 1, backgroundColor: '#fff' },
 
   navBar: {
@@ -314,7 +370,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 24 },
   resultContent: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40 },
 
-  speciesRow: { flexDirection: 'row', gap: 8, marginBottom: 20 },
+  speciesRow: { flexWrap: 'wrap', flexDirection: 'row', gap: 8, marginBottom: 20 },
   speciesChip: {
     flexDirection: 'row',
     alignItems: 'center',
