@@ -49,6 +49,8 @@ export default function HomeScreen() {
         <PetHealthCard pets={pets} loading={petsLoading} />
       </View>
 
+      <View style={styles.bannerSpacer} />
+
       {/* 🔹 divider는 화면 전체폭 */}
       <View style={styles.divider} />
 
@@ -67,21 +69,24 @@ const styles = StyleSheet.create({
   },
   contentWrap: {
     marginHorizontal: 20,
-    marginTop: 20,
+    marginTop: 16,
   },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#000',
-    marginTop: 16,
-    marginBottom: 12,
+    marginTop: 32,
+    marginBottom: 16,
   },
 
+  bannerSpacer: {
+    flex: 1,
+  },
   divider: {
     width: '100%',     
     height: 6,
     backgroundColor: '#F3F4F5',
-    marginTop: 20,
-    marginBottom: 20,
+    marginTop: 12,
+    marginBottom: 12,
   },
 });

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   View,
   Text,
@@ -19,7 +19,7 @@ import type { RootStackParamList } from "../../App";
 import {
   getPetDetail,
   PetListItem,
-  updatePetFull,
+  updatePetPartial,
   deletePet,
   PetGender,
   PetSpecies,
@@ -31,6 +31,8 @@ const PetEditScreen = () => {
   const navigation = useNavigation<any>();
   const route = useRoute<RouteProp<RootStackParamList, "PetEdit">>();
   const { petId } = route.params;
+  const lifecycle = useRef<AbortController | null>(null);
+  const mutationPending = useRef(false);
 
   // 상태 관리
   const [pet, setPet] = useState<PetListItem | null>(null);
@@ -57,9 +59,18 @@ const PetEditScreen = () => {
 
   // 데이터 로드
   useEffect(() => {
+    const controller = new AbortController();
+    lifecycle.current = controller;
+    mutationPending.current = false;
+    setIsLoading(true);
+    setIsSaving(false);
+    setIsDeleting(false);
+    setErrorMessage(null);
+    setSelectedPetImage(null);
     const loadPet = async () => {
       try {
-        const data = await getPetDetail(petId);
+        const data = await getPetDetail(petId, controller.signal);
+        if (controller.signal.aborted) return;
         setPet(data);
         setName(data.name || "");
         setBreed(data.breed || "");
@@ -68,16 +79,17 @@ const PetEditScreen = () => {
         setWeightKg(data.weightKg ? String(data.weightKg) : "");
 
         const bDay = data.birthday || data.birthDate;
-        if (bDay) {
-          setBirthday(new Date(bDay));
-        }
+        const parsedBirthday = bDay ? new Date(bDay) : null;
+        setBirthday(parsedBirthday && Number.isFinite(parsedBirthday.getTime()) ? parsedBirthday : null);
       } catch (err) {
+        if (controller.signal.aborted) return;
         setErrorMessage("반려동물 정보를 불러오지 못했습니다.");
       } finally {
-        setIsLoading(false);
+        if (!controller.signal.aborted) setIsLoading(false);
       }
     };
     loadPet();
+    return () => controller.abort();
   }, [petId]);
 
   // 날짜 포맷팅
@@ -100,6 +112,8 @@ const PetEditScreen = () => {
 
 
   const handleSelectPetImage = () => {
+    const controller = lifecycle.current;
+    if (!controller || controller.signal.aborted || mutationPending.current) return;
     launchImageLibrary(
       {
         mediaType: "photo",
@@ -109,6 +123,7 @@ const PetEditScreen = () => {
         selectionLimit: 1,
       },
       (response) => {
+        if (controller.signal.aborted || mutationPending.current) return;
         if (response.didCancel) return;
         if (response.errorCode) {
           Alert.alert("오류", "이미지를 불러올 수 없습니다.");
@@ -130,29 +145,38 @@ const PetEditScreen = () => {
     );
   };
 
-  const waitForUpdatedImage = async (previousImage?: string) => {
+  const waitForUpdatedImage = async (signal: AbortSignal, previousImage?: string): Promise<boolean> => {
     const previousPath = resolveImageUri(previousImage)?.split("?")[0];
 
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await new Promise<void>((resolve) => setTimeout(resolve, 600));
+      if (signal.aborted) return false;
+      await new Promise<void>((resolve) => {
+        const finish = () => { clearTimeout(timer); signal.removeEventListener('abort', finish); resolve(); };
+        const timer = setTimeout(finish, 600);
+        signal.addEventListener('abort', finish, { once: true });
+      });
+      if (signal.aborted) return false;
 
       try {
-        const updatedPet = await getPetDetail(petId);
+        const updatedPet = await getPetDetail(petId, signal);
         const updatedPath = resolveImageUri(updatedPet.profilePicture)?.split("?")[0];
-        if (updatedPath && updatedPath !== previousPath) return;
+        if (updatedPath && updatedPath !== previousPath) return true;
       } catch {
-        // The main update already succeeded; a later screen refresh can retry this lookup.
+        if (signal.aborted) return false;
       }
     }
+    return false;
   };
 
   const handleSave = async () => {
-    if (isSaving || !pet) return;
+    const controller = lifecycle.current;
+    if (mutationPending.current || !pet || !controller || controller.signal.aborted) return;
     if (!name.trim()) {
       Alert.alert("입력 확인", "이름을 입력해 주세요.");
       return;
     }
 
+    mutationPending.current = true;
     setIsSaving(true);
     setErrorMessage(null);
 
@@ -170,41 +194,51 @@ const PetEditScreen = () => {
         weightKg: weight,
       };
 
-      await updatePetFull({
+      await updatePetPartial({
         id: petId,
         request,
         profilePicture: selectedPetImage,
       });
 
+      if (controller.signal.aborted) return;
       if (selectedPetImage) {
-        await waitForUpdatedImage(pet.profilePicture);
+        const confirmed = await waitForUpdatedImage(controller.signal, pet.profilePicture);
+        if (controller.signal.aborted) return;
+        if (!confirmed) {
+          Alert.alert("확인 필요", "기본 정보는 저장되었지만 사진 반영을 확인하지 못했습니다. 잠시 후 다시 확인해 주세요.");
+          return;
+        }
       }
 
 
       Alert.alert("성공", "반려동물 정보가 수정되었습니다.");
       navigation.goBack();
     } catch {
-      Alert.alert("오류", "정보 저장에 실패했습니다.");
+      if (!controller.signal.aborted) Alert.alert("오류", "정보 저장에 실패했습니다.");
     } finally {
-      setIsSaving(false);
+      if (!controller.signal.aborted) { mutationPending.current = false; setIsSaving(false); }
     }
   };
 
   const handleDelete = () => {
+    if (mutationPending.current) return;
     Alert.alert("삭제 확인", "정말 삭제하시겠습니까?", [
       { text: "취소", style: "cancel" },
       {
         text: "삭제",
         style: "destructive",
         onPress: async () => {
+          const controller = lifecycle.current;
+          if (mutationPending.current || !controller || controller.signal.aborted) return;
+          mutationPending.current = true;
           setIsDeleting(true);
           try {
             await deletePet(petId);
-            navigation.goBack();
+            if (!controller.signal.aborted) navigation.goBack();
           } catch {
-            Alert.alert("오류", "삭제에 실패했습니다.");
+            if (!controller.signal.aborted) Alert.alert("오류", "삭제에 실패했습니다.");
           } finally {
-            setIsDeleting(false);
+            if (!controller.signal.aborted) { mutationPending.current = false; setIsDeleting(false); }
           }
         },
       },
@@ -255,10 +289,10 @@ const PetEditScreen = () => {
         onChangeText={setName}
       />
 
-      <Text style={styles.label}>견종</Text>
+      <Text style={styles.label}>품종</Text>
       <TextInput
         style={styles.input}
-        placeholder="견종"
+        placeholder="품종"
         value={breed}
         onChangeText={setBreed}
       />

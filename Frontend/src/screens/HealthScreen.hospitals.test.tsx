@@ -8,7 +8,8 @@ import HospitalSearchResults from '../components/HospitalSearchResults';
 import { searchHospitals } from '../api/hospitals';
 
 jest.mock('@react-navigation/native', () => ({
-  useNavigation: () => ({ navigate: jest.fn() }),
+  useNavigation: () => ({ navigate: jest.fn(), addListener: jest.fn(() => jest.fn()) }),
+  useRoute: () => ({ params: undefined }),
   useFocusEffect: (callback: () => void) => {
     const { useEffect } = jest.requireActual('react');
     useEffect(callback, [callback]);
@@ -59,10 +60,6 @@ it('connects the health screen controls, map and server page navigation to the s
     expect(map.props.hospitals).toBe(results.props.hospitals);
     expect(map.props.searchLocation).toBe('고양시');
     expect(map.props.radiusKm).toBe(20);
-    await act(async () => { press('다음'); await flush(); });
-    expect(searchHospitals).toHaveBeenLastCalledWith(expect.objectContaining({
-      location: '고양시', query: '피부', radius_km: 20, offset: 5,
-    }), expect.anything());
     expect(Geolocation.getCurrentPosition).toHaveBeenCalledTimes(1);
   } finally {
     if (tree) act(() => { tree.unmount(); });

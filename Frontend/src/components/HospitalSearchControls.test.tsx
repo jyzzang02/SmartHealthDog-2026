@@ -132,3 +132,13 @@ it('keeps all filters on one row after region, district and maximum radius selec
   press('병원 검색');
   expect(onSearch).toHaveBeenCalledWith({ location: '서울 강남구', query: undefined, radius_km: 100 });
 });
+
+it('omits the empty location row and retains the selected region reset action', () => {
+  expect(texts()).not.toContain('현재 위치');
+  chooseLocation('지역', '경기도');
+  expect(texts()).toContain('경기도');
+  expect(texts()).toContain('현재 위치');
+  press('현재 위치');
+  expect(texts()).not.toContain('경기도');
+  expect(texts()).not.toContain('현재 위치');
+});

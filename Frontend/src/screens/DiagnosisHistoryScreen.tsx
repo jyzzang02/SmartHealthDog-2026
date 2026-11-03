@@ -291,8 +291,8 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
               onPress={() => handlePressItem(item)}
             >
               <View style={styles.cardRow}>
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
+                <View style={[styles.badge, item.type === 'URINE' && styles.urineBadge]}>
+                  <Text style={[styles.badgeText, item.type === 'URINE' && styles.urineBadgeText]}>
                     {TYPE_LABELS[item.type] ?? item.type}
                   </Text>
                 </View>
@@ -394,6 +394,8 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     backgroundColor: '#0081D5',
   },
+  urineBadge: { backgroundColor: '#FFC94D' },
+  urineBadgeText: { color: '#1F2024' },
   badgeText: {
     color: '#FFFFFF',
     fontSize: 12,

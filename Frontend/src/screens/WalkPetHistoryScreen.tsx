@@ -72,18 +72,27 @@ export default function WalkPetHistoryScreen() {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const response = await getPetWalks(petId, {
-        timezone: 'Asia/Seoul',
-        sortBy: 'date_desc',
-        limit: 100,
-        offset: 0,
-      });
-      setRecords(
-        (response.items || [])
-          .filter(isCompletedWalkRecord)
-          .map((item) => normalizeWalk(item, route.params))
-      );
+      const params = { timezone: 'Asia/Seoul', sortBy: 'date_desc' as const, limit: 50 };
+      if (__DEV__) console.info('[walk-debug] history:first-page ' + JSON.stringify({ petId, limit: 50, offset: 0 }));
+      const response = await getPetWalks(petId, { ...params, offset: 0 });
+      const items = [...(response.items || [])];
+      // Preserve the existing 100-record view within the server's 50-item page limit.
+      if ((response.total ?? items.length) > 50) {
+        if (__DEV__) console.info('[walk-debug] history:next-page ' + JSON.stringify({ petId, limit: 50, offset: 50 }));
+        const nextPage = await getPetWalks(petId, { ...params, offset: 50 });
+        items.push(...(nextPage.items || []));
+      }
+      if (__DEV__) console.info('[walk-debug] history:normalize ' + JSON.stringify({ petId, receivedCount: items.length }));
+      const completedItems = items.filter(isCompletedWalkRecord);
+      const normalized = completedItems.map((item) => normalizeWalk(item, route.params));
+      if (__DEV__) console.info('[walk-debug] history:ready ' + JSON.stringify({
+        petId, receivedCount: items.length, completedCount: completedItems.length, displayedCount: normalized.length,
+      }));
+      setRecords(normalized);
     } catch (error) {
+      if (__DEV__) console.warn('[walk-debug] history:failed ' + JSON.stringify({
+        petId, errorName: error instanceof Error ? error.name : 'UnknownError',
+      }));
       const message = error instanceof Error ? error.message : '산책 기록을 불러오지 못했습니다.';
       setErrorMessage(message);
       setRecords([]);

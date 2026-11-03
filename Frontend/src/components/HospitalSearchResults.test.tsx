@@ -12,14 +12,13 @@ const item = (index: number): HospitalItem => ({
   website_url: null, place_url: null, open_now: null,
 });
 let tree: renderer.ReactTestRenderer;
-const changePage = jest.fn();
 const texts = () => tree.root.findAllByType(Text).map((node) => node.props.children);
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find((node) =>
   node.findAllByType(Text).some((text) => text.props.children === label),
 )!;
-const render = (hospitals: HospitalItem[], total = hospitals.length, offset = 0, searchLocation?: string) => act(() => {
-  tree = renderer.create(<HospitalSearchResults hospitals={hospitals} total={total}
-    page={{ limit: 5, offset }} onPageChange={changePage} searchLocation={searchLocation} />);
+const render = (hospitals: HospitalItem[], _total = hospitals.length, offset = 0, searchLocation?: string) => act(() => {
+  tree = renderer.create(<HospitalSearchResults hospitals={hospitals}
+    page={{ limit: 5, offset }} searchLocation={searchLocation} />);
 });
 const openDetails = () => act(() => { tree.root.findAllByType(HospitalCard)[0].props.onPress(); });
 
@@ -92,28 +91,18 @@ it('does not invent a missing backend distance', () => {
   expect(texts().some((value) => Array.isArray(value) && value.includes('현재 위치'))).toBe(false);
 });
 
-it('uses server total and offset instead of slicing the supplied page', () => {
-  render([item(1)], 11, 5);
+it('shows supplied hospitals without pagination controls', () => {
+  render([item(1)], 11);
   expect(tree.root.findAllByType(HospitalCard)).toHaveLength(1);
-  expect(button('이전').props.disabled).toBe(false);
-  expect(button('다음').props.disabled).toBe(false);
-  act(() => { button('다음').props.onPress(); });
-  expect(changePage).toHaveBeenLastCalledWith(2);
-  act(() => { button('이전').props.onPress(); });
-  expect(changePage).toHaveBeenLastCalledWith(0);
-});
-
-it('disables navigation at the server page boundaries', () => {
-  render([item(1)], 1);
-  expect(button('이전').props.disabled).toBe(true);
-  expect(button('다음').props.disabled).toBe(true);
+  expect(button('이전')).toBeUndefined();
+  expect(button('다음')).toBeUndefined();
 });
 
 it('hides stale details when a new response replaces the selected item', () => {
   render([item(1)]);
   openDetails();
-  act(() => { tree.update(<HospitalSearchResults hospitals={[]} total={0}
-    page={{ limit: 5, offset: 0 }} onPageChange={changePage} />); });
+  act(() => { tree.update(<HospitalSearchResults hospitals={[]}
+    page={{ limit: 5, offset: 0 }} />); });
   expect(texts()).not.toContain('Hospital 1');
   expect(texts()).toContain('표시할 병원이 없습니다.');
 });
@@ -160,4 +149,19 @@ it('reports failure if both the NAVER app and web search cannot open', async () 
   render([item(1)]);
   await act(async () => { tree.root.findByType(HospitalCard).props.onMapPress(); });
   expect(alert).toHaveBeenCalledWith('연결 실패', '연결할 수 없습니다. 다시 시도해 주세요.');
+});
+
+it.each([[0, '0m'], [999, '999m'], [1000, '1km'], [1134, '1.1km'], [2012, '2km'], [2313, '2.3km'], [10000, '10km']])
+('formats distance %s as %s in both the list and details', (distance, expected) => {
+  render([{ ...item(1), distance_m: distance as number }]);
+  const distanceTexts = () => texts().map(value => [value].flat().join(''))
+    .filter(value => value === '현재 위치에서 ' + expected);
+  expect(distanceTexts()).toHaveLength(1);
+  openDetails();
+  expect(distanceTexts()).toHaveLength(2);
+});
+
+it.each([null, undefined, -1, NaN, Infinity])('keeps an unavailable distance hidden: %s', distance => {
+  render([{ ...item(1), distance_m: distance as number | null }]); openDetails();
+  expect(texts().some(value => [value].flat().join('').startsWith('현재 위치에서 '))).toBe(false);
 });

@@ -75,18 +75,17 @@ const styles = StyleSheet.create({
     height: 88,
     position: 'absolute',
     bottom: 8,       // ★ 원하는 높이로 조절
-    left: 80,
-    right: 0,
+    right: 4,
   },
 
   // 🧪 소변키트 강아지
   urinePosition: {
-    width: 85,
-    height: 100,
+    width: 100,
+    height: 120,
+    resizeMode: 'contain',
     position: 'absolute',
-    bottom: 8,     // ★ 카드 내에 들어오도록 조정
-    left: 75,
-    right: 0,
+    bottom: -14,   // Compensate for the image's white margin.
+    right: -3,
     
   },
 });

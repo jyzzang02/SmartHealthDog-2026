@@ -60,7 +60,27 @@ export interface SubmissionStatusPayload {
   status: string;
 }
 
-export type EyeDiagnosisResult = Record<string, unknown>;
+interface DiagnosisSubmissionDetail<T> {
+  id?: string;
+  petInfo?: { id: number; name: string; species: string };
+  type?: string;
+  photoUrl?: string | null;
+  status?: string;
+  submittedAt?: string;
+  completedAt?: string | null;
+  failureReason?: string | null;
+  results?: T[];
+}
+
+export type EyeDiagnosisResult = DiagnosisSubmissionDetail<{
+  probability?: number | string | null;
+  condition?: { name?: string | null; description?: string | null } | null;
+}>;
+
+export type UrineDiagnosisResult = DiagnosisSubmissionDetail<{
+  analyte?: string | null;
+  resultValue?: string | null;
+}>;
 
 export { getMyPets };
 
@@ -377,7 +397,7 @@ export const getEyeSubmissionResult = async (
 
 export const getUrineSubmissionResult = async (
   submissionId: string
-): Promise<EyeDiagnosisResult> => {
+): Promise<UrineDiagnosisResult> => {
   const response = await authorizedFetch(
     `${API_BASE_URL}/api/submissions/${submissionId}/urine?languageCode=ko`,
     { method: 'GET' }
@@ -389,7 +409,7 @@ export const getUrineSubmissionResult = async (
   }
 
   const data = await parseJsonSafe(response);
-  return data as EyeDiagnosisResult;
+  return data as UrineDiagnosisResult;
 };
 
 export const updateEyeSubmissionResult = async (

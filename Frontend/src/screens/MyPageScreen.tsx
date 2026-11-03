@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
-import { getMyPets, getPetDetail, PetListItem } from "../api/pets";
+import { getMyPets, PetListItem } from "../api/pets";
 import { getMyProfile, UserProfile } from "../api/users";
 import { resolveImageUri } from "../utils/imageUri";
 import { getStoredAccessToken } from "../storage/tokenStorage";
@@ -22,6 +22,7 @@ import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
 import { healthStore } from "../store/healthStore";
 import type { HealthSummary } from "../types/health";
+import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
@@ -30,6 +31,9 @@ const SPACING = 16;
 const MyPageScreen = () => {
   type MyPageNavProp = StackNavigationProp<RootStackParamList, "MyPage">;
   const navigation = useNavigation<MyPageNavProp>();
+
+  const scrollRef = useRef<ScrollView>(null);
+  useTabScrollToTop(scrollRef);
 
   const [user, setUser] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -40,8 +44,10 @@ const MyPageScreen = () => {
   const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const isMountedRef = useRef(true);
+  const petLoadGeneration = useRef(0);
 
   useEffect(() => {
+    isMountedRef.current = true;
     return () => {
       isMountedRef.current = false;
     };
@@ -84,6 +90,8 @@ const MyPageScreen = () => {
   };
 
   const loadData = useCallback(async () => {
+    const generation = ++petLoadGeneration.current;
+    const isCurrent = () => isMountedRef.current && generation === petLoadGeneration.current;
     setIsPetsLoading(true);
     setPetsError(null);
 
@@ -92,42 +100,17 @@ const MyPageScreen = () => {
         getMyProfile(),
         getMyPets(),
       ]);
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setUser(profileData);
       setPetList(petsData);
 
-      const petsNeedingImage = petsData.filter(
-        (pet) => !resolveImageUri(pet.profilePicture) && Boolean(pet.id)
-      );
-
-      if (petsNeedingImage.length > 0) {
-        Promise.all(
-          petsData.map(async (pet) => {
-            const hasImage = Boolean(resolveImageUri(pet.profilePicture));
-            if (hasImage || !pet.id) return pet;
-            try {
-              const detail = await getPetDetail(pet.id);
-              return {
-                ...pet,
-                ...detail,
-                profilePicture: detail.profilePicture || pet.profilePicture,
-              };
-            } catch {
-              return pet;
-            }
-          })
-        ).then((enriched) => {
-          if (!isMountedRef.current) return;
-          setPetList(enriched);
-        });
-      }
     } catch (error) {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       const message =
         error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
       setPetsError(message);
     } finally {
-      if (!isMountedRef.current) return;
+      if (!isCurrent()) return;
       setIsPetsLoading(false);
     }
   }, []);
@@ -135,6 +118,7 @@ const MyPageScreen = () => {
   useFocusEffect(
     useCallback(() => {
       loadData();
+      return () => { petLoadGeneration.current += 1; };
     }, [loadData])
   );
 
@@ -192,6 +176,7 @@ const MyPageScreen = () => {
     <View style={styles.container}>
       <Header />
       <ScrollView
+        ref={scrollRef}
         style={styles.pageScroll}
         contentContainerStyle={styles.pageScrollContent}
         showsVerticalScrollIndicator={false}
@@ -302,8 +287,8 @@ const MyPageScreen = () => {
               }}
               scrollEventThrottle={16}
             >
-              {petCards.map((pet, idx) => (
-                <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
+              {petCards.map((pet) => (
+                <View key={pet.id} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
                   <PetProfileCard
                     {...pet}
                     onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
@@ -444,26 +429,28 @@ const styles = StyleSheet.create({
 
   /* ────── 건강검진 정보 입력 ────── */
   healthInputBtn: {
+    width: "90%",
+    alignSelf: "center",
     marginTop: 12,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: "#EEF7FD",
+    backgroundColor: "#FFF6D8",
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: "#0081D5",
+    borderColor: "#F4B844",
   },
   healthInputBtnText: {
     fontSize: 14,
     fontWeight: "600",
-    color: "#0081D5",
+    color: "#F4B844",
   },
   healthInputBtnArrow: {
     width: 14,
     height: 14,
-    tintColor: "#0081D5",
+    tintColor: "#F4B844",
   },
 
   sectionTitle: {
@@ -541,12 +528,12 @@ const styles = StyleSheet.create({
      flexDirection: 'row',
      alignItems: 'center',
      justifyContent: 'space-between',
-     paddingVertical: 12,
-     marginBottom: 16,
+     paddingVertical: 6,
+     marginBottom: 10,
    },
     btiPetIcon: {
-      width: 80,
-      height: 80,
+      width: 100,
+      height: 100,
     },
    btiDots: {
      flexDirection: 'row',
