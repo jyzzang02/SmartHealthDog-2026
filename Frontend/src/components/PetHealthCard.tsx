@@ -78,7 +78,7 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
   const petCards = effectivePets.map((pet) => ({
     id: pet.id,
     name: pet.name,
-    subtitle: `${pet.breed || pet.species}, ${pet.weightKg || 0}kg`,
+    subtitle: pet.breed || pet.species,
     weight: pet.weightKg || 0,
     profilePicture: resolveImageUri(pet.profilePicture) || null,
   }));
@@ -175,6 +175,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#E0E0E0',
   },
   contentBox: {
+    marginLeft: 14,
     flexDirection: 'column',
     justifyContent: 'center',
   },
@@ -197,19 +198,23 @@ const styles = StyleSheet.create({
   tagRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
+    minHeight: 32,
     gap: 8,
     marginTop: 2,
   },
   tagBlue: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#0081D5',
-    borderRadius: 32,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: '#EDF6FF',
+    borderRadius: 14,
+    transform: [{ translateX: -4 }, { translateY: 3 }],
   },
   tagTextBlue: {
-    fontSize: 14,
-    color: '#FFF',
-    marginBottom: 2,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
+    color: '#0081D5',
   },
   dotContainer: {
     flexDirection: 'row',

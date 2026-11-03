@@ -4,12 +4,14 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getBreedSections, RISK_LEVEL_COLOR, LEVEL_DESC } from '../data/breedDiseases';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'BreedDetail'>;
 type RoutePropType = RouteProp<RootStackParamList, 'BreedDetail'>;
 
 const BreedDetailScreen = () => {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { breedName } = route.params;
@@ -19,7 +21,7 @@ const BreedDetailScreen = () => {
   return (
     <View style={styles.screen}>
       {/* NavBar */}
-      <View style={styles.navBar}>
+      <View style={[styles.navBar, { height: 56 + insets.top, paddingTop: insets.top }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>
           <Image source={require('../assets/icon_navBack.png')} style={styles.backIcon} />
           <Text style={styles.navTitle}>{breedName} 혈통 위험도</Text>
@@ -28,7 +30,7 @@ const BreedDetailScreen = () => {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, { paddingBottom: 20 + insets.bottom }]}
         showsVerticalScrollIndicator={false}
       >
         {/* 견종 개요 카드 */}

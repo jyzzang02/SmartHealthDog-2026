@@ -1,10 +1,9 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   BackHandler,
   Image,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -14,12 +13,50 @@ import { useFocusEffect, useIsFocused } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import {
-  EyeDiagnosisResult,
+  UrineDiagnosisResult,
   getUrineSubmissionResult,
   getPetSubmissions,
   SubmissionSummary,
 } from '../api/diagnosis';
 import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
+import DiagnosisResultView from '../components/DiagnosisResultView';
+
+const URINE_ITEMS: Record<string, string> = {
+  leukocytes: '백혈구',
+  nitrite: '아질산염',
+  urobilinogen: '유로빌리노겐',
+  protein: '단백질',
+  ph: '산도 (pH)',
+  blood: '잠혈',
+  'specific gravity': '비중',
+  ketone: '케톤',
+  bilirubin: '빌리루빈',
+  glucose: '포도당',
+};
+
+const URINE_EXPLANATIONS = [
+  { name: '케톤', detail: '몸이 지방을 에너지로 사용할 때 생기는 물질이에요. 검출되면 공복이나 당뇨병 등 여러 원인을 확인할 수 있어요.' },
+  { name: '포도당', detail: '소변 속 당을 확인해요. 검출되면 혈당이나 신장 상태 등을 함께 살펴볼 수 있어요.' },
+  { name: '백혈구', detail: '염증과 관련해 살펴보는 세포예요. 동물의 시험지 검사는 신뢰도에 한계가 있어 추가 확인이 필요해요.' },
+  { name: '아질산염', detail: '일부 세균과 관련된 물질이에요. 동물의 시험지 결과만으로 감염을 판단할 수 없어요.' },
+  { name: '빌리루빈', detail: '혈액 성분이 분해될 때 생기는 물질이에요. 검출되면 간과 담도 상태 등을 함께 확인할 수 있어요.' },
+  { name: '유로빌리노겐', detail: '빌리루빈에서 만들어지는 물질이에요. 이 항목만으로 특정 질환을 판단하기는 어려워요.' },
+  { name: '잠혈', detail: '소변 속 혈액 성분을 확인해요. 양성일 때는 여러 원인을 구분하기 위한 추가 검사가 필요할 수 있어요.' },
+  { name: '단백질', detail: '소변 속 단백질을 확인해요. 검출되면 소변의 농도와 다른 검사 결과를 함께 살펴봐야 해요.' },
+  { name: '산도 (pH)', detail: '소변이 산성인지 알칼리성인지 나타내요. 식사나 약물 등 여러 요인에 따라 달라질 수 있어요.' },
+  { name: '비중', detail: '소변이 얼마나 농축됐는지 나타내요. 시험지 결과는 다른 방법으로 확인이 필요할 수 있어요.' },
+];
+
+const formatUrineValue = (value: string | null | undefined) => {
+  if (value == null || !value.trim()) return '-';
+  const labels: Record<string, string> = {
+    'neg.': '음성', negative: '음성', positive: '양성', normal: '정상',
+    trace: '미량', small: '소량', moderate: '중간', large: '다량',
+    'non hemolyzed': '비용혈', hemolyzed: '용혈',
+  };
+  return value.replace(/(^|[^a-z])(non hemolyzed|hemolyzed|neg\.|negative|positive|normal|trace|small|moderate|large)(?![a-z])/gi,
+    (match, prefix: string, label: string) => prefix + (labels[label.toLowerCase()] ?? label));
+};
 
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROCESSING = 'PROCESSING';
@@ -161,8 +198,9 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
   const [isLoading, setIsLoading] = useState(true);
   const [submission, setSubmission] = useState<SubmissionSummary | null>(null);
-  const [result, setResult] = useState<EyeDiagnosisResult | null>(null);
+  const [result, setResult] = useState<UrineDiagnosisResult | null>(null);
   const [message, setMessage] = useState('');
+  const [showExplanations, setShowExplanations] = useState(false);
   const isMountedRef = useRef(true);
   const requestIdRef = useRef(0);
 
@@ -332,16 +370,19 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     // results 배열 추출
-    const resultsArray = (result as any).results;
+    const resultsArray = result.results;
     if (!Array.isArray(resultsArray)) {
       return [];
     }
 
-    return resultsArray.map((item: any) => ({
-      analyte: item.analyte || '미확인',
-      value: item.value || '-',
-      colorRGB: item.colorRGB || [],
-    }));
+    return resultsArray.map(item => {
+      const analyte = item.analyte?.trim() || '미확인';
+      const info = URINE_ITEMS[analyte.toLowerCase()];
+      return {
+        name: info ?? analyte,
+        value: formatUrineValue(item.resultValue),
+      };
+    });
   }, [result]);
 
   const goHome = () => {
@@ -360,65 +401,43 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   };
 
-  const renderResultScreen = () => {
-    return (
-      <View style={styles.resultContainer}>
-        <Text style={styles.resultTitle}>소변키트 진단 결과</Text>
-
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.resultScrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {parsedResults.length > 0 ? (
-            <>
-              {parsedResults.map((item, index) => (
-                <View key={index} style={styles.resultCard}>
-                  <View style={styles.resultCardHeader}>
-                    <Text style={styles.resultCardTitle}>{item.analyte}</Text>
-                  </View>
-
-                  <View style={styles.resultCardRow}>
-                    <Text style={styles.resultCardLabel}>검사 결과:</Text>
-                    <Text style={styles.resultCardValue}>{item.value}</Text>
-                  </View>
-
-                  {item.colorRGB && item.colorRGB.length === 3 && (
-                    <View style={styles.resultCardRow}>
-                      <View
-                        style={[
-                          styles.colorBox,
-                          {
-                            backgroundColor: `rgb(${item.colorRGB[0]}, ${item.colorRGB[1]}, ${item.colorRGB[2]})`
-                          }
-                        ]}
-                      />
-                      <Text style={styles.resultCardLabel}>
-                        RGB: ({item.colorRGB.join(', ')})
-                      </Text>
-                    </View>
-                  )}
+  const renderResultScreen = () => (
+    <DiagnosisResultView
+      title="소변키트 검사 결과"
+      petName={petName}
+      items={parsedResults}
+      footerContent={(
+        <View style={styles.explanationSection}>
+          <TouchableOpacity
+            style={styles.explanationToggle}
+            onPress={() => setShowExplanations(previous => !previous)}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showExplanations }}
+          >
+            <Text style={styles.explanationTitle}>검사 항목 알아보기</Text>
+            <Text style={styles.explanationToggleText}>{showExplanations ? '접기' : '자세히 보기'}</Text>
+          </TouchableOpacity>
+          {showExplanations && (
+            <View style={styles.explanationBody}>
+              {URINE_EXPLANATIONS.map(item => (
+                <View key={item.name} style={styles.explanationItem}>
+                  <Text style={styles.explanationName}>{item.name}</Text>
+                  <Text style={styles.explanationText}>{item.detail}</Text>
                 </View>
               ))}
-            </>
-          ) : (
-            <View style={styles.noResultBox}>
-              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
+              <Text style={styles.explanationDisclaimer}>검사 결과만으로 질병을 판단할 수 없으며, 정확한 해석은 수의사와 상담해 주세요.</Text>
             </View>
           )}
-
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={goHome}
-          >
-            <Text style={styles.homeButtonText}>홈으로</Text>
-          </TouchableOpacity>
-
-          <View style={{ height: 80 }} />
-        </ScrollView>
-      </View>
-    );
-  };
+        </View>
+      )}
+      onBack={handleBack}
+      onRetake={() => navigation.navigate('UrineCamera')}
+      onFindHospital={() => {
+        bypassBeforeRemoveRef.current = true;
+        navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: '건강', params: { openHospitalSearch: true } } }] });
+      }}
+    />
+  );
 
   const renderMessageScreen = () => {
     return (
@@ -452,14 +471,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   if (result) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-        {renderResultScreen()}
-      </SafeAreaView>
-    );
+    return renderResultScreen();
   }
 
   return (
@@ -473,6 +485,15 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 };
 
 const styles = StyleSheet.create({
+  explanationSection: { backgroundColor: '#FFFFFF', borderRadius: 16, padding: 18, marginTop: 4 },
+  explanationToggle: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', minHeight: 32 },
+  explanationTitle: { fontSize: 17, fontWeight: '700', color: '#1F2024' },
+  explanationToggleText: { fontSize: 14, fontWeight: '600', color: '#0081D5' },
+  explanationBody: { marginTop: 16 },
+  explanationItem: { marginBottom: 14 },
+  explanationName: { fontSize: 14, fontWeight: '700', color: '#1F2024', marginBottom: 4 },
+  explanationText: { fontSize: 13, color: '#65686D', lineHeight: 20 },
+  explanationDisclaimer: { fontSize: 12, color: '#7B7C7D', lineHeight: 18 },
   safeArea: {
     flex: 1,
     backgroundColor: '#FFFFFF',

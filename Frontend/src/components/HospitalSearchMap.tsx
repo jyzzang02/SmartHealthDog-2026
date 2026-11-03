@@ -1,7 +1,9 @@
+import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { WebViewMessageEvent } from 'react-native-webview';
+import MapRecenterButton from './MapRecenterButton';
 
 interface MapPoint {
   lat: number;
@@ -32,6 +34,8 @@ const isValidPoint = (point: MapPoint) =>
   Number.isFinite(point.lng) && Math.abs(point.lng) <= 180;
 
 const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false, error, onRetry, radiusKm = 10, searchLocation }) => {
+  const webViewRef = useRef<WebView>(null);
+  const [readyMapId, setReadyMapId] = useState<string | null>(null);
   const [selected, setSelected] = useState<HospitalMapItem | null>(null);
   const [failedDocumentId, setFailedDocumentId] = useState<string | null>(null);
   const loadTimeout = useRef<{ documentId: string; timer: ReturnType<typeof setTimeout> } | null>(null);
@@ -89,6 +93,11 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
                       });
                     });
                     if (positions.length > 0) { map.setBounds(bounds); }
+                    window.recenterMap = function(payload) {
+                      if (!payload || payload.documentId !== mapDocumentId) return;
+                      if (positions.length > 0) map.setBounds(bounds);
+                      else map.panTo(center);
+                    };
                     window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'map-ready', documentId: mapDocumentId }));
                   } catch (error) { notifyMapError(); }
                 });
@@ -123,6 +132,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
       if (message?.documentId !== mapDocument.documentId) return;
       if (message?.type === 'map-ready') {
         readyDocumentId.current = message.documentId;
+        setReadyMapId(message.documentId);
         if (loadTimeout.current?.documentId === message.documentId) clearLoadTimeout();
       } else if (message?.type === 'map-error') {
         setFailedDocumentId(mapDocument.documentId);
@@ -154,6 +164,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
           </View>
         ) : (
           <WebView
+            ref={webViewRef}
             key={mapDocument.documentId}
             style={styles.map}
             source={{ html: mapDocument.html }}
@@ -175,6 +186,12 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             onContentProcessDidTerminate={() => setFailedDocumentId(mapDocument.documentId)}
           />
         )}
+        {!mapFailed && !loading && !error && <MapRecenterButton key={`recenter:${mapDocument.documentId}`}
+          accessibilityLabel="검색 위치로 이동"
+          disabled={loading || !!error || readyMapId !== mapDocument.documentId || (!!searchLocation && !hasMarkers)}
+          onPress={() => webViewRef.current?.injectJavaScript(
+            `window.recenterMap && window.recenterMap(${JSON.stringify({ documentId: mapDocument.documentId })});true;`
+          )} />}
       </View>
       <View style={styles.information}>
         {loading ? <ActivityIndicator color="#0081D5" /> : error ? (
@@ -189,7 +206,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             <Text style={styles.name}>{selectedHospital.name}</Text>
             <Text style={styles.description}>{selectedHospital.address || '주소 정보 없음'}</Text>
             {typeof selectedHospital.distance_m === 'number' && Number.isFinite(selectedHospital.distance_m) && selectedHospital.distance_m >= 0 && (
-              <Text style={styles.distance}>{searchLocation ? '검색 기준 위치' : '현재 위치'}에서 {selectedHospital.distance_m.toLocaleString()}m</Text>
+              <Text style={styles.distance}>{searchLocation ? '검색 기준 위치' : '현재 위치'}에서 {formatDistanceMeters(selectedHospital.distance_m)}</Text>
             )}
           </>
         ) : (

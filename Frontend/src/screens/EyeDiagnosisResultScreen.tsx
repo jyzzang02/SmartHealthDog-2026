@@ -1,10 +1,9 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   BackHandler,
   Image,
   SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -20,6 +19,7 @@ import {
   SubmissionSummary,
 } from '../api/diagnosis';
 import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
+import DiagnosisResultView from '../components/DiagnosisResultView';
 
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROCESSING = 'PROCESSING';
@@ -406,20 +406,23 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     }
 
     // results 배열 추출
-    const resultsArray = (result as any).results;
+    const resultsArray = result.results;
     if (!Array.isArray(resultsArray)) {
       return [];
     }
 
-    return resultsArray.map((item: any) => ({
-      disease: item.disease || '미확인',
-      probability: typeof item.probability === 'number'
-        ? (item.probability * 100).toFixed(1)
-        : (parseFloat(item.probability) * 100).toFixed(1),
-      condition: item.condition || {},
-      name: item.condition?.name || item.disease || '미확인',
+    return resultsArray.map(item => ({
+      probability: item.probability !== null && item.probability !== undefined && item.probability !== '' && Number.isFinite(Number(item.probability)) && Number(item.probability) >= 0 && Number(item.probability) <= 1
+        ? Number(item.probability)
+        : null,
+      name: item.condition?.name || '미확인',
       description: item.condition?.description || '',
-    }));
+    }))
+      .sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1))
+      .map(item => ({
+        ...item,
+        probability: item.probability === null ? null : (item.probability * 100).toFixed(1),
+      }));
   }, [result]);
 
   const goHome = () => {
@@ -438,53 +441,23 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     );
   };
 
-  const renderResultScreen = () => {
-    return (
-      <View style={styles.resultContainer}>
-        <Text style={styles.resultTitle}>안구 진단 결과</Text>
-
-        <ScrollView
-          style={{ flex: 1 }}
-          contentContainerStyle={styles.resultScrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {parsedResults.length > 0 ? (
-            <>
-              {parsedResults.map((item, index) => (
-                <View key={index} style={styles.resultCard}>
-                  <View style={styles.resultCardHeader}>
-                    <Text style={styles.resultCardTitle}>{item.name}</Text>
-                    <View style={styles.probabilityBadge}>
-                      <Text style={styles.probabilityText}>{item.probability}%</Text>
-                    </View>
-                  </View>
-
-                  {item.description ? (
-                    <Text style={styles.resultCardDescription}>
-                      {item.description}
-                    </Text>
-                  ) : null}
-                </View>
-              ))}
-            </>
-          ) : (
-            <View style={styles.noResultBox}>
-              <Text style={styles.noResultText}>진단 결과가 없습니다.</Text>
-            </View>
-          )}
-
-          <TouchableOpacity
-            style={styles.homeButton}
-            onPress={goHome}
-          >
-            <Text style={styles.homeButtonText}>홈으로</Text>
-          </TouchableOpacity>
-
-          <View style={{ height: 80 }} />
-        </ScrollView>
-      </View>
-    );
-  };
+  const renderResultScreen = () => (
+    <DiagnosisResultView
+      title="안구 검사 결과"
+      petName={petName}
+      items={parsedResults.map(item => ({
+          name: item.name,
+          value: item.probability === null ? undefined : `${item.probability}%`,
+          description: item.description,
+        }))}
+      onBack={handleBack}
+      onRetake={() => navigation.navigate('EyeCamera')}
+      onFindHospital={() => {
+        bypassBeforeRemoveRef.current = true;
+        navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: '건강', params: { openHospitalSearch: true } } }] });
+      }}
+    />
+  );
 
   const renderMessageScreen = () => {
     return (
@@ -518,14 +491,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   }
 
   if (result) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-          <Image source={require('../assets/icon_back.png')} style={styles.backIcon} />
-        </TouchableOpacity>
-        {renderResultScreen()}
-      </SafeAreaView>
-    );
+    return renderResultScreen();
   }
 
   return (

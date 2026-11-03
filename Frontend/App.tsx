@@ -8,6 +8,7 @@
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
 import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 
@@ -44,6 +45,7 @@ import HealthDetailScreen from './src/screens/HealthDetailScreen';
 import BreedDetailScreen from './src/screens/BreedDetailScreen';
 import PetQnaSelectScreen from './src/screens/PetQnaSelectScreen';
 import PetQnaListScreen from './src/screens/PetQnaListScreen';
+import SelfCheckScreen from './src/screens/SelfCheckScreen';
 import type { HealthSummary } from './src/types/health';
 import type { PetSpecies } from './src/data/petQna';
 
@@ -70,7 +72,7 @@ export type RootStackParamList = {
     profileImage?: string | null;
   };
 
-  Main: undefined;
+  Main: NavigatorScreenParams<{ '건강': { openHospitalSearch?: boolean } | undefined }> | undefined;
 
   EyeDiagnosis: undefined;
   EyeCamera: undefined;
@@ -102,14 +104,15 @@ export type RootStackParamList = {
   AnimalDetail: {
     animalData: {
       id?: number;
+      name?: string;
       shelterId?: number;
       shelterName?: string;
       shelterPhone?: string;
+      shelterAddress?: string;
       type: string;
       tags: string[];
       breed: string;
       age: string;
-      location: string;
       image: any;
     };
   };
@@ -169,6 +172,8 @@ export type RootStackParamList = {
   PetQnaList: {
     species: PetSpecies;
   };
+
+  SelfCheck: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -259,6 +264,9 @@ function AppNavigator() {
         {/* Pet Q&A */}
         <Stack.Screen name="PetQnaSelect" component={PetQnaSelectScreen} />
         <Stack.Screen name="PetQnaList" component={PetQnaListScreen} />
+
+        {/* Self Check */}
+        <Stack.Screen name="SelfCheck" component={SelfCheckScreen} />
       </Stack.Navigator>
     </NavigationContainer>
   );
