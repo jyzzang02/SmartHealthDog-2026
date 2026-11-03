@@ -12,14 +12,13 @@ const item = (index: number): HospitalItem => ({
   website_url: null, place_url: null, open_now: null,
 });
 let tree: renderer.ReactTestRenderer;
-const changePage = jest.fn();
 const texts = () => tree.root.findAllByType(Text).map((node) => node.props.children);
 const button = (label: string) => tree.root.findAllByType(TouchableOpacity).find((node) =>
   node.findAllByType(Text).some((text) => text.props.children === label),
 )!;
-const render = (hospitals: HospitalItem[], total = hospitals.length, offset = 0, searchLocation?: string) => act(() => {
-  tree = renderer.create(<HospitalSearchResults hospitals={hospitals} total={total}
-    page={{ limit: 5, offset }} onPageChange={changePage} searchLocation={searchLocation} />);
+const render = (hospitals: HospitalItem[], _total = hospitals.length, offset = 0, searchLocation?: string) => act(() => {
+  tree = renderer.create(<HospitalSearchResults hospitals={hospitals}
+    page={{ limit: 5, offset }} searchLocation={searchLocation} />);
 });
 const openDetails = () => act(() => { tree.root.findAllByType(HospitalCard)[0].props.onPress(); });
 
@@ -92,28 +91,18 @@ it('does not invent a missing backend distance', () => {
   expect(texts().some((value) => Array.isArray(value) && value.includes('현재 위치'))).toBe(false);
 });
 
-it('uses server total and offset instead of slicing the supplied page', () => {
-  render([item(1)], 11, 5);
+it('shows supplied hospitals without pagination controls', () => {
+  render([item(1)], 11);
   expect(tree.root.findAllByType(HospitalCard)).toHaveLength(1);
-  expect(button('이전').props.disabled).toBe(false);
-  expect(button('다음').props.disabled).toBe(false);
-  act(() => { button('다음').props.onPress(); });
-  expect(changePage).toHaveBeenLastCalledWith(2);
-  act(() => { button('이전').props.onPress(); });
-  expect(changePage).toHaveBeenLastCalledWith(0);
-});
-
-it('disables navigation at the server page boundaries', () => {
-  render([item(1)], 1);
-  expect(button('이전').props.disabled).toBe(true);
-  expect(button('다음').props.disabled).toBe(true);
+  expect(button('이전')).toBeUndefined();
+  expect(button('다음')).toBeUndefined();
 });
 
 it('hides stale details when a new response replaces the selected item', () => {
   render([item(1)]);
   openDetails();
-  act(() => { tree.update(<HospitalSearchResults hospitals={[]} total={0}
-    page={{ limit: 5, offset: 0 }} onPageChange={changePage} />); });
+  act(() => { tree.update(<HospitalSearchResults hospitals={[]}
+    page={{ limit: 5, offset: 0 }} />); });
   expect(texts()).not.toContain('Hospital 1');
   expect(texts()).toContain('표시할 병원이 없습니다.');
 });

@@ -143,6 +143,7 @@ export default function WalkScreen() {
   const [isSunlightIntroVisible, setSunlightIntroVisible] = useState(false);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [pets, setPets] = useState<PetListItem[]>([]);
+  const summaryScrollY = useRef(new Animated.Value(0)).current;
   const [todaySunlightPercentByPet, setTodaySunlightPercentByPet] = useState<Record<number, number | null>>({});
   const [walkRecords, setWalkRecords] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -492,12 +493,15 @@ export default function WalkScreen() {
             );
           })}
         </View>
-        <ScrollView
+        <View style={styles.petDailySummaryWrapper}>
+        <Animated.ScrollView
           style={{ height: Math.min(pets.length * 28, 56) }}
-          contentContainerStyle={styles.petDailySummaryList}
+          contentContainerStyle={[styles.petDailySummaryList, pets.length > 2 && styles.petDailySummaryScrollable]}
           nestedScrollEnabled
           scrollEnabled={pets.length > 2}
-          showsVerticalScrollIndicator={pets.length > 2}
+          showsVerticalScrollIndicator={false}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: summaryScrollY } } }], { useNativeDriver: true })}
+          scrollEventThrottle={16}
         >
           {pets.map((pet) => {
             const sunlightPercent = todaySunlightPercentByPet[pet.id];
@@ -512,7 +516,20 @@ export default function WalkScreen() {
               </View>
             );
           })}
-        </ScrollView>
+        </Animated.ScrollView>
+        {pets.length > 2 && (
+          <View style={styles.summaryScrollTrack} accessible={false} pointerEvents="none">
+            <Animated.View style={[styles.summaryScrollThumb, {
+              height: Math.max(16, 56 * 2 / pets.length),
+              transform: [{ translateY: summaryScrollY.interpolate({
+                inputRange: [0, (pets.length - 2) * 28],
+                outputRange: [0, 56 - Math.max(16, 56 * 2 / pets.length)],
+                extrapolate: 'clamp',
+              }) }],
+            }]} />
+          </View>
+        )}
+        </View>
       </View>
 
       <View style={styles.bottomSheet}>
@@ -678,7 +695,11 @@ const styles = StyleSheet.create({
   graphTitle: { color: '#000000', fontSize: 18, fontWeight: '600', alignSelf: 'flex-start' },
   graphMoreButton: { width: 56, height: 30, resizeMode: 'contain' },
   graphContainer: { width: 310, height: 135, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12, paddingBottom: 22 },
+  petDailySummaryWrapper: { alignSelf: 'stretch' },
   petDailySummaryList: { width: '100%' },
+  petDailySummaryScrollable: { paddingRight: 12 },
+  summaryScrollTrack: { position: 'absolute', right: 0, top: 0, width: 4, height: 56, borderRadius: 2, backgroundColor: '#E1E4E8' },
+  summaryScrollThumb: { width: 4, borderRadius: 2, backgroundColor: '#A9B2BA' },
   petDailySummary: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center' },
   petDailySummaryName: { width: 76, fontSize: 12, fontWeight: '600' },
   petDailySummaryText: { flex: 1, color: '#7B7C7D', fontSize: 12 },

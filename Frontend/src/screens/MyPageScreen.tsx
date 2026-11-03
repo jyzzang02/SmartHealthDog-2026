@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -528,12 +528,12 @@ const styles = StyleSheet.create({
      flexDirection: 'row',
      alignItems: 'center',
      justifyContent: 'space-between',
-     paddingVertical: 12,
-     marginBottom: 16,
+     paddingVertical: 6,
+     marginBottom: 10,
    },
     btiPetIcon: {
-      width: 80,
-      height: 80,
+      width: 100,
+      height: 100,
     },
    btiDots: {
      flexDirection: 'row',

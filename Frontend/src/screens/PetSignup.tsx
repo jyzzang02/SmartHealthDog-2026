@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,7 @@ import {
   ActivityIndicator,
   ScrollView,
   KeyboardAvoidingView,
+  Keyboard,
 } from 'react-native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
@@ -80,6 +81,54 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
   const [petGender, setPetGender] = useState<PetGender | null>(null);
   const [weightKg, setWeightKg] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [keyboardOverlap, setKeyboardOverlap] = useState(0);
+  const scrollRef = useRef<ScrollView>(null);
+  const nameRef = useRef<TextInput>(null);
+  const breedRef = useRef<TextInput>(null);
+  const weightRef = useRef<TextInput>(null);
+  const focusedInputRef = useRef<TextInput | null>(null);
+  const keyboardTopRef = useRef<number | null>(null);
+  const scrollOffsetRef = useRef(0);
+
+  const scrollToFocusedInput = useCallback(() => {
+    const input = focusedInputRef.current;
+    if (!input || keyboardTopRef.current === null) return;
+
+    input.measureInWindow((_x, y, _width, height) => {
+      const keyboardTop = keyboardTopRef.current;
+      if (keyboardTop === null || focusedInputRef.current !== input) return;
+      const overlap = y + height + 16 - keyboardTop;
+      if (overlap > 0) {
+        scrollRef.current?.scrollTo({ y: scrollOffsetRef.current + overlap, animated: true });
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    const show = Keyboard.addListener('keyboardDidShow', event => {
+      keyboardTopRef.current = event.endCoordinates.screenY;
+      scrollRef.current?.getNativeScrollRef()?.measureInWindow((_x, y, _width, height) => {
+        if (!active || keyboardTopRef.current === null) return;
+        setKeyboardOverlap(Math.max(0, y + height - keyboardTopRef.current));
+        requestAnimationFrame(scrollToFocusedInput);
+      });
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      keyboardTopRef.current = null;
+      setKeyboardOverlap(0);
+    });
+    return () => {
+      active = false;
+      show.remove();
+      hide.remove();
+    };
+  }, [scrollToFocusedInput]);
+
+  const handleInputFocus = (input: TextInput | null) => {
+    focusedInputRef.current = input;
+    requestAnimationFrame(scrollToFocusedInput);
+  };
 
   const requestAndroidPermissions = async (): Promise<boolean> => {
     if (Platform.OS !== 'android') {
@@ -348,8 +397,14 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
         </View>
 
         <ScrollView
+          ref={scrollRef}
           style={styles.scrollView}
-          contentContainerStyle={styles.content}
+          contentContainerStyle={[styles.content, keyboardOverlap > 0 && {
+            paddingBottom: (Platform.OS === 'android' ? 120 : 80) + keyboardOverlap,
+          }]}
+          onScroll={event => { scrollOffsetRef.current = event.nativeEvent.contentOffset.y; }}
+          scrollEventThrottle={16}
+          onContentSizeChange={scrollToFocusedInput}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
@@ -380,6 +435,9 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
           <View style={styles.inputContainer}>
             <TextInput
+              ref={nameRef}
+              onFocus={() => handleInputFocus(nameRef.current)}
+              onBlur={() => { if (focusedInputRef.current === nameRef.current) focusedInputRef.current = null; }}
               style={styles.input}
               placeholder="반려동물의 이름을 입력해 주세요"
               placeholderTextColor="#7B7C7D"
@@ -489,6 +547,9 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
           <View style={styles.inputContainer}>
             <TextInput
+              ref={breedRef}
+              onFocus={() => handleInputFocus(breedRef.current)}
+              onBlur={() => { if (focusedInputRef.current === breedRef.current) focusedInputRef.current = null; }}
               style={styles.input}
               placeholder="품종을 입력해 주세요"
               placeholderTextColor="#7B7C7D"
@@ -501,6 +562,9 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
 
           <View style={styles.inputContainer}>
             <TextInput
+              ref={weightRef}
+              onFocus={() => handleInputFocus(weightRef.current)}
+              onBlur={() => { if (focusedInputRef.current === weightRef.current) focusedInputRef.current = null; }}
               style={styles.input}
               placeholder="체중(kg)을 입력해 주세요"
               placeholderTextColor="#7B7C7D"
@@ -571,7 +635,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    paddingTop: 80,
+    paddingTop: 24,
     paddingBottom: Platform.OS === 'android' ? 120 : 80,
   },
   titleContainer: {

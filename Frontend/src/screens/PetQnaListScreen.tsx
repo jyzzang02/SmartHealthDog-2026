@@ -21,7 +21,7 @@ const PetQnaListScreen = () => {
   const { label } = SPECIES_META[species];
 
   return (
-    <SafeAreaView style={styles.screen} edges={['top']}>
+    <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
       {/* NavBar */}
       <View style={styles.navBar}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backRow}>

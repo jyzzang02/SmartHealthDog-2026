@@ -95,7 +95,7 @@ const HealthScreen: React.FC = () => {
   const hasHealthData = Boolean(currentSummary);
 
   return (
-    <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled">
+    <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
 
       {/* HEADER */}
       <View style={styles.headerContainer}>
@@ -229,9 +229,7 @@ const HealthScreen: React.FC = () => {
         />
         {!hospitalSearch.loading && !hospitalSearch.error && <HospitalSearchResults
           hospitals={hospitalSearch.result?.items ?? []}
-          total={hospitalSearch.result?.total ?? 0}
           page={hospitalSearch.result?.page ?? { limit: 5, offset: 0 }}
-          onPageChange={hospitalSearch.goToPage}
           searchLocation={hospitalSearch.filters.location}
         />}
 
@@ -267,8 +265,6 @@ export default HealthScreen;
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8F8F8' },
-
-  scrollContent: { paddingBottom: 80 },
 
   headerContainer: { paddingHorizontal: 20, paddingTop: 48, marginBottom: 12 },
 
