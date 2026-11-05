@@ -1,6 +1,6 @@
 # Google Vision 이미지 OCR 연동 명세 (AI 담당)
 
-**기준:** 최초 제공된 `ai.zip`의 기존 Worker 구조를 유지하고 OCR 모듈만 추가. **상태:** OCR 코드 및 오프라인 단위 테스트 작성 완료, 실제 Google Cloud 호출 재검증 및 Backend/Celery 연동 전.
+**기준:** 최초 제공된 `ai.zip`의 기존 Worker 구조를 유지하고 OCR 모듈만 추가. **상태:** Google Vision OCR 모듈 및 예외 처리 구현 완료, 오프라인 단위 테스트 및 실제 Google Cloud OCR 호출 테스트 완료, GitHub main 브랜치 반영 완료. Backend/Celery 연동 전.
 
 ## 1. 책임 범위
 - AI: 입력 이미지 바이트 검증, Google Vision DOCUMENT_TEXT_DETECTION, rawText 및 표준 오류 반환
@@ -37,7 +37,7 @@ Google Vision 설정: `document_text_detection`, 언어 힌트 `ko`, `en`, 요�
 
 Frontend 이미지 업로드 → Backend 이미지 저장 → Celery 작업 등록 → Worker 이미지 다운로드 → `extract_text(image_bytes)` → Backend OCR 결과 수신 API → DB 저장 및 Submission 상태 갱신.
 
-**주의:** 기존 Worker의 Celery 큐 이름, 결과 전송 API URL, DTO, 성공/실패 상태, 재시도 횟수, 이미지 URL의 접근 권한은 확인·확정 필요. 현재 OCR 코드에는 네트워크 이미지 다운로드/업로드, S3, Redis, Celery, Backend HTTP 호출이 포함되지 않는다.
+**주의**: 기존 Worker의 Celery 큐 이름, 결과 전송 API URL, DTO, 성공/실패 상태, 재시도 횟수, 이미지 URL의 접근 권한은 확인·확정 필요. 현재 OCR 코드에는 네트워크 이미지 다운로드/업로드, S3, Redis, Celery, Backend HTTP 호출이 포함되지 않는다.
 
 제안 작업 입력:
 ```json
@@ -51,11 +51,16 @@ Frontend 이미지 업로드 → Backend 이미지 저장 → Celery 작업 등�
 ## 5. 보안/운영
 - 서비스 계정 JSON 키, `.env`, 환자 이미지/추출 텍스트는 Git/Notion에 업로드하지 않는다.
 - 서버에서는 안전한 Google Cloud 인증 방식(가능하면 Workload Identity / ADC) 사용.
-- Google Cloud 프로젝트의 Vision API 활성화와 **결제 활성 상태**를 확인해야 한다. 이전 테스트에서 `BILLING_DISABLED` 오류가 관찰되었으므로 실서버 배포 전에 재검증한다.
-- OCR 실패와 텍스트 오인식은 별개다. `success=true`는 **문자열 추출 성공**이지 90% 정확도 달성을 보증하지 않는다.
+- Google Cloud Vision API 사용을 위해 서버 환경의 API 활성화, 결제 설정 및 인증 권한을 확인해야 한다.
+- OCR 실패와 텍스트 오인식은 별개다. `success=true`는 문자열 추출 성공이지 90% 정확도 달성을 보증하지 않는다.
 - 호출 비용, 요청 제한, 파일 크기, 서버 타임아웃 및 재시도 정책은 Backend와 협의한다.
 
 ## 6. 검증 상태
-- 과거 원본 `test_google_vision.py`에서 로컬 API 호출 성공(단일 이미지 약 0.93초, 측정 시점 기준).
-- 현재 배포 후보: OCR 함수·오류 처리·오프라인 단위 테스트 작성. **실제 Google Vision 호출은 사용자 로컬에서 재검증 필요**.
-- Backend/Celery 통합 테스트, 다양한 양식 정확도 측정, GitHub push는 미완료.
+- Google Vision OCR을 이용한 실제 이미지 텍스트 추출 테스트 성공.
+- 이미지 유효성 검사 및 예외 처리 구현 완료.
+- 빈 이미지, 손상된 이미지, 지원하지 않는 형식, 이미지 크기 초과, 텍스트 미검출에 대한 예외 처리 구현.
+- Google Cloud 인증 오류, 요청 시간 초과, API 호출량 제한 및 기타 서비스 오류에 대한 예외 처리 구현.
+- Mock 기반 오프라인 단위 테스트 통과.
+- Google Vision OCR 관련 코드 GitHub main 브랜치 업로드 완료.
+- 기존 AI Worker 코드는 수정하지 않았으며, Backend/Celery 연동은 미구현 상태.
+- 다양한 병원 양식 및 저화질 이미지에 대한 정량적 정확도 평가와 Backend/Celery 통합 테스트는 추후 진행 필요.
