@@ -147,7 +147,7 @@ const HealthScreen: React.FC = () => {
           image={selfCheckDog}
           imageType="eye"
           style={{ width: cardWidth }}
-          onPress={() => navigation.navigate('SelfCheck')}
+          onPress={() => navigation.navigate('SelfCheckEntry', currentPet ? { petId: currentPet.id, petName: currentPet.name } : undefined)}
         />
 
       </Animated.ScrollView>
@@ -212,6 +212,7 @@ const HealthScreen: React.FC = () => {
       )}
 
       {/* ============================ */}
+
       {/* 동물병원 검색 */}
       {/* ============================ */}
       <View style={styles.whiteSection} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
