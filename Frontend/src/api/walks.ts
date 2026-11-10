@@ -386,7 +386,7 @@ export const getPetTodaySunlight = async (
   );
 
   if (!response.ok) {
-    console.warn('[walk-debug] sunlight:today-error', { petId, status: response.status });
+    if (__DEV__) console.warn('[walk-debug] sunlight:today-error', { petId, status: response.status });
     await throwHttpError(response, '오늘의 일광 노출 정보를 불러오지 못했습니다.');
   }
 
@@ -395,7 +395,7 @@ export const getPetTodaySunlight = async (
   if (date !== undefined && sunlight.date !== date) {
     throw new Error('요청한 날짜의 조도 결과를 확인하지 못했습니다.');
   }
-  console.log('[walk-debug] sunlight:today-response', {
+  if (__DEV__) console.log('[walk-debug] sunlight:today-response', {
     petId,
     date: sunlight.date,
     targetLuxMinutes: sunlight.target_lux_minutes,
@@ -468,7 +468,7 @@ export const getPetWalks = async (
   const data = await parseJsonSafe(response);
   const result = (data || {}) as PetWalkListResponse;
   if (Array.isArray(result.items)) result.items = result.items.map(normalizeWalkRecord);
-  console.log('[walk-debug] walk-list:response', {
+  if (__DEV__) console.log('[walk-debug] walk-list:response', {
     petId,
     count: result.items?.length ?? 0,
     walks: (result.items ?? []).map((walk) => ({
@@ -503,13 +503,13 @@ export const getWalkDetail = async (walkId: number): Promise<WalkRecordDto> => {
   });
 
   if (!response.ok) {
-    console.warn('[walk-debug] walk-detail:error', { walkId, status: response.status });
+    if (__DEV__) console.warn('[walk-debug] walk-detail:error', { walkId, status: response.status });
     await throwHttpError(response, '산책 상세를 불러오지 못했습니다.');
   }
 
   const data = await parseJsonSafe(response);
   const walk = normalizeWalkRecord((data?.walk || data) as WalkRecordDto);
-  console.log('[walk-debug] walk-detail:response', {
+  if (__DEV__) console.log('[walk-debug] walk-detail:response', {
     requestedWalkId: walkId,
     responseWalkId: walk.walk_id ?? walk.walkId ?? walk.id,
     petId: walk.pet_id ?? walk.petId,

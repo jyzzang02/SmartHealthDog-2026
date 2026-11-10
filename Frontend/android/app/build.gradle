@@ -73,6 +73,19 @@ def enableProguardInReleaseBuilds = false
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+def releaseStore = System.getenv("SMARTHEALTHDOG_RELEASE_STORE_FILE")
+def releaseStorePassword = System.getenv("SMARTHEALTHDOG_RELEASE_STORE_PASSWORD")
+def releaseAlias = System.getenv("SMARTHEALTHDOG_RELEASE_KEY_ALIAS")
+def releaseKeyPassword = System.getenv("SMARTHEALTHDOG_RELEASE_KEY_PASSWORD")
+def hasReleaseSigning = releaseStore && releaseStorePassword && releaseAlias && releaseKeyPassword &&
+    file(releaseStore).isFile() && file(releaseStore).canonicalFile != file('debug.keystore').canonicalFile
+
+gradle.taskGraph.whenReady { graph ->
+    if (graph.allTasks.any { it.project == project && it.name in ['assembleRelease', 'bundleRelease', 'packageRelease', 'packageReleaseBundle'] } && !hasReleaseSigning) {
+        throw new GradleException("Configure production signing using SMARTHEALTHDOG_RELEASE_* environment variables.")
+    }
+}
+
 android {
     ndkVersion rootProject.ext.ndkVersion
     buildToolsVersion rootProject.ext.buildToolsVersion
@@ -87,6 +100,14 @@ android {
         versionName "1.0"
     }
     signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(releaseStore)
+                storePassword releaseStorePassword
+                keyAlias releaseAlias
+                keyPassword releaseKeyPassword
+            }
+        }
         debug {
             storeFile file('debug.keystore')
             storePassword 'android'
@@ -99,9 +120,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
-            signingConfig signingConfigs.debug
+            if (hasReleaseSigning) signingConfig signingConfigs.release
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
         }

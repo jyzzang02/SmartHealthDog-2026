@@ -224,6 +224,7 @@ const authorizedFetch = async (
 
   let response = await doFetch(accessToken);
 
+  if (init?.signal?.aborted) throw new Error('Request aborted');
   if (response.status === 403) {
     throw new Error('권한이 없습니다.');
   }
@@ -235,6 +236,7 @@ const authorizedFetch = async (
   try {
     accessToken = await refreshSessionAccessToken(session, accessToken);
     assertAuthSession(session);
+    if (init?.signal?.aborted) throw new Error('Request aborted');
     response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
@@ -289,14 +291,6 @@ export const requestEyeDiagnosis = async (
   const mimeType = resolveMimeType(image);
   const fileName = image.fileName || normalizeFileName(image.uri, 'eye.jpg');
 
-  console.log('[diagnosis] upload:eye:start', {
-    petId,
-    uploadUrl,
-    uri: image.uri,
-    fileName,
-    mimeType,
-    fileSize: image.fileSize,
-  });
 
   formData.append('image', {
     uri: image.uri,
@@ -321,16 +315,12 @@ export const requestEyeDiagnosis = async (
   }
 
   const message = await parseErrorResponse(response);
-  console.log('[diagnosis] upload:eye:error', {
-    status: response.status,
-    statusText: response.statusText,
-    message,
-  });
   throw new Error(message);
 };
 
 export const getPetSubmissions = async (
-  petId: number
+  petId: number,
+  signal?: AbortSignal
 ): Promise<SubmissionSummary[]> => {
   const endpoints = [
     `${API_BASE_URL}/api/submissions/pets/${petId}`,
@@ -340,8 +330,9 @@ export const getPetSubmissions = async (
   let lastError: Error | null = null;
 
   for (const url of endpoints) {
+    if (signal?.aborted) throw new Error('Request aborted');
     try {
-      const response = await authorizedFetch(url, { method: 'GET' });
+      const response = await authorizedFetch(url, { method: 'GET', signal });
       if (!response.ok) {
         const message = await parseErrorResponse(response);
         throw new Error(message);
@@ -379,11 +370,12 @@ export const getMySubmissions = async (): Promise<SubmissionSummary[]> => {
 };
 
 export const getEyeSubmissionResult = async (
-  submissionId: string
+  submissionId: string,
+  signal?: AbortSignal
 ): Promise<EyeDiagnosisResult> => {
   const response = await authorizedFetch(
     `${API_BASE_URL}/api/submissions/${submissionId}/eye?languageCode=ko`,
-    { method: 'GET' }
+    { method: 'GET', signal }
   );
 
   if (!response.ok) {
@@ -396,11 +388,12 @@ export const getEyeSubmissionResult = async (
 };
 
 export const getUrineSubmissionResult = async (
-  submissionId: string
+  submissionId: string,
+  signal?: AbortSignal
 ): Promise<UrineDiagnosisResult> => {
   const response = await authorizedFetch(
     `${API_BASE_URL}/api/submissions/${submissionId}/urine?languageCode=ko`,
-    { method: 'GET' }
+    { method: 'GET', signal }
   );
 
   if (!response.ok) {

@@ -3,6 +3,7 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Geolocation from 'react-native-geolocation-service';
 import { isHospitalCoordinates, logHospitalSearch, searchHospitals } from '../api/hospitals';
+import { getAuthSession } from '../storage/tokenStorage';
 import type { HospitalCoordinates, HospitalSearchParams, HospitalSearchResponse } from '../api/hospitals';
 
 const cancelled = () => Object.assign(new Error('위치 조회가 취소되었습니다.'), { name: 'AbortError' });
@@ -77,6 +78,7 @@ export const useHospitalSearch = () => {
   const [request, setRequest] = useState<SearchRequest>({
     filters: { radius_km: 10 }, offset: 0, searchId: 0, attempt: 0,
   });
+  const lastResult = useRef<{ request: SearchRequest; session: symbol; expires: number; result: HospitalSearchResponse } | null>(null);
   const requestRef = useRef(request);
   const loadingRef = useRef(true);
   const controllerRef = useRef<AbortController | null>(null);
@@ -117,10 +119,17 @@ export const useHospitalSearch = () => {
   }, [result, schedule]);
 
   useFocusEffect(useCallback(() => {
+    const session = getAuthSession();
+    const cachedResult = lastResult.current;
+    if (cachedResult?.request === request && cachedResult.session === session && cachedResult.expires > Date.now()) {
+      setResult(cachedResult.result); setError(null); setLoading(false);
+      loadingRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     controllerRef.current = controller;
     let active = true;
-    const valid = () => active && !controller.signal.aborted;
+    const valid = () => active && !controller.signal.aborted && getAuthSession() === session;
     loadingRef.current = true;
     logHospitalSearch('search:start', { attempt: request.attempt, offset: request.offset, hasLocation: !!request.filters.location });
     setLoading(true); setError(null); setResult(null);
@@ -142,6 +151,7 @@ export const useHospitalSearch = () => {
         if (response.page.limit !== PAGE_SIZE || response.page.offset !== request.offset) {
           throw new Error('병원검색 응답 형식이 명세서와 다릅니다.');
         }
+        lastResult.current = { request, session, expires: Date.now() + 30_000, result: response };
         setResult(response);
       } catch (failure) {
         if (valid()) {

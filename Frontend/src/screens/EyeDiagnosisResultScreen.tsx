@@ -109,7 +109,7 @@ const isEyeType = (type?: string) => {
 };
 
 const logEyeDiagnosis = (event: string, details: Record<string, unknown>) => {
-  console.log(`[eye-diagnosis] ${event}`, details);
+  if (__DEV__) console.log(`[eye-diagnosis] ${event}`, details);
 };
 
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
@@ -173,6 +173,8 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const [message, setMessage] = useState('');
   const isMountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const requestRef = useRef<AbortController | null>(null);
+  const pollRef = useRef({ startedAt: 0, attempts: 0 });
   const lastLoggedStatusRef = useRef('');
 
   useEffect(() => {
@@ -185,9 +187,13 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const status = normalizeStatus(submission?.status);
 
   const loadResult = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId;
+    const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId && !controller.signal.aborted;
 
     setIsLoading(true);
     logEyeDiagnosis('status-check:start', {
@@ -201,7 +207,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       if (submissionId && !directLookupTriedRef.current) {
         directLookupTriedRef.current = true;
         try {
-          const direct = await getEyeSubmissionResult(submissionId);
+          const direct = await getEyeSubmissionResult(submissionId, controller.signal);
           if (!canUpdate()) return;
           setSubmission({ id: submissionId, type: 'EYE', status: STATUS_COMPLETED });
           setResult(direct);
@@ -209,7 +215,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           logEyeDiagnosis('direct-result:success', { submissionId });
           return;
         } catch (directError) {
-          console.warn('[eye-diagnosis] direct-result:failed', {
+          if (__DEV__) console.warn('[eye-diagnosis] direct-result:failed', {
             submissionId,
             message:
               directError instanceof Error ? directError.message : String(directError),
@@ -217,7 +223,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      const submissions = await getPetSubmissions(petId);
+      const submissions = await getPetSubmissions(petId, controller.signal);
       if (!canUpdate()) return;
 
       const eyeSubmissions = submissions.filter((item) => isEyeType(item.type));
@@ -274,7 +280,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (!idToFetch) {
-        console.warn('[eye-diagnosis] submission:missing-id', { target });
+        if (__DEV__) console.warn('[eye-diagnosis] submission:missing-id', { target });
         setResult(null);
         setMessage('진단 기록 ID를 확인할 수 없습니다.');
         return;
@@ -288,7 +294,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (isFailedStatus(normalizedStatus)) {
         if (isNewStatus) {
-          console.warn('[eye-diagnosis] submission:failed', {
+          if (__DEV__) console.warn('[eye-diagnosis] submission:failed', {
             submissionId: idToFetch,
             status: normalizedStatus,
             failureReason,
@@ -304,7 +310,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (isDeletedStatus(normalizedStatus)) {
         if (isNewStatus) {
-          console.warn('[eye-diagnosis] submission:deleted', {
+          if (__DEV__) console.warn('[eye-diagnosis] submission:deleted', {
             submissionId: idToFetch,
             status: normalizedStatus,
             failureReason,
@@ -321,7 +327,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (isCompletedStatus(normalizedStatus) || normalizedStatus.length > 0) {
         try {
-          const detail = await getEyeSubmissionResult(idToFetch);
+          const detail = await getEyeSubmissionResult(idToFetch, controller.signal);
           if (!canUpdate()) return;
           setResult(detail);
           setMessage('');
@@ -331,7 +337,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           });
           return;
         } catch (detailError) {
-          console.warn('[eye-diagnosis] detail-result:failed', {
+          if (__DEV__) console.warn('[eye-diagnosis] detail-result:failed', {
             status: normalizedStatus,
             submissionId: idToFetch,
             error: String(detailError),
@@ -355,7 +361,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           : '결과를 불러오지 못했습니다.';
 
       if (!canUpdate()) return;
-      console.error('[eye-diagnosis] status-check:failed', {
+      if (__DEV__) console.error('[eye-diagnosis] status-check:failed', {
         requestId,
         petId,
         submissionId: submissionId ?? null,
@@ -365,15 +371,23 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       setMessage(errorMessage);
       Alert.alert('오류', errorMessage);
     } finally {
-      if (canUpdate()) {
+      clearTimeout(timeout);
+      if (requestRef.current === controller) requestRef.current = null;
+      if (isMountedRef.current && requestIdRef.current === requestId) {
         setIsLoading(false);
       }
     }
   }, [petId, submissionId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    pollRef.current = { startedAt: Date.now(), attempts: 0 };
     loadResult();
-  }, [loadResult]);
+    return () => {
+      requestIdRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [loadResult]));
 
   useEffect(() => {
     if (!isFocused || isLoading) {
@@ -392,7 +406,10 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
+    const poll = pollRef.current;
+    if (poll.attempts >= 30 || Date.now() - poll.startedAt + 5000 > 120_000) return;
     const timer = setTimeout(() => {
+      poll.attempts += 1;
       loadResult();
     }, 5000);
 

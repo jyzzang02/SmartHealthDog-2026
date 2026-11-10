@@ -1,3 +1,4 @@
+import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -67,7 +68,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
               window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'map-error', documentId: mapDocumentId }));
             }
           </script>
-          <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false" onerror="notifyMapError()"></script>
+          <script src="${KAKAO_MAP_SDK_URL}" onerror="notifyMapError()"></script>
         </head>
         <body>
           <div id="map"></div>

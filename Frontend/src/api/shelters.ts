@@ -254,7 +254,7 @@ export const searchShelters = async (
   };
 };
 
-export const searchAllShelters = async (
+const loadAllShelters = async (
   params: ShelterSearchParams,
   signal?: AbortSignal
 ): Promise<ShelterSearchResponse> => {
@@ -380,7 +380,7 @@ export const getShelterPets = async (
   };
 };
 
-export const getAllShelterPets = async (
+const loadAllShelterPets = async (
   shelterId: number,
   signal?: AbortSignal
 ): Promise<PetDetail[]> => {
@@ -429,3 +429,36 @@ export const getShelterPetDetail = async (
   }
   return normalizeAdoptionPet(value, shelterId);
 };
+
+const shelterResultCache = new Map<string, { expires: number; value: unknown }>();
+let shelterCacheSession: symbol | undefined;
+
+async function cachedShelterResult<T>(key: string, signal: AbortSignal | undefined, load: () => Promise<T>): Promise<T> {
+  if (!signal) return load();
+  const session = getAuthSession();
+  if (session !== shelterCacheSession) {
+    shelterResultCache.clear();
+    shelterCacheSession = session;
+  }
+  if (signal?.aborted) throw Object.assign(new Error('Aborted'), { name: 'AbortError' });
+  const cached = shelterResultCache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.value as T;
+  const value = await load();
+  assertAuthSession(session);
+  if (!signal?.aborted) {
+    shelterResultCache.delete(key);
+    if (shelterResultCache.size >= 16) {
+      const oldest = shelterResultCache.keys().next();
+      if (!oldest.done) shelterResultCache.delete(oldest.value);
+    }
+    shelterResultCache.set(key, { expires: Date.now() + 30_000, value });
+  }
+  return value;
+}
+
+export const searchAllShelters = (params: ShelterSearchParams, signal?: AbortSignal) =>
+  cachedShelterResult(JSON.stringify(["search", params.province?.trim(), params.district?.trim(),
+    params.location, params.lat, params.lng, params.sort_by]), signal, () => loadAllShelters(params, signal));
+
+export const getAllShelterPets = (shelterId: number, signal?: AbortSignal) =>
+  cachedShelterResult("pets:" + shelterId, signal, () => loadAllShelterPets(shelterId, signal));

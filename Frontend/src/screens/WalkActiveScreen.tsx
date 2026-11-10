@@ -1,3 +1,4 @@
+import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -305,7 +306,7 @@ export default function WalkActiveScreen() {
       if (uploadedCount > 0 && appStateRef.current === 'active') {
         try {
           const sunlight = await getPetTodaySunlight(petId);
-          console.info('[walk-light] summary:after-upload', {
+          if (__DEV__) console.info('[walk-light] summary:after-upload', {
             walkId,
             sampleCount: sunlight.sample_count,
             qualifyingMinutes: sunlight.qualifying_minutes,
@@ -314,7 +315,7 @@ export default function WalkActiveScreen() {
           setTodaySunlight(sunlight);
           setSunlightUnavailable(false);
         } catch (error) {
-          console.warn('[walk-light] summary:refresh-failed', error);
+          if (__DEV__) console.warn('[walk-light] summary:refresh-failed', error);
           // The samples are already saved; a progress refresh can retry later.
         }
       }
@@ -323,7 +324,7 @@ export default function WalkActiveScreen() {
     try {
       await upload;
     } catch (error) {
-      console.warn('[walk-light] upload:failed', { walkId, error });
+      if (__DEV__) console.warn('[walk-light] upload:failed', { walkId, error });
       throw error;
     } finally {
       lightUploadPromiseRef.current = null;
@@ -436,7 +437,7 @@ export default function WalkActiveScreen() {
     getPetTodaySunlight(petId)
       .then((sunlight) => {
         if (isMounted) {
-          console.info('[walk-light] summary:initial', {
+          if (__DEV__) console.info('[walk-light] summary:initial', {
             sampleCount: sunlight.sample_count,
             qualifyingMinutes: sunlight.qualifying_minutes,
             achievedLuxMinutes: sunlight.achieved_lux_minutes,
@@ -446,7 +447,7 @@ export default function WalkActiveScreen() {
         }
       })
       .catch((error) => {
-        console.warn('[walk-light] summary:initial-failed', error);
+        if (__DEV__) console.warn('[walk-light] summary:initial-failed', error);
         if (isMounted) setSunlightUnavailable(true);
       });
     return () => {
@@ -763,14 +764,14 @@ export default function WalkActiveScreen() {
               walkIdRef.current!,
               timerStateRef.current.startedAtMs,
             );
-            console.info('[walk-light] service:started', {
+            if (__DEV__) console.info('[walk-light] service:started', {
               walkId: walkIdRef.current,
               startedAt: new Date(timerStateRef.current.startedAtMs).toISOString(),
             });
           }
           nativeTrackingStarted = !pauseTrackingRef.current;
         } catch (error) {
-          console.warn('[walk-light] service:start-failed', error);
+          if (__DEV__) console.warn('[walk-light] service:start-failed', error);
           // Foreground location tracking remains available if native tracking cannot start.
         }
       }
@@ -984,18 +985,18 @@ export default function WalkActiveScreen() {
       try {
         await flushLightSamples();
       } catch (error) {
-        console.warn('[walk-light] result:upload-failed', error);
+        if (__DEV__) console.warn('[walk-light] result:upload-failed', error);
       }
       try {
         const sunlight = await getPetTodaySunlight(petId);
-        console.info('[walk-light] result:summary', {
+        if (__DEV__) console.info('[walk-light] result:summary', {
           sampleCount: sunlight.sample_count,
           qualifyingMinutes: sunlight.qualifying_minutes,
           achievedLuxMinutes: sunlight.achieved_lux_minutes,
         });
         setTodaySunlight(sunlight);
       } catch (error) {
-        console.warn('[walk-light] result:summary-failed', error);
+        if (__DEV__) console.warn('[walk-light] result:summary-failed', error);
         setSunlightUnavailable(true);
       }
     };
@@ -1109,7 +1110,7 @@ export default function WalkActiveScreen() {
               box-shadow: 0 1px 3px rgba(0, 67, 126, 0.3);
             }
           </style>
-          <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false"></script>
+          <script src="${KAKAO_MAP_SDK_URL}"></script>
         </head>
         <body>
           <div id="map"></div>

@@ -1,3 +1,4 @@
+import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -223,7 +224,7 @@ export default function WalkLogDetailScreen() {
           <style>
             html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
           </style>
-          <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false"></script>
+          <script src="${KAKAO_MAP_SDK_URL}"></script>
         </head>
         <body>
           <div id="map"></div>

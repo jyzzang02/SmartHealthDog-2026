@@ -1,4 +1,4 @@
-﻿import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -145,6 +145,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const uploadLock = useRef(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isGuideVisible, setGuideVisible] = useState(true);
   const [galleryImage, setGalleryImage] = useState<GalleryDiagnosisImage | null>(null);
@@ -202,15 +203,10 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
           .sort((a, b) => getSubmissionTime(b) - getSubmissionTime(a))[0];
         const resolvedId = getSubmissionId(latest);
 
-        console.log('[diagnosis] upload:resolved-submission', {
-          type,
-          petId,
-          submissionId: resolvedId || undefined,
-        });
 
         return resolvedId || undefined;
       } catch (error) {
-        console.log('[diagnosis] upload:resolve-submission-failed', error);
+
         return undefined;
       }
     },
@@ -410,104 +406,33 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   ]);
 
   const handleCapture = useCallback(async () => {
-    if (isUploading) return;
-
-    console.log('[diagnosis] capture:start', {
-      type,
-      hasPermission,
-      hasDevice: Boolean(device),
-      selectedPetId,
-      isFocused,
-      format: format
-        ? {
-            photoHeight: format.photoHeight,
-            photoWidth: format.photoWidth,
-            videoHeight: format.videoHeight,
-            videoWidth: format.videoWidth,
-          }
-        : null,
-    });
-
-    const canCapture = await ensureReadyToCapture();
-    if (!canCapture || !isValidPetId(selectedPetId) || !cameraRef.current) {
-      console.log('[diagnosis] capture:blocked', {
-        canCapture,
-        isValidPetId: isValidPetId(selectedPetId),
-        hasCameraRef: Boolean(cameraRef.current),
-      });
-      return;
-    }
-
-    const petId = selectedPetId as number;
-    setIsUploading(true);
-
+    if (uploadLock.current) return;
+    uploadLock.current = true;
     try {
-      console.log('[diagnosis] capture:snapshot', {
-        quality: SNAPSHOT_QUALITY,
-      });
+      const canCapture = await ensureReadyToCapture();
+      if (!canCapture || !isMountedRef.current || !isValidPetId(selectedPetId) || !cameraRef.current) return;
+      const petId = selectedPetId as number;
+      setIsUploading(true);
+
       let photo = await cameraRef.current.takeSnapshot({
         quality: SNAPSHOT_QUALITY,
       });
 
       if (!photo?.path) {
-        console.log('[diagnosis] capture:takePhoto', {
-          flash: isFlashOn && device?.hasFlash ? 'on' : 'off',
-        });
+
         photo = await cameraRef.current.takePhoto({
           flash: isFlashOn && device?.hasFlash ? 'on' : 'off',
           enableShutterSound: true,
         });
       }
 
-      console.log('[diagnosis] capture:photo', {
-        path: photo?.path,
-        width: photo?.width,
-        height: photo?.height,
-      });
 
       const fileUri = toFileUri(photo.path);
-      Image.getSize(
-        fileUri,
-        (width, height) =>
-          console.log('[diagnosis] capture:file:size', {
-            uri: fileUri,
-            width,
-            height,
-          }),
-        (error) =>
-          console.log('[diagnosis] capture:file:read-failed', {
-            uri: fileUri,
-            error: String(error),
-          })
-      );
 
       const fileName = getFileNameFromPath(photo.path, `${type}.jpg`);
-      const upload = (uri: string) =>
-        requestDiagnosis(petId, {
-          uri,
-          type: 'image/jpeg',
-          fileName,
-        });
-
-      let created: CreateSubmissionResponse | null = null;
-      try {
-        created = await upload(fileUri);
-      } catch (uploadError) {
-        const errorMessage =
-          uploadError instanceof Error ? uploadError.message : String(uploadError);
-        if (!errorMessage.includes('Network request failed')) {
-          throw uploadError;
-        }
-
-        console.log('[diagnosis] capture:retry', {
-          reason: 'network failed',
-          uri: photo.path,
-        });
-        created = await upload(photo.path);
-      }
-
+      const created = await requestDiagnosis(petId, { uri: fileUri, type: 'image/jpeg', fileName });
       const submissionId = await resolveLatestSubmissionId(petId, created);
-      console.log('[diagnosis] capture:uploaded', { submissionId });
+
 
       if (!isMountedRef.current) return;
 
@@ -521,13 +446,13 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     } catch (error) {
       if (!isMountedRef.current) return;
 
-      console.log('[diagnosis] capture:error', error);
       const message =
         error instanceof Error
           ? error.message
           : '진단 요청에 실패했습니다. 다시 시도해 주세요.';
       Alert.alert('오류', message);
     } finally {
+      uploadLock.current = false;
       if (isMountedRef.current) {
         setIsUploading(false);
       }
@@ -535,11 +460,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   }, [
     device,
     ensureReadyToCapture,
-    format,
-    hasPermission,
     isFlashOn,
-    isFocused,
-    isUploading,
     navigation,
     requestDiagnosis,
     resultRouteName,
@@ -576,14 +497,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       const fileName = image.fileName;
       const mimeType = image.mimeType;
 
-      console.log('[diagnosis] gallery:upload:start', {
-        type,
-        petId,
-        uri: image.uri,
-        fileName,
-        mimeType,
-        fileSize: image.fileSize,
-      });
 
       const created = await requestDiagnosis(petId, {
         uri: image.uri,
@@ -593,7 +506,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       });
       const submissionId = await resolveLatestSubmissionId(petId, created);
 
-      console.log('[diagnosis] gallery:upload:uploaded', { submissionId });
 
       if (!isMountedRef.current) return;
 
@@ -607,7 +519,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     } catch (error) {
       if (!isMountedRef.current) return;
 
-      console.log('[diagnosis] gallery:upload:error', error);
       const message =
         error instanceof Error
           ? error.message
@@ -628,7 +539,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     resolveLatestSubmissionId,
     selectedPet?.name,
     selectedPetId,
-    type,
   ]);
 
   const handlePickFromGallery = useCallback(() => {
@@ -669,7 +579,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
           height: dimensions.height,
         });
       } catch (error) {
-        console.log('[diagnosis] gallery:select:error', error);
+
         Alert.alert('오류', '사진을 불러오지 못했습니다. 다시 선택해 주세요.');
       }
     };
@@ -678,7 +588,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   }, [isUploading, pets.length, promptPetSelection, selectedPetId, type]);
 
   const handleConfirmGalleryAlignment = useCallback(async () => {
-    if (!galleryImage || isUploading) return;
+    if (!galleryImage || uploadLock.current) return;
 
     if (!diagnosisImageCropper) {
       Alert.alert('오류', '사진 정렬 기능을 준비하지 못했습니다. 앱을 다시 설치해 주세요.');
@@ -698,6 +608,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       Math.min(galleryImage.height - cropHeight, -galleryImageLayout.top / galleryImageLayout.renderedScale)
     );
 
+    uploadLock.current = true;
     try {
       setIsUploading(true);
       const croppedUri = await diagnosisImageCropper.cropImage(
@@ -717,14 +628,15 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
         mimeType: 'image/jpeg',
       });
     } catch (error) {
-      console.log('[diagnosis] gallery:crop:error', error);
+
       Alert.alert('오류', '사진을 정렬하지 못했습니다. 다시 시도해 주세요.');
     } finally {
+      uploadLock.current = false;
       if (isMountedRef.current) {
         setIsUploading(false);
       }
     }
-  }, [galleryImage, galleryImageLayout, handleUploadFromGallery, isUploading, type]);
+  }, [galleryImage, galleryImageLayout, handleUploadFromGallery, type]);
 
   const canInteract = !isLoading && !isUploading;
   const canUseFlash = Boolean(device?.hasFlash);

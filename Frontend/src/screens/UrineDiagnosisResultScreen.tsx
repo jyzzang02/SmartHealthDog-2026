@@ -203,6 +203,9 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const [showExplanations, setShowExplanations] = useState(false);
   const isMountedRef = useRef(true);
   const requestIdRef = useRef(0);
+  const directLookupTriedRef = useRef(false);
+  const requestRef = useRef<AbortController | null>(null);
+  const pollRef = useRef({ startedAt: 0, attempts: 0 });
 
   useEffect(() => {
     return () => {
@@ -214,23 +217,28 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const status = normalizeStatus(submission?.status);
 
   const loadResult = useCallback(async () => {
+    if (requestRef.current) return;
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const timeout = setTimeout(() => controller.abort(), 15_000);
     const requestId = requestIdRef.current + 1;
     requestIdRef.current = requestId;
-    const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId;
+    const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId && !controller.signal.aborted;
 
     setIsLoading(true);
 
     try {
-      if (submissionId) {
+      if (submissionId && !directLookupTriedRef.current) {
+        directLookupTriedRef.current = true;
         try {
-          const direct = await getUrineSubmissionResult(submissionId);
+          const direct = await getUrineSubmissionResult(submissionId, controller.signal);
           if (!canUpdate()) return;
           setSubmission({ id: submissionId, type: 'URINE', status: STATUS_COMPLETED });
           setResult(direct);
           setMessage('');
           return;
         } catch (directError) {
-          console.log('[urine] direct submission lookup skipped; using list fallback', {
+          if (__DEV__) console.log('[urine] direct submission lookup skipped; using list fallback', {
             submissionId,
             message:
               directError instanceof Error ? directError.message : String(directError),
@@ -238,7 +246,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         }
       }
 
-      const submissions = await getPetSubmissions(petId);
+      const submissions = await getPetSubmissions(petId, controller.signal);
       if (!canUpdate()) return;
 
       const urineSubmissions = submissions.filter((item) => isUrineType(item.type));
@@ -300,7 +308,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       if (isCompletedStatus(normalizedStatus) || normalizedStatus.length > 0) {
         try {
-          const detail = await getUrineSubmissionResult(idToFetch);
+          const detail = await getUrineSubmissionResult(idToFetch, controller.signal);
           if (!canUpdate()) return;
           setResult(detail);
           setMessage('');
@@ -329,15 +337,23 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       setMessage(errorMessage);
       Alert.alert('오류', errorMessage);
     } finally {
-      if (canUpdate()) {
+      clearTimeout(timeout);
+      if (requestRef.current === controller) requestRef.current = null;
+      if (isMountedRef.current && requestIdRef.current === requestId) {
         setIsLoading(false);
       }
     }
   }, [petId, submissionId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    pollRef.current = { startedAt: Date.now(), attempts: 0 };
     loadResult();
-  }, [loadResult]);
+    return () => {
+      requestIdRef.current += 1;
+      requestRef.current?.abort();
+      requestRef.current = null;
+    };
+  }, [loadResult]));
 
   useEffect(() => {
     if (!isFocused || isLoading) {
@@ -356,7 +372,10 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       return;
     }
 
+    const poll = pollRef.current;
+    if (poll.attempts >= 30 || Date.now() - poll.startedAt + 2000 > 120_000) return;
     const timer = setTimeout(() => {
+      poll.attempts += 1;
       loadResult();
     }, 2000);
 
