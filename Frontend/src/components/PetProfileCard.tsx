@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import {
   View,
   Text,
@@ -19,6 +19,7 @@ interface PetProfileCardProps {
   healthInfo?: string[];
   condition: string;
   onPressHistory?: () => void;
+  onPressHealthInput?: () => void;
   onPressEdit?: () => void;
 }
 
@@ -31,6 +32,7 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
   healthInfo = [],
   condition,
   onPressHistory,
+  onPressHealthInput,
   onPressEdit,
 }) => {
   const resolvedImageUrl =
@@ -95,6 +97,12 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
             style={styles.smallRightIcon}
           />
         </TouchableOpacity>
+        {onPressHealthInput && (
+          <TouchableOpacity style={[styles.historyBtn, styles.healthInputBtn]} onPress={onPressHealthInput} activeOpacity={0.8}>
+            <Text style={[styles.historyBtnText, styles.healthInputBtnText]}>건강검진 정보 입력</Text>
+            <Image source={require("../assets/icon_right.png")} style={[styles.smallRightIcon, styles.healthInputBtnIcon]} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -205,6 +213,16 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "center",
   },
+
+  healthInputBtn: {
+    marginTop: 10,
+    height: 42,
+    paddingVertical: 0,
+    backgroundColor: "#FFF6D8",
+  },
+
+  healthInputBtnText: { color: "#F4B844" },
+  healthInputBtnIcon: { tintColor: "#F4B844" },
 
   historyBtnText: {
     color: "#0081D5",

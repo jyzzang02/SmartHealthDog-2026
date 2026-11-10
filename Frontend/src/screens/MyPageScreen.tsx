@@ -240,6 +240,7 @@ const MyPageScreen = () => {
             <PetProfileCard
               {...petCards[0]}
               onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+              onPressHealthInput={() => navigation.navigate("HealthCheckInput", { petId: petCards[0].id, petName: petCards[0].name })}
               onPressHistory={() =>
                 navigation.navigate("DiagnosisHistory", {
                   petId: petCards[0].id,
@@ -248,24 +249,6 @@ const MyPageScreen = () => {
               }
             />
           </View>
-          {!healthData[petCards[0].id] && (
-            <TouchableOpacity
-              style={styles.healthInputBtn}
-              onPress={() =>
-                navigation.navigate("HealthCheckInput", {
-                  petId: petCards[0].id,
-                  petName: petCards[0].name,
-                })
-              }
-              activeOpacity={0.8}
-            >
-              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
-              <Image
-                source={require("../assets/icon_right.png")}
-                style={styles.healthInputBtnArrow}
-              />
-            </TouchableOpacity>
-          )}
         </>
       )}
 
@@ -292,6 +275,7 @@ const MyPageScreen = () => {
                   <PetProfileCard
                     {...pet}
                     onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
+                    onPressHealthInput={() => navigation.navigate("HealthCheckInput", { petId: pet.id, petName: pet.name })}
                     onPressHistory={() =>
                       navigation.navigate("DiagnosisHistory", {
                         petId: pet.id,
@@ -313,24 +297,6 @@ const MyPageScreen = () => {
             ))}
           </View>
 
-          {petCards[currentIndex] && !healthData[petCards[currentIndex].id] && (
-            <TouchableOpacity
-              style={styles.healthInputBtn}
-              onPress={() =>
-                navigation.navigate("HealthCheckInput", {
-                  petId: petCards[currentIndex].id,
-                  petName: petCards[currentIndex].name,
-                })
-              }
-              activeOpacity={0.8}
-            >
-              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
-              <Image
-                source={require("../assets/icon_right.png")}
-                style={styles.healthInputBtnArrow}
-              />
-            </TouchableOpacity>
-          )}
         </>
       )}
 
@@ -427,39 +393,13 @@ const styles = StyleSheet.create({
     tintColor: "#7B7C7D",
   },
 
-  /* ────── 건강검진 정보 입력 ────── */
-  healthInputBtn: {
-    width: "90%",
-    alignSelf: "center",
-    marginTop: 12,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    backgroundColor: "#FFF6D8",
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: "#F4B844",
-  },
-  healthInputBtnText: {
-    fontSize: 14,
-    fontWeight: "600",
-    color: "#F4B844",
-  },
-  healthInputBtnArrow: {
-    width: 14,
-    height: 14,
-    tintColor: "#F4B844",
-  },
-
   sectionTitle: {
     fontSize: 18,
     fontWeight: "600",
     color: "#000",
   },
   sectionHeader: {
-    marginTop: 40,
+    marginTop: 16,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",

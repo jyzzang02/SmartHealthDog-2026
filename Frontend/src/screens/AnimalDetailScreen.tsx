@@ -133,9 +133,6 @@ export default function AnimalDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* 보호소 제목 */}
-        <Text style={styles.shelterTitle}>{shelterName}</Text>
-
         {/* 동물 이미지 */}
         <View style={styles.imageContainer}>
           <Image
@@ -248,20 +245,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
   },
-  shelterTitle: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 20,
-    marginBottom: 16,
-  },
   imageContainer: {
     alignItems: 'center',
     marginBottom: 20,
   },
   animalImage: {
-    width: 380,
-    height: 250,
+    width: 320,
+    height: 210,
     borderRadius: 12,
   },
   animalName: {
@@ -346,7 +336,7 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   buttonContainer: {
-    marginTop: 50,
+    marginTop: 16,
     alignItems: 'center',
   },
 });

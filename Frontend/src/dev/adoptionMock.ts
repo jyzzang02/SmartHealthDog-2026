@@ -15,13 +15,13 @@ export const getAdoptionMock = () => {
   const dogImage = Image.resolveAssetSource(require('../assets/img_adoptDog.png'))?.uri;
   const catImage = Image.resolveAssetSource(require('../assets/img_adoptCat.png'))?.uri;
   const samples: PetDetail[] = [
-    { pet_id: 9000101, shelter_id: shelter.shelter_id, name: '[목업] 해피', species: 'dog',
+    { pet_id: 9000101, shelter_id: shelter.shelter_id, name: '[테스트] 해피', species: 'dog',
       breed: '믹스견', age: '2살', gender: 'female', is_neutered: true,
       adoption_status: 'AVAILABLE', images: dogImage ? [dogImage] : [] },
-    { pet_id: 9000102, shelter_id: shelter.shelter_id, name: '[목업] 나비', species: 'cat',
+    { pet_id: 9000102, shelter_id: shelter.shelter_id, name: '[테스트] 나비', species: 'cat',
       breed: '코리안 쇼트헤어', age: '1살', gender: 'male', is_neutered: false,
       adoption_status: 'AVAILABLE', images: catImage ? [catImage] : [] },
-    { pet_id: 9000103, shelter_id: shelter.shelter_id, name: '[목업] 이름이 긴 반려동물 밤비', species: 'dog',
+    { pet_id: 9000103, shelter_id: shelter.shelter_id, name: '[테스트] 이름이 긴 반려동물 밤비', species: 'dog',
       breed: '리트리버', age: '3살', gender: null, is_neutered: null,
       adoption_status: 'AVAILABLE', images: dogImage ? [dogImage] : [] },
   ];

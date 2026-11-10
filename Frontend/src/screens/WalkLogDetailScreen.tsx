@@ -9,6 +9,7 @@ import {
   Animated,
   Easing,
   ActivityIndicator,
+  ScrollView,
   Alert,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -346,7 +347,7 @@ export default function WalkLogDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.mapContainer}>
           <WebView
             key={`walk-detail-map-${record.id}-${pathPoints.length}`}
@@ -415,7 +416,7 @@ export default function WalkLogDetailScreen() {
             )}
           </View>
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -467,9 +468,12 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  contentContainer: {
+    paddingBottom: 32,
+  },
   mapContainer: {
     width: '100%',
-    height: 250,
+    height: 200,
     backgroundColor: '#E9ECEF',
   },
   mapWebView: {

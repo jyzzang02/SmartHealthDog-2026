@@ -48,7 +48,7 @@ it('provides three clearly marked local samples with no real contact or external
   const pets = mock.getPets(id);
   expect(pets).toHaveLength(3);
   expect(new Set(pets.map(pet => pet.species))).toEqual(new Set(['dog', 'cat']));
-  expect(pets.every(pet => pet.name.startsWith('[목업]'))).toBe(true);
+  expect(pets.every(pet => pet.name.startsWith('[테스트]'))).toBe(true);
   expect(pets.every(pet => pet.shelter_contact?.phone_number === undefined)).toBe(true);
   expect(pets.every(pet => pet.images?.[0]?.startsWith('http://localhost:8081/'))).toBe(true);
   const selected = mock.getPetDetail(id, pets[0].pet_id);
@@ -81,18 +81,18 @@ it('renders preview list and detail in release mode without API calls', async ()
     await act(async () => { button.props.onPress(); await flush(); });
   };
   await press('입양 홍보');
-  expect(texts(list)).toContain('[목업] 해피');
-  expect(texts(list)).toContain('[목업] 나비');
+  expect(texts(list)).toContain('[테스트] 해피');
+  expect(texts(list)).toContain('[테스트] 나비');
   await press('모두'); await press('고양이');
-  expect(texts(list)).toContain('[목업] 나비');
-  expect(texts(list)).not.toContain('[목업] 해피');
+  expect(texts(list)).toContain('[테스트] 나비');
+  expect(texts(list)).not.toContain('[테스트] 해피');
   const card = list.root.findAllByType(TouchableOpacity).find(node =>
-    node.findAllByType(Text).some(label => label.props.children === '[목업] 나비'))!;
+    node.findAllByType(Text).some(label => label.props.children === '[테스트] 나비'))!;
   await act(async () => { card.props.onPress(); });
   mockAnimalData = mockNavigation.navigate.mock.calls[0][1].animalData;
   let detail!: renderer.ReactTestRenderer;
   await act(async () => { detail = renderer.create(<AnimalDetailScreen />); trees.push(detail); await flush(); });
-  expect(texts(detail)).toContain('[목업] 나비');
+  expect(texts(detail)).toContain('[테스트] 나비');
   expect(texts(detail)).toContain('입양 가능');
   expect(detail.root.findByType(CustomButton).props.disabled).toBe(true);
   expect(searchAllShelters).not.toHaveBeenCalled();
@@ -122,7 +122,7 @@ it('restores the real list and detail API paths when the preview switch is off',
   })!;
   await act(async () => { tab.props.onPress(); await flush(); });
   expect(texts(list)).toContain('Server pet');
-  expect(texts(list)).not.toContain('[목업] 해피');
+  expect(texts(list)).not.toContain('[테스트] 해피');
   expect(searchAllShelters).toHaveBeenCalled();
   expect(getAllShelterPets).toHaveBeenCalledWith(7, expect.any(AbortSignal));
   const card = list.root.findAllByType(TouchableOpacity).find(node =>

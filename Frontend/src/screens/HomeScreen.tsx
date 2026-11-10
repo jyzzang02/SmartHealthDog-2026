@@ -1,6 +1,10 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import type { RootStackParamList } from '../../App';
+import { healthStore } from '../store/healthStore';
+import type { HealthSummary } from '../types/health';
 import PetHealthCard from '../components/PetHealthCard';
 import ProfileCard from '../components/ProfileCard';
 import BannerSlider from '../components/BannerSlider';
@@ -9,6 +13,8 @@ import { getMyProfile, UserProfile } from '../api/users';
 import { getMyPets, PetListItem } from '../api/pets';
 
 export default function HomeScreen() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -32,6 +38,7 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      setHealthData(healthStore.getAll());
       loadHomeData();
     }, [loadHomeData])
   );
@@ -46,7 +53,8 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>반려동물 보건정보</Text>
 
-        <PetHealthCard pets={pets} loading={petsLoading} />
+        <PetHealthCard pets={pets} loading={petsLoading} healthData={healthData}
+          onPressPet={(pet) => navigation.navigate('HealthCheckInput', { petId: pet.id, petName: pet.name })} />
       </View>
 
       <View style={styles.bannerSpacer} />
