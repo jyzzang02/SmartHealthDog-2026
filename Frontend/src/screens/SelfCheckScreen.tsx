@@ -111,8 +111,8 @@ const SelfCheckScreen = () => {
   const handleBack = () => {
     if (saving) return;
     if (route.params?.recordId) { navigation.goBack(); return; }
-    if (showResult) { setShowResult(false); setSavedRecord(null); }
-    else if (step > 0) setStep(step - 1);
+    if (showResult) { navigation.navigate('Main', { screen: '건강' }); return; }
+    if (step > 0) setStep(step - 1);
     else navigation.goBack();
     scrollToTop();
   };

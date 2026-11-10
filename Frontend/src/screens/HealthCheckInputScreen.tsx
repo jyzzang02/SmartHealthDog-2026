@@ -9,43 +9,45 @@ import {
   Alert,
   Image,
   Modal,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
+import { launchCamera, launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
-import type { PhysicalResult, HealthSummary, OverallCondition } from '../types/health';
+import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
 
 /* ─── 상수 ─── */
-const EXAM_TYPES = [
-  '일반 검진',
-  '혈액검사',
-  '소변검사',
-  '분변검사',
-  '안과검사',
-  '구강/치주검사',
-  '영상검사',
+const CERTIFICATE_FIELDS: {
+  key: keyof DiagnosisCertificate;
+  label: string;
+  placeholder?: string;
+  multiline?: boolean;
+}[] = [
+  { key: 'animalName', label: '동물명' },
+  { key: 'species', label: '종류' },
+  { key: 'breed', label: '품종' },
+  { key: 'sex', label: '성별' },
+  { key: 'coatColor', label: '모색' },
+  { key: 'age', label: '연령' },
+  { key: 'features', label: '특징', multiline: true },
+  { key: 'diseaseName', label: '병명' },
+  { key: 'onsetDate', label: '발병 연월일', placeholder: 'YYYY-MM-DD' },
+  { key: 'diagnosisDate', label: '진단 연월일', placeholder: 'YYYY-MM-DD' },
+  { key: 'prognosis', label: '예후 소견', multiline: true },
+  { key: 'remarks', label: '그 외의 사항(비고)', multiline: true },
 ];
 
-const PHYSICAL_ITEMS = [
-  '체중',
-  '체온',
-  '심박수',
-  '호흡수',
-  '식욕',
-  '활력',
-  '눈',
-  '귀',
-  '피부/피모',
-  '치아/구강',
-  '심장/폐',
-  '복부',
-  '보행/관절',
-];
-
-const RESULT_OPTIONS: PhysicalResult[] = ['정상', '소견 있음', '미실시'];
+const IMAGE_PICKER_OPTIONS = {
+  mediaType: 'photo',
+  quality: 0.8,
+  maxWidth: 2048,
+  maxHeight: 2048,
+} as const;
 
 const todayString = () => {
   const d = new Date();
@@ -55,30 +57,20 @@ const todayString = () => {
   return `${y}-${m}-${day}`;
 };
 
-const calcOverallCondition = (
-  results: Record<string, PhysicalResult>
-): OverallCondition => {
-  const badCount = Object.values(results).filter(v => v === '소견 있음').length;
-  if (badCount === 0) return '양호';
-  if (badCount <= 3) return '주의';
-  return '위험';
-};
-
-const calcRecommendation = (condition: OverallCondition): string => {
-  if (condition === '양호') return '6개월 후 정기 검진 권장';
-  if (condition === '주의') return '3개월 후 정기 검진 권장';
-  return '1개월 후 정기 검진 권장';
-};
-
-const initPhysicalResults = (): Record<string, PhysicalResult> =>
-  Object.fromEntries(PHYSICAL_ITEMS.map(item => [item, '미실시' as PhysicalResult]));
-
-const parseNumber = (value: string): number | undefined => {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? n : undefined;
-};
+const initCertificate = (): DiagnosisCertificate => ({
+  animalName: '',
+  species: '',
+  breed: '',
+  sex: '',
+  coatColor: '',
+  age: '',
+  features: '',
+  diseaseName: '',
+  onsetDate: '',
+  diagnosisDate: '',
+  prognosis: '',
+  remarks: '',
+});
 
 /* ─── 컴포넌트 ─── */
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckInput'>;
@@ -96,14 +88,9 @@ const HealthCheckInputScreen = () => {
   const [isPetSelectorVisible, setPetSelectorVisible] = useState(false);
   const [checkupDate, setCheckupDate] = useState(todayString());
   const [hospitalName, setHospitalName] = useState('');
-  const [selectedExamTypes, setSelectedExamTypes] = useState<string[]>([]);
-  const [physicalResults, setPhysicalResults] = useState<Record<string, PhysicalResult>>(
-    initPhysicalResults
-  );
-  const [notes, setNotes] = useState('');
-  const [weight, setWeight] = useState('');
-  const [heartRate, setHeartRate] = useState('');
-  const [temperature, setTemperature] = useState('');
+  const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
+  // 추후 OCR 결과도 이 state에 채워 넣으며, 입력 칸은 항상 수동 수정 가능
+  const [certificate, setCertificate] = useState<DiagnosisCertificate>(initCertificate);
 
   useEffect(() => {
     let isMounted = true;
@@ -128,35 +115,60 @@ const HealthCheckInputScreen = () => {
   }, [petId]);
 
   /* ─── 핸들러 ─── */
-  const toggleExamType = (type: string) => {
-    setSelectedExamTypes(prev =>
-      prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
-    );
+  const setCertificateField = (key: keyof DiagnosisCertificate, value: string) => {
+    setCertificate(prev => ({ ...prev, [key]: value }));
   };
 
-  const setPhysicalResult = (item: string, result: PhysicalResult) => {
-    setPhysicalResults(prev => ({ ...prev, [item]: result }));
+  const handleImageResponse = (response: ImagePickerResponse) => {
+    if (response.didCancel) return;
+    const uri = response.assets?.[0]?.uri;
+    if (response.errorCode || !uri) {
+      Alert.alert('오류', '이미지를 불러올 수 없습니다.');
+      return;
+    }
+    setCertificateImageUri(uri);
+  };
+
+  const requestCameraPermission = async () => {
+    if (Platform.OS !== 'android') return true;
+    try {
+      const granted = await PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA, {
+        title: '카메라 접근 권한',
+        message: '진단서를 촬영하기 위해 카메라 접근 권한이 필요합니다.',
+        buttonNegative: '취소',
+        buttonPositive: '확인',
+      });
+      return granted === PermissionsAndroid.RESULTS.GRANTED;
+    } catch {
+      return false;
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    const hasPermission = await requestCameraPermission();
+    if (!hasPermission) {
+      Alert.alert('권한 필요', '진단서를 촬영하려면 카메라 권한을 허용해 주세요.');
+      return;
+    }
+    launchCamera(IMAGE_PICKER_OPTIONS, handleImageResponse);
+  };
+
+  const handlePickFromAlbum = () => {
+    launchImageLibrary({ ...IMAGE_PICKER_OPTIONS, selectionLimit: 1 }, handleImageResponse);
   };
 
   const handleSubmit = () => {
-    const overallCondition = calcOverallCondition(physicalResults);
-    const healthTags = Object.entries(physicalResults)
-      .filter(([, v]) => v === '소견 있음')
-      .map(([k]) => k);
+    const trimmedCertificate = { ...certificate };
+    CERTIFICATE_FIELDS.forEach(({ key }) => {
+      trimmedCertificate[key] = certificate[key].trim();
+    });
 
     const summary: HealthSummary = {
       petId: selectedPetId,
       checkupDate,
       hospitalName: hospitalName.trim() || undefined,
-      examTypes: selectedExamTypes,
-      physicalResults,
-      notes: notes.trim() || undefined,
-      overallCondition,
-      healthTags,
-      recommendation: calcRecommendation(overallCondition),
-      weight: parseNumber(weight),
-      heartRate: parseNumber(heartRate),
-      temperature: parseNumber(temperature),
+      certificate: trimmedCertificate,
+      certificateImageUri: certificateImageUri || undefined,
     };
 
     navigation.navigate('HealthCheckResult', {
@@ -200,7 +212,7 @@ const HealthCheckInputScreen = () => {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.description}>
-          반려동물의 건강검진 결과를 입력하거나 불러올 수 있습니다.
+          병원 진단서를 촬영하거나 앨범에서 불러와 건강검진 정보를 입력할 수 있습니다.
         </Text>
 
         {/* ── 기본 정보 ── */}
@@ -243,145 +255,66 @@ const HealthCheckInputScreen = () => {
           />
         </View>
 
-        {/* 검진 종류 */}
-        <View style={styles.examTypeSection}>
-          <Text style={styles.subLabel}>검진 종류</Text>
-          <View style={styles.examTypeRow}>
-            {EXAM_TYPES.map(type => {
-              const active = selectedExamTypes.includes(type);
-              return (
-                <TouchableOpacity
-                  key={type}
-                  style={[styles.examTypeBtn, active && styles.examTypeBtnActive]}
-                  onPress={() => toggleExamType(type)}
-                >
-                  <Text
-                    style={[
-                      styles.examTypeBtnText,
-                      active && styles.examTypeBtnTextActive,
-                    ]}
-                  >
-                    {type}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </View>
-
-        {/* ── 측정 수치 ── */}
-        <Text style={[styles.sectionTitle, { marginTop: 28 }]}>측정 수치 (선택)</Text>
-        <View style={styles.vitalsRow}>
-          <View style={styles.vitalsBox}>
-            <Text style={styles.vitalsLabel}>체중</Text>
-            <View style={styles.vitalsField}>
-              <TextInput
-                style={styles.vitalsInput}
-                value={weight}
-                onChangeText={setWeight}
-                placeholder="0.0"
-                placeholderTextColor="#aaa"
-                keyboardType="decimal-pad"
-              />
-              <Text style={styles.vitalsUnit}>kg</Text>
-            </View>
-          </View>
-          <View style={styles.vitalsBox}>
-            <Text style={styles.vitalsLabel}>심박수</Text>
-            <View style={styles.vitalsField}>
-              <TextInput
-                style={styles.vitalsInput}
-                value={heartRate}
-                onChangeText={setHeartRate}
-                placeholder="0"
-                placeholderTextColor="#aaa"
-                keyboardType="number-pad"
-              />
-              <Text style={styles.vitalsUnit}>bpm</Text>
-            </View>
-          </View>
-          <View style={styles.vitalsBox}>
-            <Text style={styles.vitalsLabel}>체온</Text>
-            <View style={styles.vitalsField}>
-              <TextInput
-                style={styles.vitalsInput}
-                value={temperature}
-                onChangeText={setTemperature}
-                placeholder="0.0"
-                placeholderTextColor="#aaa"
-                keyboardType="decimal-pad"
-              />
-              <Text style={styles.vitalsUnit}>°C</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* ── 기본 신체검사 결과 ── */}
-        <Text style={[styles.sectionTitle, { marginTop: 28 }]}>기본 신체검사 결과</Text>
-        <View style={styles.physicalContainer}>
-          {PHYSICAL_ITEMS.map((item, idx) => (
-            <View
-              key={item}
-              style={[
-                styles.physicalRow,
-                idx < PHYSICAL_ITEMS.length - 1 && styles.physicalRowBorder,
-              ]}
-            >
-              <Text style={styles.physicalLabel}>{item}</Text>
-              <View style={styles.physicalBtns}>
-                {RESULT_OPTIONS.map(result => {
-                  const active = physicalResults[item] === result;
-                  return (
-                    <TouchableOpacity
-                      key={result}
-                      style={[
-                        styles.physicalBtn,
-                        active && styles.physicalBtnActive,
-                      ]}
-                      onPress={() => setPhysicalResult(item, result)}
-                    >
-                      <Text
-                        style={[
-                          styles.physicalBtnText,
-                          active && styles.physicalBtnTextActive,
-                        ]}
-                      >
-                        {result}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          ))}
-        </View>
-
-        {/* ── 검진결과 불러오기 ── */}
-        <View style={styles.importBox}>
-          <Text style={styles.importTitle}>검진결과를 빠르게 불러오세요</Text>
-          <Text style={styles.importDesc}>
-            병원 연동 또는 진단서 업로드로 자동 입력할 수 있습니다
+        {/* ── 진단서 이미지 ── */}
+        <View style={styles.certBox}>
+          <Text style={styles.certTitle}>진단서 이미지</Text>
+          <Text style={styles.certDesc}>
+            병원 진단서를 촬영하거나 앨범에서 선택해 주세요.
           </Text>
-          <TouchableOpacity
-            style={styles.importBtn}
-            onPress={() => Alert.alert('알림', '준비 중인 기능입니다.')}
-          >
-            <Text style={styles.importBtnText}>검진결과 불러오기</Text>
-          </TouchableOpacity>
+          {certificateImageUri && (
+            <View style={styles.certPreviewWrap}>
+              <Image
+                source={{ uri: certificateImageUri }}
+                style={styles.certPreview}
+                resizeMode="contain"
+              />
+              <TouchableOpacity
+                style={styles.certRemoveBtn}
+                onPress={() => setCertificateImageUri(null)}
+              >
+                <Text style={styles.certRemoveBtnText}>삭제</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+          <View style={styles.certBtnRow}>
+            <TouchableOpacity style={styles.certBtn} onPress={handleTakePhoto}>
+              <Text style={styles.certBtnText}>촬영하기</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.certBtn} onPress={handlePickFromAlbum}>
+              <Text style={styles.certBtnText}>앨범에서 선택</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {/* ── 특이사항 ── */}
-        <Text style={[styles.subLabel, { marginTop: 28 }]}>특이사항</Text>
-        <TextInput
-          style={styles.notesInput}
-          value={notes}
-          onChangeText={setNotes}
-          placeholder="특이사항을 입력해주세요"
-          placeholderTextColor="#aaa"
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-        />
+        {/* ── 진단서 정보 ── */}
+        <Text style={[styles.sectionTitle, { marginTop: 28 }]}>진단서 정보</Text>
+        {CERTIFICATE_FIELDS.map(({ key, label, placeholder, multiline }) => (
+          <View key={key}>
+            <Text style={styles.fieldLabel}>{label}</Text>
+            {multiline ? (
+              <TextInput
+                style={styles.multilineInput}
+                value={certificate[key]}
+                onChangeText={value => setCertificateField(key, value)}
+                placeholder={placeholder}
+                placeholderTextColor="#aaa"
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            ) : (
+              <View style={styles.inputBox}>
+                <TextInput
+                  style={styles.inputValue}
+                  value={certificate[key]}
+                  onChangeText={value => setCertificateField(key, value)}
+                  placeholder={placeholder}
+                  placeholderTextColor="#aaa"
+                />
+              </View>
+            )}
+          </View>
+        ))}
       </ScrollView>
 
       {/* 하단 버튼 */}
@@ -495,12 +428,6 @@ const styles = StyleSheet.create({
     color: '#040505',
     marginBottom: 12,
   },
-  subLabel: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#040505',
-    marginBottom: 10,
-  },
 
   /* 입력 박스 */
   inputBox: {
@@ -565,163 +492,85 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
 
-  /* 측정 수치 */
-  vitalsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  vitalsBox: {
-    flex: 1,
-  },
-  vitalsLabel: {
-    fontSize: 13,
-    color: '#7B7C7D',
-    marginBottom: 6,
-  },
-  vitalsField: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#E0E0E0',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  vitalsInput: {
-    flex: 1,
-    fontSize: 15,
-    color: '#040505',
-  },
-  vitalsUnit: {
-    fontSize: 13,
-    color: '#7B7C7D',
-    marginLeft: 4,
-  },
-
-  /* 검진 종류 */
-  examTypeSection: {
-    marginTop: 4,
-  },
-  examTypeRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  examTypeBtn: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#D0D0D0',
-    backgroundColor: '#fff',
-    marginBottom: 4,
-  },
-  examTypeBtnActive: {
-    borderColor: '#0081D5',
-    backgroundColor: '#EEF7FD',
-  },
-  examTypeBtnText: {
-    fontSize: 14,
-    color: '#333',
-  },
-  examTypeBtnTextActive: {
-    color: '#0081D5',
-    fontWeight: '600',
-  },
-
-  /* 신체검사 */
-  physicalContainer: {
-    borderWidth: 1,
-    borderColor: '#E8E8E8',
-    borderRadius: 10,
-    overflow: 'hidden',
-    marginBottom: 4,
-  },
-  physicalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-  },
-  physicalRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#F3F4F5',
-  },
-  physicalLabel: {
-    width: 72,
-    fontSize: 14,
-    color: '#333',
-  },
-  physicalBtns: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  physicalBtn: {
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#D0D0D0',
-    backgroundColor: '#fff',
-  },
-  physicalBtnActive: {
-    backgroundColor: '#0081D5',
-    borderColor: '#0081D5',
-  },
-  physicalBtnText: {
-    fontSize: 13,
-    color: '#333',
-  },
-  physicalBtnTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-
-  /* 검진결과 불러오기 */
-  importBox: {
-    marginTop: 24,
+  /* 진단서 이미지 */
+  certBox: {
+    marginTop: 16,
     backgroundColor: '#EEF7FD',
     borderRadius: 12,
     padding: 20,
     borderWidth: 1,
     borderColor: '#0081D5',
   },
-  importTitle: {
+  certTitle: {
     fontSize: 15,
     fontWeight: '700',
     color: '#040505',
     marginBottom: 6,
   },
-  importDesc: {
+  certDesc: {
     fontSize: 13,
     color: '#555',
     lineHeight: 20,
     marginBottom: 16,
   },
-  importBtn: {
+  certPreviewWrap: {
+    marginBottom: 16,
+  },
+  certPreview: {
+    width: '100%',
+    height: 240,
+    borderRadius: 8,
+    backgroundColor: '#fff',
+  },
+  certRemoveBtn: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.55)',
+  },
+  certRemoveBtnText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  certBtnRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  certBtn: {
+    flex: 1,
     backgroundColor: '#0081D5',
     borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  importBtnText: {
+  certBtnText: {
     color: '#fff',
     fontSize: 15,
     fontWeight: '600',
   },
 
-  /* 특이사항 */
-  notesInput: {
+  /* 진단서 정보 */
+  fieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#040505',
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  multilineInput: {
     borderWidth: 1,
     borderColor: '#E0E0E0',
     borderRadius: 8,
     paddingHorizontal: 16,
     paddingVertical: 12,
-    fontSize: 14,
+    fontSize: 15,
     color: '#040505',
-    minHeight: 100,
-    marginTop: 4,
+    minHeight: 84,
+    marginBottom: 8,
   },
 
   /* 하단 버튼 */

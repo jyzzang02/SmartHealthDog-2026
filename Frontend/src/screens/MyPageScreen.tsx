@@ -20,8 +20,6 @@ import { getStoredAccessToken } from "../storage/tokenStorage";
 import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
-import { healthStore } from "../store/healthStore";
-import type { HealthSummary } from "../types/health";
 import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
@@ -42,7 +40,6 @@ const MyPageScreen = () => {
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
-  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const isMountedRef = useRef(true);
   const petLoadGeneration = useRef(0);
 
@@ -122,35 +119,19 @@ const MyPageScreen = () => {
     }, [loadData])
   );
 
-  // HealthCheckInputScreen / HealthCheckResultScreen 에서 돌아올 때마다 캐시 동기화
-  useFocusEffect(
-    useCallback(() => {
-      setHealthData(healthStore.getAll());
-    }, [])
-  );
-
   const petCards = useMemo(
     () =>
-      petList.map((pet) => {
-        const summary = healthData[pet.id];
-        return {
-          id: pet.id,
-          name: pet.name || "이름 없음",
-          type: pet.breed || mapSpeciesLabel(pet.species) || "",
-          gender: mapGenderLabel(pet.sex) || "",
-          birth: formatBirthDate(pet.birthDate) || "",
-          imageUrl: resolveImageUri(pet.profilePicture) || null,
-          healthInfo: summary
-            ? summary.healthTags.length > 0
-              ? summary.healthTags
-              : ["특이사항 없음"]
-            : Array.isArray(pet.healthInfo)
-              ? pet.healthInfo
-              : [],
-          condition: summary ? summary.overallCondition : "정보 없음",
-        };
-      }),
-    [petList, healthData]
+      petList.map((pet) => ({
+        id: pet.id,
+        name: pet.name || "이름 없음",
+        type: pet.breed || mapSpeciesLabel(pet.species) || "",
+        gender: mapGenderLabel(pet.sex) || "",
+        birth: formatBirthDate(pet.birthDate) || "",
+        imageUrl: resolveImageUri(pet.profilePicture) || null,
+        healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
+        condition: "정보 없음",
+      })),
+    [petList]
   );
 
   const resolvedUserImage = resolveImageUri(user?.profilePicture);

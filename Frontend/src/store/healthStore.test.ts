@@ -4,11 +4,20 @@ import type { HealthSummary } from '../types/health';
 const createSummary = (petId: number, checkupDate: string): HealthSummary => ({
   petId,
   checkupDate,
-  examTypes: ['일반 검진', '혈액검사'],
-  physicalResults: {},
-  overallCondition: '양호',
-  healthTags: [],
-  recommendation: '6개월 후 정기 검진 권장',
+  certificate: {
+    animalName: '',
+    species: '',
+    breed: '',
+    sex: '',
+    coatColor: '',
+    age: '',
+    features: '',
+    diseaseName: '',
+    onsetDate: '',
+    diagnosisDate: '',
+    prognosis: '',
+    remarks: '',
+  },
 });
 
 describe('healthStore', () => {

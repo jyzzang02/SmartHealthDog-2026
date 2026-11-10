@@ -6,7 +6,6 @@ import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { healthStore } from '../store/healthStore';
-import { CONDITION_COLORS } from '../types/health';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckResult'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckResult'>;
@@ -16,10 +15,6 @@ const HealthCheckResultScreen = () => {
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { petId, petName, summary } = route.params;
-
-  const conditionColor = CONDITION_COLORS[summary.overallCondition].text;
-  const summaryText =
-    summary.healthTags.length > 0 ? summary.healthTags.join(', ') : '특이사항 없음';
 
   const handleSave = () => {
     healthStore.set(petId, summary);
@@ -57,16 +52,9 @@ const HealthCheckResultScreen = () => {
             <Text style={styles.infoLabel}>검진일</Text>
             <Text style={styles.infoValue}>{summary.checkupDate}</Text>
           </View>
-
-          <View style={styles.summaryBox}>
-            <Text style={styles.summaryLabel}>건강 상태 요약</Text>
-            <Text style={[styles.summaryValue, { color: conditionColor }]}>
-              {summaryText}
-            </Text>
-          </View>
-
-          <View style={styles.trackBox}>
-            <Text style={styles.trackText}>{`✓ ${summary.recommendation}`}</Text>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>병원명</Text>
+            <Text style={styles.infoValue}>{summary.hospitalName || '미입력'}</Text>
           </View>
         </View>
       </ScrollView>
@@ -158,34 +146,6 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 16,
     color: '#040505',
-    fontWeight: '500',
-  },
-
-  /* 건강 상태 요약 */
-  summaryBox: {
-    backgroundColor: '#F3F4F5',
-    borderRadius: 12,
-    padding: 16,
-    gap: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#7B7C7D',
-  },
-  summaryValue: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  /* 추적관찰 */
-  trackBox: {
-    backgroundColor: '#EEF7FD',
-    borderRadius: 8,
-    padding: 12,
-  },
-  trackText: {
-    fontSize: 14,
-    color: '#0081D5',
     fontWeight: '500',
   },
 
