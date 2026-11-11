@@ -14,7 +14,15 @@ const HealthCheckResultScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
-  const { petId, petName, summary } = route.params;
+  const { petId, petName, summary, viewOnly } = route.params;
+  const fields = [
+    ['동물명', summary.certificate.animalName], ['종류', summary.certificate.species],
+    ['품종', summary.certificate.breed], ['성별', summary.certificate.sex],
+    ['모색', summary.certificate.coatColor], ['연령', summary.certificate.age],
+    ['특징', summary.certificate.features], ['병명', summary.certificate.diseaseName],
+    ['발병 연월일', summary.certificate.onsetDate], ['진단 연월일', summary.certificate.diagnosisDate],
+    ['예후 소견', summary.certificate.prognosis], ['그 외의 사항(비고)', summary.certificate.remarks],
+  ];
 
   const handleSave = () => {
     healthStore.set(petId, summary);
@@ -36,13 +44,9 @@ const HealthCheckResultScreen = () => {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, viewOnly && { paddingBottom: 24 + Math.max(insets.bottom, 24) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.description}>
-          불러오거나 입력한 검진결과를 확인해주세요
-        </Text>
-
         <View style={styles.card}>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>반려동물</Text>
@@ -57,17 +61,30 @@ const HealthCheckResultScreen = () => {
             <Text style={styles.infoValue}>{summary.hospitalName || '미입력'}</Text>
           </View>
         </View>
+        {viewOnly && (
+          <View style={[styles.card, { marginTop: 16 }]}>
+            {summary.certificateImageUri && (
+              <Image source={{ uri: summary.certificateImageUri }} resizeMode="contain" style={{ width: '100%', height: 200, marginBottom: 16 }} />
+            )}
+            {fields.map(([label, value]) => (
+              <View key={label} style={styles.infoRow}>
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, { flex: 1, textAlign: 'right', marginLeft: 12 }]}>{value || '미입력'}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
+      {!viewOnly && <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
         <TouchableOpacity style={styles.editBtn} onPress={() => navigation.goBack()}>
           <Text style={styles.editBtnText}>수정하기</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
           <Text style={styles.saveBtnText}>저장하기</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
     </View>
   );
 };
@@ -110,14 +127,8 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 24,
+    paddingTop: 16,
     paddingBottom: 24,
-  },
-  description: {
-    fontSize: 14,
-    color: '#7B7C7D',
-    lineHeight: 22,
-    marginBottom: 16,
   },
 
   /* 카드 */

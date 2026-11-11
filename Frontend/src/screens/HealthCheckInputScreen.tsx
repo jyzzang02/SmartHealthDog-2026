@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,8 @@ import {
   Modal,
   PermissionsAndroid,
   Platform,
+  Keyboard,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { launchCamera, launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
 import { useNavigation, useRoute } from '@react-navigation/native';
@@ -57,7 +59,22 @@ const todayString = () => {
   return `${y}-${m}-${day}`;
 };
 
-const initCertificate = (): DiagnosisCertificate => ({
+const isCalendarDate = (value: string) => {
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+
+const getCertificateAge = (birthDate: string | undefined, checkupDate: string) => {
+  const birth = birthDate?.split('T')[0].trim() ?? '';
+  const checkup = checkupDate.trim();
+  if (!isCalendarDate(birth) || !isCalendarDate(checkup) || birth > checkup) return '';
+
+  const years = Number(checkup.slice(0, 4)) - Number(birth.slice(0, 4));
+  const age = checkup.slice(5) < birth.slice(5) ? years - 1 : years;
+  return `${age}세`;
+};
+
+const emptyCertificate: DiagnosisCertificate = {
   animalName: '',
   species: '',
   breed: '',
@@ -70,7 +87,10 @@ const initCertificate = (): DiagnosisCertificate => ({
   diagnosisDate: '',
   prognosis: '',
   remarks: '',
-});
+};
+
+const CERTIFICATE_SPECIES: Record<string, string> = { DOG: '강아지', CAT: '고양이' };
+const CERTIFICATE_SEX: Record<string, string> = { MALE: '수컷', FEMALE: '암컷', UNKNOWN: '미상' };
 
 /* ─── 컴포넌트 ─── */
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckInput'>;
@@ -81,6 +101,12 @@ const HealthCheckInputScreen = () => {
   const route = useRoute<RoutePropType>();
   const insets = useSafeAreaInsets();
   const { petId, petName } = route.params;
+  const screenRef = useRef<View>(null);
+  const scrollRef = useRef<ScrollView>(null);
+  const scrollOffset = useRef(0);
+  const revealFrame = useRef<number | null>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(() => Keyboard.isVisible());
+  const [androidKeyboardOverlap, setAndroidKeyboardOverlap] = useState(0);
 
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState(petId);
@@ -89,8 +115,80 @@ const HealthCheckInputScreen = () => {
   const [checkupDate, setCheckupDate] = useState(todayString());
   const [hospitalName, setHospitalName] = useState('');
   const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
-  // 추후 OCR 결과도 이 state에 채워 넣으며, 입력 칸은 항상 수동 수정 가능
-  const [certificate, setCertificate] = useState<DiagnosisCertificate>(initCertificate);
+  const [certificateOverrides, setCertificateOverrides] = useState<Partial<DiagnosisCertificate>>({});
+  const selectedPet = pets.find(pet => pet.id === selectedPetId);
+  const species = selectedPet?.species?.trim() ?? '';
+  const sex = selectedPet?.gender?.trim() || selectedPet?.sex?.trim() || '';
+  // Keep profile defaults separate so a late response cannot overwrite edits.
+  const certificate: DiagnosisCertificate = {
+    ...emptyCertificate,
+    animalName: selectedPet?.name || (selectedPetId === petId ? petName : ''),
+    species: CERTIFICATE_SPECIES[species.toUpperCase()] ?? species,
+    breed: selectedPet?.breed ?? '',
+    sex: CERTIFICATE_SEX[sex.toUpperCase()] ?? sex,
+    age: getCertificateAge(selectedPet?.birthDate || selectedPet?.birthday, checkupDate),
+    ...certificateOverrides,
+  };
+
+  const revealFocusedInput = useCallback(() => {
+    if (!Keyboard.isVisible() || revealFrame.current !== null) return;
+
+    revealFrame.current = requestAnimationFrame(() => {
+      revealFrame.current = null;
+      const scroll = scrollRef.current;
+      const input = TextInput.State.currentlyFocusedInput();
+      if (!scroll || !input) return;
+
+      scroll.getNativeScrollRef()?.measureInWindow((_x, viewportTop, _width, viewportHeight) => {
+        input.measureInWindow((_inputX, inputTop, _inputWidth, inputHeight) => {
+          const keyboard = Keyboard.metrics();
+          if (!keyboard || scrollRef.current !== scroll || TextInput.State.currentlyFocusedInput() !== input) return;
+
+          // The fixed footer can make the scroll viewport end above the keyboard.
+          const visibleBottom = Math.min(viewportTop + viewportHeight, keyboard.screenY);
+          if (visibleBottom <= viewportTop || inputHeight <= 0) return;
+          const gap = 12;
+          const delta = inputTop < viewportTop || inputHeight + gap > visibleBottom - viewportTop
+            ? inputTop - viewportTop - gap
+            : Math.max(0, inputTop + inputHeight + gap - visibleBottom);
+          if (delta !== 0) scroll.scrollTo({ y: Math.max(0, scrollOffset.current + delta), animated: true });
+        });
+      });
+    });
+  }, []);
+
+  const updateAndroidKeyboardOverlap = useCallback(() => {
+    const screen = screenRef.current;
+    if (!screen || !Keyboard.isVisible()) return;
+
+    screen.measureInWindow((_x, top, _width, height) => {
+      const keyboard = Keyboard.metrics();
+      if (!keyboard || screenRef.current !== screen || height <= 0) return;
+
+      // Only reserve the space that Android's window resize did not remove.
+      setAndroidKeyboardOverlap(Math.max(0, Math.ceil(top + height - keyboard.screenY)));
+    });
+  }, []);
+
+  useEffect(() => {
+    const show = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+      updateAndroidKeyboardOverlap();
+      revealFocusedInput();
+    });
+    const hide = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+      setAndroidKeyboardOverlap(0);
+    });
+    return () => {
+      show.remove();
+      hide.remove();
+      if (revealFrame.current !== null) {
+        cancelAnimationFrame(revealFrame.current);
+        revealFrame.current = null;
+      }
+    };
+  }, [revealFocusedInput, updateAndroidKeyboardOverlap]);
 
   useEffect(() => {
     let isMounted = true;
@@ -100,9 +198,9 @@ const HealthCheckInputScreen = () => {
         if (!isMounted) return;
         setPets(petList);
 
-        const selectedPet = petList.find((pet) => pet.id === petId);
-        if (selectedPet?.name) {
-          setSelectedPetName(selectedPet.name);
+        const initialPet = petList.find((pet) => pet.id === petId);
+        if (initialPet?.name) {
+          setSelectedPetName(initialPet.name);
         }
       })
       .catch(() => {
@@ -116,7 +214,7 @@ const HealthCheckInputScreen = () => {
 
   /* ─── 핸들러 ─── */
   const setCertificateField = (key: keyof DiagnosisCertificate, value: string) => {
-    setCertificate(prev => ({ ...prev, [key]: value }));
+    setCertificateOverrides(prev => ({ ...prev, [key]: value }));
   };
 
   const handleImageResponse = (response: ImagePickerResponse) => {
@@ -179,14 +277,25 @@ const HealthCheckInputScreen = () => {
   };
 
   const handleSelectPet = (pet: PetListItem) => {
+    if (pet.id !== selectedPetId) {
+      setCertificateOverrides(prev => {
+        const next = { ...prev };
+        delete next.animalName;
+        delete next.species;
+        delete next.breed;
+        delete next.sex;
+        delete next.age;
+        return next;
+      });
+    }
     setSelectedPetId(pet.id);
     setSelectedPetName(pet.name || '이름 없음');
     setPetSelectorVisible(false);
   };
 
   /* ─── 렌더 ─── */
-  return (
-    <View style={styles.screen}>
+  const content = (
+    <>
       {/* NavBar */}
       <View
         style={[
@@ -207,8 +316,12 @@ const HealthCheckInputScreen = () => {
       </View>
 
       <ScrollView
+        ref={scrollRef}
         style={styles.scroll}
         contentContainerStyle={styles.content}
+        onLayout={revealFocusedInput}
+        onScroll={({ nativeEvent }) => { scrollOffset.current = nativeEvent.contentOffset.y; }}
+        scrollEventThrottle={16}
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.description}>
@@ -236,6 +349,7 @@ const HealthCheckInputScreen = () => {
         <View style={styles.inputBox}>
           <TextInput
             style={styles.inputValue}
+            onFocus={revealFocusedInput}
             value={checkupDate}
             onChangeText={setCheckupDate}
             placeholder="YYYY-MM-DD"
@@ -248,6 +362,7 @@ const HealthCheckInputScreen = () => {
         <View style={styles.inputBox}>
           <TextInput
             style={styles.inputValue}
+            onFocus={revealFocusedInput}
             value={hospitalName}
             onChangeText={setHospitalName}
             placeholder="병원명 (선택)"
@@ -294,6 +409,7 @@ const HealthCheckInputScreen = () => {
             {multiline ? (
               <TextInput
                 style={styles.multilineInput}
+                onFocus={revealFocusedInput}
                 value={certificate[key]}
                 onChangeText={value => setCertificateField(key, value)}
                 placeholder={placeholder}
@@ -306,6 +422,7 @@ const HealthCheckInputScreen = () => {
               <View style={styles.inputBox}>
                 <TextInput
                   style={styles.inputValue}
+                  onFocus={revealFocusedInput}
                   value={certificate[key]}
                   onChangeText={value => setCertificateField(key, value)}
                   placeholder={placeholder}
@@ -321,7 +438,7 @@ const HealthCheckInputScreen = () => {
       <View
         style={[
           styles.bottomBtns,
-          { paddingBottom: Math.max(insets.bottom, 16) + 12 },
+          { paddingBottom: (keyboardVisible ? 0 : insets.bottom) + 8 },
         ]}
       >
         <TouchableOpacity
@@ -369,7 +486,22 @@ const HealthCheckInputScreen = () => {
           </View>
         </View>
       </Modal>
-    </View>
+    </>
+  );
+
+  if (Platform.OS === 'android') {
+    return (
+      <View ref={screenRef} collapsable={false} onLayout={updateAndroidKeyboardOverlap}
+        style={[styles.screen, { paddingBottom: androidKeyboardOverlap }]}>
+        {content}
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView style={styles.screen} behavior="padding" enabled={Platform.OS === 'ios'}>
+      {content}
+    </KeyboardAvoidingView>
   );
 };
 
@@ -577,7 +709,7 @@ const styles = StyleSheet.create({
   bottomBtns: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 12,
     gap: 12,
     borderTopWidth: 1,
     borderTopColor: '#F3F4F5',

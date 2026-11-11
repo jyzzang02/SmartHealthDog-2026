@@ -13,7 +13,6 @@ import { STAGE_BAR_COLOR } from '../data/selfCheck';
 import {
   BREED_RISK_LIST,
   RISK_COLORS,
-  PEDIGREE_INTRO_TEXT,
   PEDIGREE_INFO_TITLE,
   PEDIGREE_INFO_DESC,
 } from '../data/breedRisk';
@@ -141,7 +140,9 @@ const HealthDetailScreen = () => {
   const ageYears = calcAgeYears(pet?.birthDate || pet?.birthday);
   const ageLabel = ageYears !== null ? `${ageYears}세` : '';
   const genderLabel = mapGenderSuffix(pet?.sex || pet?.gender);
-  const subInfoText = [breedLabel, ageLabel, genderLabel].filter(Boolean).join(' · ');
+  const weightKg = pet?.weightKg;
+  const weightLabel = typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg}kg` : '';
+  const subInfoText = [breedLabel, ageLabel, genderLabel, weightLabel].filter(Boolean).join(' · ');
 
   const recentStatusText = summary
     ? summary.hospitalName || '병원명 미입력'
@@ -166,7 +167,7 @@ const HealthDetailScreen = () => {
         {/* 펫 정보 카드 */}
         <View style={styles.petCard}>
           <View style={styles.petCardHeaderRow}>
-            <View>
+            <View style={weightLabel ? styles.petHeaderInfo : undefined}>
               <Text style={styles.petName}>{displayName}</Text>
               <Text style={styles.petSubInfo}>{subInfoText}</Text>
             </View>
@@ -226,14 +227,15 @@ const HealthDetailScreen = () => {
           {activeTab === '검진 기록' && (
             history.length > 0 ? (
               history.map((record, index) => (
-                <View key={`${record.checkupDate}-${index}`} style={styles.examCard}>
+                <TouchableOpacity key={`${record.checkupDate}-${index}`} style={styles.examCard} accessibilityRole="button"
+                  onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, summary: record, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
                     <Text style={styles.examHospitalName}>
                       {record.hospitalName || '병원명 미입력'}
                     </Text>
                     <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
-                </View>
+                </TouchableOpacity>
               ))
             ) : (
               <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
@@ -307,7 +309,9 @@ const HealthDetailScreen = () => {
 
           {activeTab === '혈통 위험도' && (
             <>
-              <Text style={styles.pedigreeIntroText}>{PEDIGREE_INTRO_TEXT}</Text>
+              <View style={styles.pedigreeScopeNotice}>
+                <Text style={styles.pedigreeScopeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
+              </View>
 
               {/* 목록 안내 (단순 텍스트 카드) */}
               <View style={styles.pedigreeInfoCard}>
@@ -396,6 +400,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   petName: { fontSize: 20, fontWeight: '700', color: '#040505', marginBottom: 4 },
+  petHeaderInfo: { flexShrink: 1, marginEnd: 8 },
   petSubInfo: { fontSize: 14, color: '#7B7C7D' },
   addExamBtn: { backgroundColor: '#0081D5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   addExamBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
@@ -522,7 +527,8 @@ const styles = StyleSheet.create({
   monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
 
   // 혈통 위험도 탭
-  pedigreeIntroText: { fontSize: 14, color: '#7B7C7D', lineHeight: 21, marginBottom: 4 },
+  pedigreeScopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
+  pedigreeScopeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
 
   pedigreeInfoCard: {
     backgroundColor: '#EAF4FB',
