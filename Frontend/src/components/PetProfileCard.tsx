@@ -99,7 +99,7 @@ const PetProfileCard: React.FC<PetProfileCardProps> = ({
         </TouchableOpacity>
         {onPressHealthInput && (
           <TouchableOpacity style={[styles.historyBtn, styles.healthInputBtn]} onPress={onPressHealthInput} activeOpacity={0.8}>
-            <Text style={[styles.historyBtnText, styles.healthInputBtnText]}>건강검진 정보 입력</Text>
+            <Text style={[styles.historyBtnText, styles.healthInputBtnText]}>검진 정보 입력</Text>
             <Image source={require("../assets/icon_right.png")} style={[styles.smallRightIcon, styles.healthInputBtnIcon]} />
           </TouchableOpacity>
         )}

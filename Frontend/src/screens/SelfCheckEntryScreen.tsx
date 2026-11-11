@@ -26,14 +26,17 @@ export default function SelfCheckEntryScreen({ navigation, route }: NativeStackS
         <Pressable accessibilityRole="button" style={styles.option}
           onPress={() => navigation.navigate('SelfCheck', pet ? { petId: pet.petId } : undefined)}>
           <Image source={require('../assets/icon_edit.png')} style={styles.optionIcon} />
-          <Text style={styles.label}>질문지 자가진단</Text>
+          <Text style={[styles.label, styles.optionText]}>질문지 자가진단</Text>
           <Image source={require('../assets/icon_right.png')} style={styles.arrow} />
         </Pressable>
         <Pressable accessibilityRole="button" accessibilityState={{ disabled: videoUnavailable }} disabled={videoUnavailable}
           style={[styles.option, videoUnavailable && styles.disabled]}
           onPress={() => { if (pet) navigation.navigate('RespirationCapture', pet); }}>
           <Image source={require('../assets/icon_camera.png')} style={styles.optionIcon} />
-          <Text style={styles.label}>수면 영상 분석</Text>
+          <View style={styles.optionText}>
+            <Text style={styles.label}>수면 영상 분석</Text>
+            <Text style={styles.optionHint}>수면 중 분당 호흡수 측정을 통해 심장 건강을 확인 할 수 있어요.</Text>
+          </View>
           <Image source={require('../assets/icon_right.png')} style={styles.arrow} />
         </Pressable>
         {notice && (
@@ -54,10 +57,12 @@ const styles = StyleSheet.create({
   navTitle: { fontSize: 20, fontWeight: '600', color: '#1F2024' },
   content: { paddingHorizontal: 20, paddingTop: 28 },
   description: { fontSize: 15, color: '#555', marginBottom: 20 },
-  option: { minHeight: 76, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#F6FAFE', marginBottom: 12 },
-  optionIcon: { width: 24, height: 24, marginRight: 14, tintColor: '#0081D5', resizeMode: 'contain' },
-  label: { flex: 1, fontSize: 17, fontWeight: '700', color: '#1F2024' },
-  arrow: { width: 18, height: 18, tintColor: '#0081D5' },
+  option: { minHeight: 96, paddingHorizontal: 18, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', borderRadius: 14, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#F6FAFE', marginBottom: 12 },
+  optionIcon: { width: 24, height: 24, marginRight: 14, tintColor: '#F4B844', resizeMode: 'contain' },
+  optionText: { flex: 1 },
+  label: { fontSize: 17, fontWeight: '700', color: '#1F2024' },
+  optionHint: { marginTop: 3, fontSize: 13, color: '#555' },
+  arrow: { width: 18, height: 18, tintColor: '#F4B844' },
   disabled: { opacity: 0.5 },
   notice: { marginTop: 8, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 12, backgroundColor: '#F3F4F5' },
   noticeText: { fontSize: 14, lineHeight: 21, color: '#666' },

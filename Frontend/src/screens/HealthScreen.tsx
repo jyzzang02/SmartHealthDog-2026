@@ -188,7 +188,7 @@ const HealthScreen: React.FC = () => {
                 </Text>
               ) : (
                 <Text style={styles.healthInfoDesc}>
-                  등록된 건강검진 정보가 없습니다.{'\n'}건강검진 정보를 등록해보세요.
+                  등록된 검진 기록이 없습니다.{'\n'}검진 정보를 등록해보세요.
                 </Text>
               )}
             </View>

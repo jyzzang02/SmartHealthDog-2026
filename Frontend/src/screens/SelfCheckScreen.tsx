@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Modal, Pressable, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
@@ -43,6 +43,8 @@ const SelfCheckScreen = () => {
   const [answers, setAnswers] = useState<Record<string, number[]>>({});
   const [showResult, setShowResult] = useState(false);
   const [previewStarted, setPreviewStarted] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerTop, setPickerTop] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -82,11 +84,23 @@ const SelfCheckScreen = () => {
   const remaining = area.questions.length - answeredCount;
   const isLast = step === areas.length - 1;
   const name = SPECIES_META[species].label;
+  const selectedPetName = pets.find(pet => pet.id === petId)?.name ?? '';
+  const showPicker = !loading && !loadError && !showResult && !route.params?.recordId &&
+    step === 0 && (preview || petId !== null);
+
+  useEffect(() => {
+    if (!showPicker || !pickerOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setPickerOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [showPicker, pickerOpen]);
 
   const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: false });
 
   const changePet = (pet: PetListItem) => {
-    if (saving) return;
+    if (saving || pet.id === petId) return;
     setPetId(pet.id);
     setSpecies(pet.species.toLowerCase() as PetSpecies);
     setAnswers({});
@@ -109,7 +123,7 @@ const SelfCheckScreen = () => {
 
   const goNext = async () => {
     if (busy.current || (!preview && petId === null) || remaining > 0) return;
-    if (!isLast) { setStep(step + 1); scrollToTop(); return; }
+    if (!isLast) { setPickerOpen(false); setStep(step + 1); scrollToTop(); return; }
     if (!areas.every(item => item.questions.every((_, i) => Number.isInteger(answers[item.id]?.[i]) && answers[item.id][i] >= 0 && answers[item.id][i] <= 3))) return;
     if (preview) {
       void markSelfCheckPreviewSeen();
@@ -208,9 +222,29 @@ const SelfCheckScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {!preview && petId !== null && <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('SelfCheckHistory', { petId, petName: pets.find(pet => pet.id === petId)?.name ?? '' })} disabled={saving}>
-        <Text style={styles.historyText}>과거 자가진단 기록</Text>
-      </TouchableOpacity>}
+      {!showResult && !route.params?.recordId && ((!preview && petId !== null) || showPicker) && (
+        <View style={styles.actionRow} onLayout={({ nativeEvent: { layout } }) => setPickerTop(layout.y + layout.height)}>
+          {!preview && petId !== null && (
+            <TouchableOpacity style={styles.historyButton} accessibilityRole="button" disabled={saving}
+              onPress={() => {
+                setPickerOpen(false);
+                navigation.navigate('SelfCheckHistory', { petId, petName: selectedPetName });
+              }}>
+              <Text style={styles.historyText}>과거 자가진단 기록</Text>
+            </TouchableOpacity>
+          )}
+          {showPicker && (
+            <TouchableOpacity style={styles.pickerToggle} accessibilityRole="button"
+              accessibilityLabel={'반려동물 선택: ' + (preview ? name : selectedPetName)}
+              accessibilityState={{ expanded: pickerOpen, disabled: saving }}
+              disabled={saving} onPress={() => setPickerOpen(open => !open)}>
+              <Text style={styles.speciesChipText} numberOfLines={1}>{preview ? name : selectedPetName}</Text>
+              <Image source={require('../assets/icon_arrowDown.png')}
+                style={[styles.pickerArrow, pickerOpen && styles.pickerArrowOpen]} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
       {loading || loadError || (!preview && petId === null) ? <View style={styles.content}>
         <Text>{loading ? '불러오는 중입니다.' : loadError ? '정보를 불러오지 못했습니다.' : '자가진단할 반려동물을 먼저 등록해주세요.'}</Text>
         {!loading && <TouchableOpacity onPress={() => setReload(value => value + 1)}><Text style={styles.historyText}>다시 시도</Text></TouchableOpacity>}
@@ -239,29 +273,9 @@ const SelfCheckScreen = () => {
           <ScrollView
             ref={scrollRef}
             style={styles.scroll}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, styles.questionContent]}
             showsVerticalScrollIndicator={false}
           >
-            {step === 0 && (
-              <View style={styles.speciesRow}>
-                {preview ? (['dog', 'cat'] as const).map(item => (
-                  <TouchableOpacity key={item} style={[styles.speciesChip, species === item && styles.speciesChipActive]}
-                    accessibilityRole="button" accessibilityState={{ selected: species === item }} onPress={() => {
-                      if (species === item) return;
-                      setSpecies(item);
-                      setAnswers({});
-                    }}>
-                    <Text style={[styles.speciesChipText, species === item && styles.speciesChipTextActive]}>{SPECIES_META[item].label}</Text>
-                  </TouchableOpacity>
-                )) : pets.map((item) => {
-                  const selected = petId === item.id;
-                  return <TouchableOpacity key={item.id} style={[styles.speciesChip, selected && styles.speciesChipActive]} onPress={() => changePet(item)}>
-                    <Text style={[styles.speciesChipText, selected && styles.speciesChipTextActive]}>{item.name}</Text>
-                  </TouchableOpacity>;
-                })}
-              </View>
-            )}
-
             {preview && step === 0 && <Text style={styles.headlineDesc}>회원가입 없이 먼저 체험해 보세요. 답변과 결과는 저장되지 않아요.</Text>}
             <Text style={styles.headline}>{area.title}</Text>
             <Text style={styles.headlineDesc}>
@@ -414,6 +428,34 @@ const SelfCheckScreen = () => {
           </View>
         </ScrollView>
       )}
+      {showPicker && pickerOpen && (
+        <View style={styles.pickerLayer} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPickerOpen(false)}
+            accessible={false} importantForAccessibility="no" />
+          <View style={[styles.pickerMenu, { top: pickerTop + 6 }]}>
+            <ScrollView style={styles.pickerScroll} keyboardShouldPersistTaps="handled">
+              {(preview ? (['dog', 'cat'] as const).map(item => ({
+                key: item, label: SPECIES_META[item].label, selected: species === item,
+                select: () => {
+                  if (species === item) return;
+                  setSpecies(item);
+                  setAnswers({});
+                  scrollToTop();
+                },
+              })) : pets.map(pet => ({
+                key: pet.id, label: pet.name, selected: petId === pet.id,
+                select: () => { changePet(pet); scrollToTop(); },
+              }))).map(item => (
+                <TouchableOpacity key={item.key} style={[styles.pickerOption, item.selected && styles.pickerOptionSelected]}
+                  accessibilityRole="button" accessibilityState={{ selected: item.selected }}
+                  onPress={() => { setPickerOpen(false); item.select(); }}>
+                  <Text style={styles.pickerOptionText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 };
@@ -433,7 +475,8 @@ const styles = StyleSheet.create({
   previewStart: { minHeight: 52, padding: 12, borderRadius: 14, backgroundColor: '#3F73C5', alignItems: 'center', justifyContent: 'center' },
   previewSkipText: { fontSize: 14, fontWeight: '600', color: '#4F6475' },
   previewSkip: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
-  historyButton: { alignSelf: 'flex-start', marginHorizontal: 20, marginVertical: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#EEF7FD' },
+  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginHorizontal: 20, marginTop: 8 },
+  historyButton: { flexShrink: 1, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#EEF7FD' },
   historyText: { color: '#0081D5', fontWeight: '600' },
   screen: { flex: 1, backgroundColor: '#fff' },
 
@@ -461,22 +504,17 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 24 },
   resultContent: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40 },
 
-  speciesRow: { flexWrap: 'wrap', flexDirection: 'row', gap: 8, marginBottom: 20 },
-  speciesChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    backgroundColor: '#fff',
-  },
-  speciesChipActive: { backgroundColor: '#0081D5', borderColor: '#0081D5' },
-  speciesChipImage: { width: 22, height: 22, borderRadius: 11 },
-  speciesChipText: { fontSize: 14, fontWeight: '600', color: '#3C4144' },
-  speciesChipTextActive: { color: '#fff' },
+  questionContent: { paddingTop: 16 },
+  pickerToggle: { marginLeft: 'auto', maxWidth: '48%', minHeight: 40, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#F6FAFE' },
+  pickerArrow: { width: 12, height: 12, tintColor: '#0081D5' },
+  pickerArrowOpen: { transform: [{ rotate: '180deg' }] },
+  pickerLayer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
+  pickerMenu: { position: 'absolute', right: 20, minWidth: 120, maxWidth: '75%', borderRadius: 12, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#fff', overflow: 'hidden', elevation: 4 },
+  pickerScroll: { maxHeight: 176, flexGrow: 0 },
+  pickerOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8 },
+  pickerOptionSelected: { backgroundColor: '#EEF7FD' },
+  speciesChipText: { flexShrink: 1, fontSize: 14, fontWeight: '600', color: '#3C4144' },
+  pickerOptionText: { fontSize: 14, color: '#3C4144' },
 
   headline: { fontSize: 24, fontWeight: '700', color: '#000', lineHeight: 34, marginBottom: 6 },
   headlineDesc: { fontSize: 14, fontWeight: '500', color: '#7B7C7D', lineHeight: 22, marginBottom: 20 },

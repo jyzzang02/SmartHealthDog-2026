@@ -10,7 +10,7 @@ it('shows the health check button and opens the selected pet action', () => {
     tree = renderer.create(<PetProfileCard name="하나" type="고양이" gender="미상" birth="" condition="정보 없음" onPressHealthInput={onPressHealthInput} />);
   });
   const button = tree.root.findAllByType(TouchableOpacity).find(item =>
-    item.findAllByType(Text).some(text => text.props.children === '건강검진 정보 입력'));
+    item.findAllByType(Text).some(text => text.props.children === '검진 정보 입력'));
   expect(button).toBeDefined();
   act(() => button!.props.onPress());
   expect(onPressHealthInput).toHaveBeenCalledTimes(1);

@@ -146,7 +146,7 @@ const HealthDetailScreen = () => {
 
   const recentStatusText = summary
     ? summary.hospitalName || '병원명 미입력'
-    : '등록된 건강검진 정보가 없습니다.';
+    : '등록된 검진 기록이 없습니다.';
   const recentStatusColor = summary ? '#040505' : '#7B7C7D';
 
   return (

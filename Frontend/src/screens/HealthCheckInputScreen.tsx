@@ -311,7 +311,7 @@ const HealthCheckInputScreen = () => {
             source={require('../assets/icon_navBack.png')}
             style={styles.backIcon}
           />
-          <Text style={styles.navTitle}>건강검진 정보 입력</Text>
+          <Text style={styles.navTitle}>검진 정보 입력</Text>
         </TouchableOpacity>
       </View>
 
@@ -325,7 +325,7 @@ const HealthCheckInputScreen = () => {
         keyboardShouldPersistTaps="handled"
       >
         <Text style={styles.description}>
-          병원 진단서를 촬영하거나 앨범에서 불러와 건강검진 정보를 입력할 수 있습니다.
+          병원 진단서를 촬영하거나 앨범에서 불러와 검진 정보를 입력할 수 있습니다.
         </Text>
 
         {/* ── 기본 정보 ── */}
