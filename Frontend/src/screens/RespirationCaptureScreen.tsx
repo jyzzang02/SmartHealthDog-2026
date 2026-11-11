@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useCameraFormat, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
 import type { RootStackParamList } from '../../App';
 import { getMyPets, type PetListItem } from '../api/pets';
+import { RespirationPendingView } from '../components/DiagnosisAnalysisProgress';
 import { completeRespirationUpload, getRespirationRecord, prepareRespirationUpload, RespirationHttpError } from '../api/respiration';
 import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
 
@@ -244,6 +245,10 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
     }
   };
 
+  if (phase === 'done') {
+    return <SafeAreaView style={styles.screen}><RespirationPendingView onConfirm={() => navigation.goBack()} /></SafeAreaView>;
+  }
+
   const button = (label: string, action: () => void, disabled = false, variant: 'primary' | 'pet' | 'secondary' = 'primary') => (
     <Pressable accessibilityRole="button" disabled={disabled} onPress={action} style={[styles.button, variant === 'pet' && styles.petButton, variant === 'secondary' && styles.secondaryButton, disabled && styles.disabled]}>
       <Text style={[styles.buttonText, variant === 'pet' && styles.petButtonText, variant === 'secondary' && styles.secondaryButtonText]}>{label}</Text>
@@ -278,8 +283,7 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
           </View>
         </View>
       </Modal>
-      {phase === 'done' ? <Text style={styles.title}>영상 등록 완료</Text> :
-        <View style={styles.guide}><Text style={styles.guideText}>편히 쉬는 반려동물의 가슴이나 배 움직임이 보이도록 약 <Text style={styles.guideHighlight}>60초</Text> 동안 촬영해 주세요.</Text></View>}
+      <View style={styles.guide}><Text style={styles.guideText}>편히 쉬는 반려동물의 가슴이나 배 움직임이 보이도록 약 <Text style={styles.guideHighlight}>60초</Text> 동안 촬영해 주세요.</Text></View>
       {files && permission.hasPermission && device && ['idle', 'recording', 'checking'].includes(phase) && (
         <View style={styles.preview}>
           <Camera key={cameraKey} ref={camera} style={StyleSheet.absoluteFill} device={device}
@@ -326,7 +330,7 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
       {phase === 'ready' && button(uploadedId.current ? '등록 완료 다시 확인' : '영상 등록', () => { void upload(); })}
       {phase === 'ready' && !uploadedId.current && button('다시 촬영', () => reset())}
       {!!message && <Text accessibilityRole="alert" style={styles.text}>{message}</Text>}
-      {phase !== 'uploading' && phase !== 'recording' && button(phase === 'done' ? '확인' : '뒤로', () => navigation.goBack(), false, 'secondary')}
+      {phase !== 'uploading' && phase !== 'recording' && button('뒤로', () => navigation.goBack(), false, 'secondary')}
     </SafeAreaView>
   );
 }

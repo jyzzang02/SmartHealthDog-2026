@@ -90,6 +90,30 @@ export default function DiagnosisAnalysisProgress({
   );
 }
 
+export function RespirationPendingView({ onConfirm }: { onConfirm: () => void }) {
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>영상 등록 완료</Text>
+      <View style={styles.progressWrapper}>
+        <View style={styles.progressBase} />
+        <View style={styles.progressArc} />
+        <Image source={require('../assets/eyeDog.png')} style={styles.dogImage} />
+      </View>
+      <Text style={styles.expectedTime}>수면 영상이 등록되었습니다.</Text>
+      <View style={styles.stageList}>
+        <Text style={styles.completedStage}>1. 영상 업로드 완료</Text>
+        <View style={styles.activeStageRow}>
+          <Text style={styles.pendingStatus}>2. 분석 대기</Text>
+        </View>
+      </View>
+      <Text style={styles.pendingNotice}>호흡수 분석은 아직 제공하지 않습니다.</Text>
+      <TouchableOpacity accessibilityRole="button" style={styles.homeButton} onPress={onConfirm}>
+        <Text style={styles.homeButtonText}>확인</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -177,6 +201,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#0081D5',
+  },
+  pendingStatus: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#0081D5',
+  },
+  pendingNotice: {
+    marginTop: 20,
+    fontSize: 14,
+    color: '#6A7178',
+    textAlign: 'center',
   },
   pendingStage: {
     marginTop: 12,
