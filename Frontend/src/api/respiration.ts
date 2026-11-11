@@ -23,14 +23,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   assertAuthSession(session);
   if (!token) throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
+  const abort = () => controller.abort();
+  const signal = init.signal;
+  const timeout = setTimeout(abort, 30000);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort);
   try {
     const send = (value: string) => fetch(`${BASE_URL}${path}`, {
       ...init, signal: controller.signal,
       headers: { Accept: 'application/json', ...init.headers, Authorization: `Bearer ${value}` },
     });
     let response = await send(token);
-    if (response.status === 401) {
+    if (response.status === 401 && !controller.signal.aborted) {
       token = await refreshSessionAccessToken(session, token);
       assertAuthSession(session);
       response = await send(token);
@@ -44,7 +48,10 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const result = await response.json();
     assertAuthSession(session);
     return result as T;
-  } finally { clearTimeout(timeout); }
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
 }
 
 const path = (petId: number) => `/api/pets/${petId}/respiration`;
@@ -57,9 +64,9 @@ export function prepareRespirationUpload(petId: number, fileSizeBytes: number, d
 export function completeRespirationUpload(petId: number, videoId: string): Promise<RespirationRecord> {
   return request(`${path(petId)}/${encodeURIComponent(videoId)}/complete`, { method: 'POST' });
 }
-export function getRespirationRecord(petId: number, videoId: string): Promise<RespirationRecord> {
-  return request(`${path(petId)}/${encodeURIComponent(videoId)}`);
+export function getRespirationRecord(petId: number, videoId: string, signal?: AbortSignal): Promise<RespirationRecord> {
+  return request(`${path(petId)}/${encodeURIComponent(videoId)}`, { signal });
 }
-export function listRespirationRecords(petId: number): Promise<RespirationRecord[]> {
-  return request(path(petId));
+export function listRespirationRecords(petId: number, signal?: AbortSignal): Promise<RespirationRecord[]> {
+  return request(path(petId), { signal });
 }

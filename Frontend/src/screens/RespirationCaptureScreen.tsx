@@ -7,7 +7,7 @@ import { Camera, useCameraDevice, useCameraFormat, useCameraPermission, useMicro
 import type { RootStackParamList } from '../../App';
 import { getMyPets, type PetListItem } from '../api/pets';
 import { RespirationPendingView } from '../components/DiagnosisAnalysisProgress';
-import { completeRespirationUpload, getRespirationRecord, prepareRespirationUpload, RespirationHttpError } from '../api/respiration';
+import { completeRespirationUpload, getRespirationRecord, prepareRespirationUpload, RespirationHttpError, type RespirationRecord } from '../api/respiration';
 import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
 
 const files = NativeModules.RespirationFile as {
@@ -52,6 +52,7 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
   const [canCancelUpload, setCanCancelUpload] = useState(false);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [registered, setRegistered] = useState<RespirationRecord | null>(null);
   const [clip, setClip] = useState<Clip | null>(null);
   const [message, setMessage] = useState('');
   const focused = useIsFocused();
@@ -220,16 +221,18 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
         if (__DEV__) console.log('[수면 영상] 완료 응답 실패, 등록 상태 조회');
         const existing = await getRespirationRecord(petId, videoId).catch(() => null);
         if (__DEV__) console.log('[수면 영상] 조회 결과', { status: existing?.status ?? '확인 실패' });
-        if (existing?.status === 'PENDING') return existing;
+        if (existing?.videoId === videoId && existing.petId === petId && existing.status !== 'UPLOADING') return existing;
         if (existing?.status === 'UPLOADING' && error instanceof RespirationHttpError &&
             (error.status === 400 || error.status === 409)) {
           uploadedId.current = null;
         }
         throw error;
       });
-      if (record.status !== 'PENDING' || record.videoId !== videoId || record.petId !== petId) throw new Error('UNCONFIRMED');
+      if (record.videoId !== videoId || record.petId !== petId ||
+          !['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'].includes(record.status)) throw new Error('UNCONFIRMED');
       if (__DEV__) console.log('[수면 영상] 등록 완료', { status: record.status });
       reset();
+      setRegistered(record);
       setPhase('done');
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
@@ -245,15 +248,23 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
     }
   };
 
-  if (phase === 'done') {
-    return <SafeAreaView style={styles.screen}><RespirationPendingView onConfirm={() => navigation.goBack()} /></SafeAreaView>;
-  }
-
   const button = (label: string, action: () => void, disabled = false, variant: 'primary' | 'pet' | 'secondary' = 'primary') => (
     <Pressable accessibilityRole="button" disabled={disabled} onPress={action} style={[styles.button, variant === 'pet' && styles.petButton, variant === 'secondary' && styles.secondaryButton, disabled && styles.disabled]}>
       <Text style={[styles.buttonText, variant === 'pet' && styles.petButtonText, variant === 'secondary' && styles.secondaryButtonText]}>{label}</Text>
     </Pressable>
   );
+
+  if (phase === 'done' && registered) {
+    const showResult = () => navigation.navigate('RespirationResult', { petId, petName, videoId: registered.videoId });
+    return (
+      <SafeAreaView style={styles.screen}>
+        {registered.status === 'PENDING'
+          ? <RespirationPendingView onConfirm={() => navigation.goBack()} />
+          : <Text style={styles.title}>영상 등록 완료</Text>}
+        {button('분석 결과 확인', showResult, false, 'secondary')}
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen}>
@@ -270,12 +281,12 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
                   <ScrollView>
                     {pets.map(pet => (
                       <Pressable key={pet.id} accessibilityRole="button" accessibilityState={{ selected: pet.id === petId }}
-                        style={styles.petOption} onPress={() => {
+                        style={[styles.petOption, pet.id === petId && styles.petOptionSelected]} onPress={() => {
                           if (phase !== 'idle' || recording.current) return;
                           setPet({ petId: pet.id, petName: pet.name });
                           setPickerOpen(false);
                         }}>
-                        <Text style={styles.text}>{pet.name}{pet.id === petId ? ' · 선택됨' : ''}</Text>
+                        <Text style={styles.text}>{pet.name}</Text>
                       </Pressable>
                     ))}
                   </ScrollView>}
@@ -330,6 +341,7 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
       {phase === 'ready' && button(uploadedId.current ? '등록 완료 다시 확인' : '영상 등록', () => { void upload(); })}
       {phase === 'ready' && !uploadedId.current && button('다시 촬영', () => reset())}
       {!!message && <Text accessibilityRole="alert" style={styles.text}>{message}</Text>}
+      {phase === 'idle' && button('최근 분석 결과', () => navigation.navigate('RespirationResult', { petId, petName }), false, 'secondary')}
       {phase !== 'uploading' && phase !== 'recording' && button('뒤로', () => navigation.goBack(), false, 'secondary')}
     </SafeAreaView>
   );
@@ -363,4 +375,5 @@ const styles = StyleSheet.create({
   pickerOverlay: { flex: 1, padding: 24, justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.4)' },
   picker: { maxHeight: '75%', padding: 20, gap: 12, borderRadius: 12, backgroundColor: '#fff' },
   petOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 8 },
+  petOptionSelected: { backgroundColor: '#FFF3D0', borderRadius: 8 },
 });

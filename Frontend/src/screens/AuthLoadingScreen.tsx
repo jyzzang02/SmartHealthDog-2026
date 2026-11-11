@@ -12,6 +12,7 @@ import { getStoredAccessToken, clearAuthTokens, getAuthSession, assertAuthSessio
 import { isApiError } from '../api/auth';
 import { MissingRefreshTokenError } from '../api/refreshSession';
 import { getMyProfile } from '../api/users';
+import { markSelfCheckPreviewSeen, shouldShowSelfCheckPreview } from '../storage/selfCheckPreviewStorage';
 
 type AuthLoadingNavigationProp = NativeStackNavigationProp<any>;
 
@@ -33,10 +34,16 @@ const AuthLoadingScreen: React.FC = () => {
       assertAuthSession(session);
       if (!mounted.current) return;
       if (!accessToken) {
-        navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+        const showPreview = await shouldShowSelfCheckPreview();
+        assertAuthSession(session);
+        if (!mounted.current) return;
+        navigation.reset({ index: 0, routes: [showPreview
+          ? { name: 'SelfCheck', params: { preview: true } }
+          : { name: 'Login' }] });
         return;
       }
 
+      void markSelfCheckPreviewSeen();
       await getMyProfile({ preserveRefreshError: true });
       assertAuthSession(session);
       if (mounted.current) navigation.reset({ index: 0, routes: [{ name: 'Main' }] });

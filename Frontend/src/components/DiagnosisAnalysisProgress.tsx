@@ -106,7 +106,6 @@ export function RespirationPendingView({ onConfirm }: { onConfirm: () => void })
           <Text style={styles.pendingStatus}>2. 분석 대기</Text>
         </View>
       </View>
-      <Text style={styles.pendingNotice}>호흡수 분석은 아직 제공하지 않습니다.</Text>
       <TouchableOpacity accessibilityRole="button" style={styles.homeButton} onPress={onConfirm}>
         <Text style={styles.homeButtonText}>확인</Text>
       </TouchableOpacity>
@@ -206,12 +205,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: '#0081D5',
-  },
-  pendingNotice: {
-    marginTop: 20,
-    fontSize: 14,
-    color: '#6A7178',
-    textAlign: 'center',
   },
   pendingStage: {
     marginTop: 12,

@@ -10,7 +10,7 @@ export default function SelfCheckEntryScreen({ navigation, route }: NativeStackS
   const videoUnavailable = !supportsRespirationCapture || !pet;
   const notice = !supportsRespirationCapture
     ? '이 기기에서는 수면 영상 등록을 지원하지 않습니다.'
-    : pet ? '호흡수 분석은 아직 제공하지 않습니다.'
+    : pet ? null
       : '수면 영상을 등록하려면 반려동물을 먼저 등록해 주세요.';
 
   return (
@@ -33,12 +33,14 @@ export default function SelfCheckEntryScreen({ navigation, route }: NativeStackS
           style={[styles.option, videoUnavailable && styles.disabled]}
           onPress={() => { if (pet) navigation.navigate('RespirationCapture', pet); }}>
           <Image source={require('../assets/icon_camera.png')} style={styles.optionIcon} />
-          <Text style={styles.label}>수면 영상 등록</Text>
+          <Text style={styles.label}>수면 영상 분석</Text>
           <Image source={require('../assets/icon_right.png')} style={styles.arrow} />
         </Pressable>
-        <View style={styles.notice}>
-          <Text style={styles.noticeText}>{notice}</Text>
-        </View>
+        {notice && (
+          <View style={styles.notice}>
+            <Text style={styles.noticeText}>{notice}</Text>
+          </View>
+        )}
       </View>
     </SafeAreaView>
   );
