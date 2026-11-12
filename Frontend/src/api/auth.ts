@@ -25,8 +25,7 @@ class ApiError extends Error {
     this.codes = codes;
   }
 }
-
-const API_BASE_URL = 'https://dev.puppydoc.ovh';
+const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
 const parseErrorResponse = async (response: Response) => {
   const fallbackMessage = `요청을 처리하지 못했습니다. (HTTP ${response.status})`;
@@ -113,11 +112,6 @@ export const registerUser = async ({
     emailVerificationToken,
   };
 
-  console.log('[auth] registerUser 요청', {
-    ...jsonPayload,
-    hasProfilePicture: Boolean(profilePictureUri),
-  });
-
   const formData = new FormData();
 
   // Ensure Content-Type: application/json for the request part (RN will set boundary)
@@ -137,45 +131,24 @@ export const registerUser = async ({
     } as any);
   }
 
-  let response: Response | undefined;
-
-  try {
-    response = await fetch(`${API_BASE_URL}/api/auth/register`, {
-      method: 'POST',
-      body: formData,
-      headers: {
-        Accept: 'application/json',
-      },
-    });
-  } catch (error) {
-    console.error('[auth] registerUser 네트워크 오류', error);
-    throw error;
-  }
-
-  if (!response) {
-    throw new Error('registerUser: no response received');
-  }
-
-  console.log('[auth] registerUser 응답 상태', response.status);
+  const response = await fetch(`${API_BASE_URL}/api/auth/register`, {
+    method: 'POST',
+    body: formData,
+    headers: {
+      Accept: 'application/json',
+    },
+  });
 
   if (response.status !== 201) {
-    const errorBody = await response.clone().text().catch(() => '');
-    if (errorBody) {
-      console.log('[auth] registerUser 실패 응답 본문', errorBody);
-    }
     const { message, codes } = await parseErrorResponse(response);
     throw new ApiError(message, response.status, codes);
   }
-
-  console.log('[auth] registerUser 성공');
 };
 
 export const login = async (
   email: string,
   password: string
 ): Promise<AuthTokens> => {
-  console.log('[auth] login 요청', { email });
-
   const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
     method: 'POST',
     headers: {
@@ -186,22 +159,60 @@ export const login = async (
   });
 
   if (!response.ok) {
-    const errorBody = await response.clone().text().catch(() => '');
-    if (errorBody) {
-      console.log('[auth] login 실패 응답 본문', errorBody);
-    }
     const { message, codes } = await parseErrorResponse(response);
     throw new ApiError(message, response.status, codes);
   }
 
-  console.log('[auth] login 응답 상태', response.status);
   return response.json();
 };
 
 export const refreshAuthToken = async (
   refreshToken: string
 ): Promise<AuthTokens> => {
-  const response = await fetch(`${API_BASE_URL}/api/auth/token/refresh`, {
+  const controller = new AbortController();
+  // Bound the shared refresh so a stalled connection cannot block future requests.
+  const timeout = setTimeout(() => controller.abort(), 30000);
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/auth/token/refresh`, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
+
+    if (!response.ok) {
+      const { message, codes } = await parseErrorResponse(response);
+      throw new ApiError(message, response.status, codes);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+};
+
+export const loginWithKakaoCode = async (code: string): Promise<AuthTokens> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/login/social/kakao/code`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'application/json',
+    },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!response.ok) {
+    const { message, codes } = await parseErrorResponse(response);
+    throw new ApiError(message, response.status, codes);
+  }
+
+  return (await response.json()) as AuthTokens;
+};
+
+export const logout = async (refreshToken: string): Promise<void> => {
+  const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -213,11 +224,8 @@ export const refreshAuthToken = async (
     const { message, codes } = await parseErrorResponse(response);
     throw new ApiError(message, response.status, codes);
   }
-
-  return response.json();
 };
 
 export const isApiError = (error: unknown): error is ApiError => {
   return error instanceof ApiError;
 };
-

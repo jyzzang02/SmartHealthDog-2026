@@ -1,44 +1,45 @@
-import { AuthTokens } from '../api/auth';
+import type { AuthTokens } from '../api/auth';
+import type { AsyncStorageStatic } from '@react-native-async-storage/async-storage';
 
-// Lazy-load AsyncStorage to avoid crashing when the native module is missing.
-let AsyncStorage: any = null;
+let AsyncStorage: AsyncStorageStatic | null = null;
 try {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires
   AsyncStorage = require('@react-native-async-storage/async-storage').default;
-} catch (error) {
-  console.warn(
-    '[auth] AsyncStorage native module not found at import time; will use in-memory fallback until the app is rebuilt with the native module.',
-    error
-  );
+} catch {
+  AsyncStorage = null;
 }
 
 const ACCESS_TOKEN_KEY = 'auth.accessToken';
 const REFRESH_TOKEN_KEY = 'auth.refreshToken';
 const EXPIRATION_KEY = 'auth.expiration';
 
-// In-memory fallback when native AsyncStorage is unavailable (e.g., not linked/rebuilt).
 let memoryStore: Partial<AuthTokens> = {};
+let hasMemorySession = false;
+let authSession = Symbol('auth-session');
+let storageWrites: Promise<unknown> = Promise.resolve();
+
+export const getAuthSession = () => authSession;
+
+export const assertAuthSession = (session: symbol) => {
+  if (session !== authSession) {
+    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+  }
+};
+
+// Serialize native writes so a late refresh cannot finish after a newer login/logout.
+const enqueueStorageWrite = <T>(operation: () => Promise<T>): Promise<T> => {
+  const result = storageWrites.then(operation);
+  storageWrites = result.then(() => undefined, () => undefined);
+  return result;
+};
 
 const isAsyncStorageAvailable = () =>
   AsyncStorage &&
   typeof AsyncStorage.multiSet === 'function' &&
   typeof AsyncStorage.multiGet === 'function';
 
-const warnIfFallback = () => {
-  console.warn(
-    '[auth] AsyncStorage native module not available; using in-memory fallback. Rebuild the app after installing @react-native-async-storage/async-storage.'
-  );
-};
+const getStorage = () => (isAsyncStorageAvailable() ? AsyncStorage : null);
 
-const getStorage = () => {
-  if (isAsyncStorageAvailable()) {
-    return AsyncStorage;
-  }
-  warnIfFallback();
-  return null;
-};
-
-export const storeAuthTokens = async (tokens: AuthTokens) => {
+const persistAuthTokens = async (tokens: AuthTokens) => {
   const storage = getStorage();
   if (storage) {
     try {
@@ -48,60 +49,82 @@ export const storeAuthTokens = async (tokens: AuthTokens) => {
         [EXPIRATION_KEY, tokens.expiration],
       ]);
       return;
-    } catch (error) {
-      console.warn('[auth] AsyncStorage store failed, falling back to memory', error);
+    } catch {
     }
-  } else {
-    warnIfFallback();
   }
-  memoryStore = tokens;
 };
 
-export const getStoredRefreshToken = async () => {
+export const storeAuthTokens = (tokens: AuthTokens) => {
+  authSession = Symbol('auth-session');
+  hasMemorySession = true;
+  memoryStore = { ...tokens };
+  return enqueueStorageWrite(() => persistAuthTokens(tokens));
+};
+
+export const storeRefreshedAuthTokens = (
+  tokens: AuthTokens,
+  expectedRefreshToken: string,
+  session: symbol,
+) => enqueueStorageWrite(async () => {
+  assertAuthSession(session);
+  const currentRefreshToken = await getStoredRefreshToken();
+  assertAuthSession(session);
+  if (currentRefreshToken !== expectedRefreshToken) {
+    throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
+  }
+  hasMemorySession = true;
+  memoryStore = { ...tokens };
+  await persistAuthTokens(tokens);
+  assertAuthSession(session);
+});
+
+export const getStoredRefreshToken = async (strict = false) => {
+  if (hasMemorySession) return memoryStore.refreshToken ?? null;
   const storage = getStorage();
   if (storage) {
     try {
-      return storage.getItem(REFRESH_TOKEN_KEY);
+      const token = await storage.getItem(REFRESH_TOKEN_KEY);
+      return hasMemorySession ? memoryStore.refreshToken ?? null : token;
     } catch (error) {
-      console.warn('[auth] AsyncStorage get refreshToken failed, using memory', error);
+      if (strict) throw error;
     }
-  } else {
-    warnIfFallback();
+  } else if (strict) {
+    throw new Error('Token storage unavailable');
   }
   return memoryStore.refreshToken ?? null;
 };
 
-export const getStoredAccessToken = async () => {
+export const getStoredAccessToken = async (strict = false) => {
+  if (hasMemorySession) return memoryStore.accessToken ?? null;
   const storage = getStorage();
   if (storage) {
     try {
-      return storage.getItem(ACCESS_TOKEN_KEY);
+      const token = await storage.getItem(ACCESS_TOKEN_KEY);
+      return hasMemorySession ? memoryStore.accessToken ?? null : token;
     } catch (error) {
-      console.warn('[auth] AsyncStorage get accessToken failed, using memory', error);
+      if (strict) throw error;
     }
-  } else {
-    warnIfFallback();
+  } else if (strict) {
+    throw new Error('Token storage unavailable');
   }
   return memoryStore.accessToken ?? null;
 };
 
-export const clearAuthTokens = async () => {
-  const storage = getStorage();
-  if (storage) {
-    try {
-      await storage.multiRemove([
-        ACCESS_TOKEN_KEY,
-        REFRESH_TOKEN_KEY,
-        EXPIRATION_KEY,
-      ]);
-      return;
-    } catch (error) {
-      console.warn('[auth] AsyncStorage clear failed, clearing memory only', error);
-    }
-  } else {
-    warnIfFallback();
-  }
+export const clearAuthTokens = () => {
+  authSession = Symbol('auth-session');
+  hasMemorySession = true;
   memoryStore = {};
+  return enqueueStorageWrite(async () => {
+    const storage = getStorage();
+    if (storage) {
+      try {
+        await storage.multiRemove([
+          ACCESS_TOKEN_KEY,
+          REFRESH_TOKEN_KEY,
+          EXPIRATION_KEY,
+        ]);
+      } catch {
+      }
+    }
+  });
 };
-
-

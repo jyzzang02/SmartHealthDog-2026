@@ -302,7 +302,7 @@ def _run_dog_inference(image_url: str, submission_id: str) -> dict:
         return {"error": str(e)}
     except Exception as e:
         logging.error(f"Image download failed: {e}")
-        submit_status_update(submission_id, token, "FAILED", "INFERENCE_ERROR")
+        submit_status_update(submission_id, token, "FAILED", "INVALID_INPUT")
         return {"error": str(e)}
 
     results = {}
@@ -342,7 +342,7 @@ def _run_cat_inference(image_url: str, submission_id: str) -> dict:
         return {"error": str(e)}
     except Exception as e:
         logging.error(f"Image download failed: {e}")
-        submit_status_update(submission_id, token, "FAILED", "INFERENCE_ERROR")
+        submit_status_update(submission_id, token, "FAILED", "INVALID_INPUT")
         return {"error": str(e)}
 
     results = {}

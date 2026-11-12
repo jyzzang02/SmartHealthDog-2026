@@ -16,4 +16,34 @@ mlruns/
 .ipynb_checkpoints/
 
 benchmark_results/
+benchmark_data/
 mlflow.db
+
+# Python virtual environments
+.venv/
+.venv_*/
+__pycache__/
+*.pyc
+
+# Google Cloud credentials
+.env
+.env.*
+!.env.example
+*service-account*.json
+*vision-key*.json
+
+# OCR test outputs
+google_vision_results/
+paddle_vl_results/
+paddle_vl_test_summary.txt
+health_check_test_ocr.json
+
+# OCR test images
+health_check_sample_*.png
+
+# Old OCR experiments
+test_paddle_vl.py
+test_paddle_vl_backup.py
+
+# Local ZIP archives
+*.zip

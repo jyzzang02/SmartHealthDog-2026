@@ -1,134 +1,240 @@
-import React, { useMemo } from 'react';
-import { View, Text, StyleSheet, Image } from 'react-native';
-import { WALK_RECORDS_THIS_WEEK } from '../data/walkRecords';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Image,
+  ActivityIndicator,
+  ScrollView,
+  Dimensions,
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { getMyPets, PetListItem } from '../api/pets';
+import { resolveImageUri } from '../utils/imageUri';
 
-const PetHealthCard = () => {
-  const ppoppiRecord = useMemo(
-    () =>
-      WALK_RECORDS_THIS_WEEK.find((record) => record.petName === '뽀삐') ?? {
-        petName: '뽀삐',
-        petImage: require('../assets/img_adoptDog.png'),
-      },
-    []
+const SCREEN_WIDTH = Dimensions.get('window').width;
+const CARD_WIDTH = SCREEN_WIDTH - 40;
+const CARD_SPACING = 12;
+
+type PetHealthCardProps = {
+  pets?: PetListItem[];
+  loading?: boolean;
+};
+
+const PetHealthCard: React.FC<PetHealthCardProps> = ({
+  pets: petsProp,
+  loading: loadingProp,
+}) => {
+  const [pets, setPets] = useState<PetListItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const shouldFetch = petsProp === undefined;
+
+  const loadPets = useCallback(async () => {
+    setLoading(true);
+    try {
+      const data = await getMyPets();
+      setPets(data);
+    } catch {
+      setPets([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (shouldFetch) {
+      loadPets();
+    }
+  }, [loadPets, shouldFetch]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (shouldFetch) {
+        loadPets();
+      }
+    }, [loadPets, shouldFetch])
   );
 
-  const healthInfo = useMemo(
-    () => ({
-      weight: '체중 4.2kg ',
-      vaccine: '예방접종 2025.11.28 완료',
-    }),
-    []
-  );
+  const effectivePets = shouldFetch ? pets : petsProp || [];
+  const effectiveLoading = shouldFetch ? loading : Boolean(loadingProp);
+
+  if (effectiveLoading) {
+    return (
+      <View style={[styles.card, { justifyContent: 'center' }]}>
+        <ActivityIndicator size="small" color="#0081D5" />
+      </View>
+    );
+  }
+
+  if (effectivePets.length === 0) {
+    return (
+      <View style={styles.card}>
+        <Text style={styles.emptyText}>등록된 반려동물이 없습니다.</Text>
+      </View>
+    );
+  }
+
+  const petCards = effectivePets.map((pet) => ({
+    id: pet.id,
+    name: pet.name,
+    subtitle: pet.breed || pet.species,
+    weight: pet.weightKg || 0,
+    profilePicture: resolveImageUri(pet.profilePicture) || null,
+  }));
 
   return (
-    <View style={styles.card}>
+    <View style={styles.carouselWrap}>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        decelerationRate="fast"
+        snapToInterval={CARD_WIDTH + CARD_SPACING}
+        snapToAlignment="start"
+        contentContainerStyle={styles.scrollContent}
+        onScroll={(e) => {
+          const index = Math.round(
+            e.nativeEvent.contentOffset.x / (CARD_WIDTH + CARD_SPACING)
+          );
+          setCurrentIndex(index);
+        }}
+        scrollEventThrottle={16}
+      >
+        {petCards.map((pet) => (
+          <View key={pet.id} style={[styles.card, { width: CARD_WIDTH }]}>
+            {pet.profilePicture ? (
+              <Image
+                source={{ uri: pet.profilePicture }}
+                style={styles.profileImage}
+              />
+            ) : (
+              <View style={styles.profileImagePlaceholder} />
+            )}
 
-    {/* 왼쪽 프로필 */}
-    <Image source={ppoppiRecord.petImage} style={styles.profileImage} />
+            <View style={styles.contentBox}>
+              <View style={styles.nameRow}>
+                <Text style={styles.name}>{pet.name}</Text>
+              </View>
 
-    {/* 오른쪽 내용 영역 */}
-    <View style={styles.contentBox}>
+              <Text style={styles.subInfo}>{pet.subtitle}</Text>
 
-      {/* 이름 + 서브타이틀 */}
-      <View style={styles.nameRow}>
-        <Text style={styles.name}>{ppoppiRecord.petName}</Text>
-        <Text style={styles.subInfo}>(골든리트리버, 5kg)</Text>
-      </View>
+              <View style={styles.tagRow}>
+                <View style={styles.tagBlue}>
+                  <Text style={styles.tagTextBlue}>체중 {pet.weight}kg</Text>
+                </View>
+              </View>
+            </View>
+          </View>
+        ))}
+      </ScrollView>
 
-      {/* 건강 정보 태그 */}
-      <View style={styles.tagRow}>
-        <View style={styles.tagBlue}>
-          <Text style={styles.tagTextBlue}>{healthInfo.weight}</Text>
+      {petCards.length > 1 && (
+        <View style={styles.dotContainer}>
+          {petCards.map((pet, index) => (
+            <View
+              key={pet.id}
+              style={[styles.dot, currentIndex === index && styles.activeDot]}
+            />
+          ))}
         </View>
-      </View>
-
-      <View style={styles.tagRow}>
-      </View>
-
+      )}
     </View>
-
-</View>
-
   );
 };
 
 const styles = StyleSheet.create({
+  carouselWrap: {
+    width: '100%',
+  },
+  scrollContent: {
+    paddingRight: 0,
+  },
   card: {
     flexDirection: 'row',
-    alignSelf: 'flex-start', // ⬅ 내용만큼 width
-    alignItems : 'center',
+    alignSelf: 'flex-start',
+    alignItems: 'center',
     paddingVertical: 16,
     paddingHorizontal: 20,
-    gap: 20,
+    marginRight: CARD_SPACING,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#DCDEE0',
     backgroundColor: '#FFFFFF',
-
+    minHeight: 92,
   },
   profileImage: {
     width: 60,
     height: 60,
-    borderRadius: 48,
-    backgroundColor: '#ECECEC', // 프로필 자리
+    borderRadius: 30,
+    backgroundColor: '#ECECEC',
   },
-
+  profileImagePlaceholder: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#E0E0E0',
+  },
   contentBox: {
+    marginLeft: 14,
     flexDirection: 'column',
     justifyContent: 'center',
   },
-
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 6, 
+    marginBottom: 6,
   },
-  
   name: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#111', 
-    // 진한 텍스트
+    color: '#111',
   },
-  
   subInfo: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#777', 
-    marginLeft: 4,
+    color: '#777',
   },
-  
   tagRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    alignItems: 'center',
     gap: 8,
-    marginTop: 2,
+    marginTop: 6,
   },
-
   tagBlue: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#0081D5',
-    borderRadius: 32,
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: '#EDF6FF',
+    borderRadius: 14,
+    transform: [{ translateX: -4 }],
   },
   tagTextBlue: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
+    color: '#0081D5',
+  },
+  dotContainer: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 12,
+    gap: 8,
+  },
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 8,
+    backgroundColor: '#D0D5DD',
+  },
+  activeDot: {
+    backgroundColor: '#0081D5',
+  },
+  emptyText: {
     fontSize: 14,
-    color: '#FFF',
-    marginBottom: 2,
+    color: '#777',
+    textAlign: 'center',
+    width: '100%',
   },
-
-  tagGray: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    backgroundColor: '#F4F4F4',
-    borderRadius: 32,
-  },
-  tagTextGray: {
-    fontSize: 14,
-    color: '#555',
-  },
-
 });
 
 export default PetHealthCard;
-

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
+import { Text, Image, StyleSheet, TouchableOpacity } from 'react-native';
 
 interface Props {
   title: string;
@@ -40,7 +40,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFF',
     borderRadius: 20,
     padding: 20,
-    overflow: 'visible',
+    overflow: 'hidden',
 
     shadowColor: '#B3B6B8',
     shadowOffset: { width: 0, height: 0 },
@@ -75,18 +75,17 @@ const styles = StyleSheet.create({
     height: 88,
     position: 'absolute',
     bottom: 8,       // ★ 원하는 높이로 조절
-    left: 80,
-    right: 0,
+    right: 4,
   },
 
   // 🧪 소변키트 강아지
   urinePosition: {
-    width: 85,
-    height: 100,
+    width: 100,
+    height: 120,
+    resizeMode: 'contain',
     position: 'absolute',
-    bottom: -0,     // ★ 원하는 높이로 조절
-    left: 75,
-    right: 0,
+    bottom: -14,   // Compensate for the image's white margin.
+    right: -3,
     
   },
 });

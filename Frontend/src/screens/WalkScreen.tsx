@@ -1,22 +1,39 @@
-import React, { useMemo, useRef, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image, Dimensions, TouchableOpacity, Modal, Animated } from 'react-native';
+import React, { useMemo, useRef, useState, useCallback, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Image,
+  TouchableOpacity,
+  Modal,
+  Animated,
+  ActivityIndicator,
+  AppState,
+  NativeModules,
+  Platform,
+} from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
 import CustomButton from '../components/CustomButton';
+import { getMyPets, PetListItem } from '../api/pets';
 import {
-  WALK_RECORDS_THIS_WEEK as WALK_RECORDS,
-  PET_COLORS,
-  PET_BADGE_BG_COLORS,
-  getPetColor,
-  getPetBadgeColor,
-  parseDistanceKm,
-} from '../data/walkRecords';
+  getPetTodaySunlight,
+  getMyThisWeekWalks,
+  getPetWalks,
+  isCompletedWalkRecord,
+  WalkRecordDto,
+} from '../api/walks';
+import { retryPendingWalkLightSamples } from '../utils/walkLightSync';
+import type { WalkLightSampleSource } from '../utils/walkLightSync';
+import { resolveImageUri } from '../utils/imageUri';
+import { filterToCurrentSeoulWeek } from '../utils/walkWeek';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const walkLightSampleSource = NativeModules.WalkLocationTracking as WalkLightSampleSource | undefined;
+
 const WALK_SHEET_HEIGHT = 420;
-
-// 산책 팁 더미데이터 (20자 이내)
+const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
 const WALK_TIPS = [
   '여름에는 지면 온도 확인이 필수에요! 🔥',
   '산책 후 발바닥 체크는 꼭! 🐾',
@@ -25,19 +42,111 @@ const WALK_TIPS = [
   '간식으로 훈련해보세요! 🍖',
 ];
 
-const DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+const PET_COLORS = ['#6665DD', '#74BC8C', '#0081D5', '#FFC94D'];
+const PET_BADGE_BG_COLORS = ['#EFF1FF', '#E8F6EE', '#EEF7FD', '#FFF6D8'];
+
+const normalizeWalk = (
+  item: WalkRecordDto,
+  petList: PetListItem[],
+  petOverride?: PetListItem
+) => {
+  const itemPetIdRaw = item.pet_id ?? item.petId ?? item.pet?.id ?? petOverride?.id ?? 0;
+  const itemPetId = Number(itemPetIdRaw) || 0;
+  const pet = petOverride ?? petList.find((p) => p.id === itemPetId);
+  const walkId = item.id ?? item.walk_id ?? item.walkId;
+  const startTimeIso = item.start_time ?? item.startTime ?? '';
+  const endTimeIso = item.end_time ?? item.endTime ?? '';
+  const durationSec = item.duration ?? 0;
+  const distanceKm = item.distance ?? 0;
+  const pathCoordinates = item.path_coordinates ?? item.pathCoordinates ?? [];
+  const petName =
+    pet?.name ??
+    item.pet?.name ??
+    (item as any).petName ??
+    (item as any).pet_name ??
+    '';
+  const rawPetImage =
+    pet?.profilePicture ??
+    item.pet?.profilePicture ??
+    (item.pet as any)?.imageUrl ??
+    (item.pet as any)?.photoUrl ??
+    (item as any).petImage ??
+    (item as any).pet_image ??
+    (item as any).petImageUrl;
+  const petImageUri = resolveImageUri(rawPetImage);
+
+  const startDate = startTimeIso ? new Date(startTimeIso) : null;
+  const endDate = endTimeIso ? new Date(endTimeIso) : null;
+
+  const dateLabel = startDate
+    ? `${startDate.getFullYear()}.${String(startDate.getMonth() + 1).padStart(2, '0')}.${String(startDate.getDate()).padStart(2, '0')}`
+    : '-';
+
+  const h = Math.floor(durationSec / 3600)
+    .toString()
+    .padStart(2, '0');
+  const m = Math.floor((durationSec % 3600) / 60)
+    .toString()
+    .padStart(2, '0');
+  const s = Math.floor(durationSec % 60)
+    .toString()
+    .padStart(2, '0');
+
+  const startClock = startDate
+    ? `${String(startDate.getHours()).padStart(2, '0')}:${String(startDate.getMinutes()).padStart(2, '0')}`
+    : '00:00';
+
+  const endClock = endDate
+    ? `${String(endDate.getHours()).padStart(2, '0')}:${String(endDate.getMinutes()).padStart(2, '0')}`
+    : undefined;
+
+  return {
+    id: walkId,
+    petId: itemPetId,
+    petName,
+    petImage: petImageUri ? { uri: petImageUri } : null,
+    date: dateLabel,
+    distance: `${distanceKm.toFixed(1)}km`,
+    duration: `${h}:${m}:${s}`,
+    startTime: startClock,
+    endTime: endClock,
+    startedAt: startTimeIso,
+    distanceKm,
+    durationSec,
+    pathCoordinates,
+  };
+};
 
 const getDayLabel = (dateText: string) => {
-  const normalized = dateText.replace(/\./g, '-');
-  const date = new Date(normalized);
-  const dayIndex = date.getDay();
-  return DAYS[dayIndex] ?? '일';
+  const date = new Date(dateText.replace(/\./g, '-'));
+  return DAYS[date.getDay()] ?? '일';
+};
+
+const getSeoulDateKey = (date: Date) =>
+  new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Seoul',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date);
+
+const formatWalkDuration = (seconds: number) => {
+  const totalMinutes = Math.floor(seconds / 60);
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}시간 ${minutes}분` : `${minutes}분`;
 };
 
 export default function WalkScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [isBottomSheetVisible, setBottomSheetVisible] = useState(false);
-  const [selectedPet, setSelectedPet] = useState<string | null>(null);
+  const [isSunlightIntroVisible, setSunlightIntroVisible] = useState(false);
+  const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
+  const [pets, setPets] = useState<PetListItem[]>([]);
+  const summaryScrollY = useRef(new Animated.Value(0)).current;
+  const [todaySunlightPercentByPet, setTodaySunlightPercentByPet] = useState<Record<number, number | null>>({});
+  const [walkRecords, setWalkRecords] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
   const bottomSheetY = useRef(new Animated.Value(WALK_SHEET_HEIGHT)).current;
   const [randomTip, setRandomTip] = useState(() => {
     const randomIndex = Math.floor(Math.random() * WALK_TIPS.length);
@@ -49,25 +158,159 @@ export default function WalkScreen() {
     setRandomTip(WALK_TIPS[randomIndex]);
   }, []);
 
-  // 화면 재진입 시마다 팁 새로고침
+  const loadWalkData = useCallback(async () => {
+    setIsLoading(true);
+    try {
+      const petList = await getMyPets();
+
+      let merged: ReturnType<typeof normalizeWalk>[] = [];
+      let walkSource: WalkRecordDto[] = [];
+
+      try {
+        const thisWeekWalks = await getMyThisWeekWalks('Asia/Seoul');
+        walkSource = thisWeekWalks;
+        merged = thisWeekWalks
+          .filter(isCompletedWalkRecord)
+          .map((item) => normalizeWalk(item, petList));
+      } catch {
+        const settled = await Promise.allSettled(
+          petList.map(async (pet) => {
+            const response = await getPetWalks(pet.id, {
+              timezone: 'Asia/Seoul',
+              sortBy: 'date_desc',
+              limit: 30,
+              offset: 0,
+            });
+            return { pet, items: response.items || [] };
+          })
+        );
+
+        walkSource = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value.items : [])) as WalkRecordDto[];
+        merged = settled.flatMap((result) =>
+          result.status === 'fulfilled'
+            ? result.value.items
+                .filter(isCompletedWalkRecord)
+                .map((item) => normalizeWalk(item, petList, result.value.pet))
+            : []
+        );
+      }
+
+      const enrichedPets = petList.map((pet) => {
+        if (pet.profilePicture && pet.name) return pet;
+        const hit = walkSource.find((walk) => {
+          const rawId = (walk as any).pet_id ?? (walk as any).petId ?? (walk as any).pet?.id;
+          return Number(rawId) === pet.id;
+        });
+        if (!hit) return pet;
+        const fallbackName = (hit as any).pet?.name ?? (hit as any).petName ?? (hit as any).pet_name;
+        const fallbackImage =
+          (hit as any).pet?.profilePicture ||
+          (hit as any).pet?.imageUrl ||
+          (hit as any).pet?.photoUrl ||
+          (hit as any).petImage ||
+          (hit as any).pet_image ||
+          (hit as any).petImageUrl;
+        return {
+          ...pet,
+          name: pet.name || fallbackName,
+          profilePicture: pet.profilePicture || fallbackImage,
+        };
+      });
+
+      setPets(enrichedPets);
+      merged.sort((a, b) => (b.id || 0) - (a.id || 0));
+      setWalkRecords(merged);
+    } catch {
+      setWalkRecords([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
       refreshTip();
-    }, [refreshTip])
+      loadWalkData();
+    }, [loadWalkData, refreshTip])
   );
 
-  const petOptions = useMemo(() => {
-    const petMap = new Map<string, any>();
-    WALK_RECORDS.forEach((record) => {
-      if (!petMap.has(record.petName)) {
-        petMap.set(record.petName, record.petImage);
-      }
+  useEffect(() => {
+    let isCurrent = true;
+    if (pets.length === 0) {
+      setTodaySunlightPercentByPet({});
+      return () => {
+        isCurrent = false;
+      };
+    }
+
+    let refreshVersion = 0;
+    const refreshSunlight = () => {
+      const version = ++refreshVersion;
+      const retry = Platform.OS === 'android' && walkLightSampleSource
+        ? retryPendingWalkLightSamples(pets.map(pet => pet.id), walkLightSampleSource)
+        : Promise.resolve();
+      retry.catch(() => undefined).then(() => {
+        if (!isCurrent || version !== refreshVersion) return [];
+        return Promise.allSettled(
+          pets.map(async (pet) => {
+            const sunlight = await getPetTodaySunlight(pet.id);
+            const percent = Number.isFinite(sunlight.progress_percent)
+              ? sunlight.progress_percent
+              : sunlight.target_lux_minutes > 0
+                ? (sunlight.achieved_lux_minutes / sunlight.target_lux_minutes) * 100
+                : 0;
+            return [pet.id, Math.max(0, Math.min(100, percent))] as const;
+          })
+        );
+      }).then((results) => {
+        if (!isCurrent || version !== refreshVersion) return;
+        setTodaySunlightPercentByPet(
+          Object.fromEntries(
+            results.map((result, index) => [
+              pets[index].id,
+              result.status === 'fulfilled' ? result.value[1] : null,
+            ])
+          )
+        );
+      }).catch(() => undefined);
+    };
+    refreshSunlight();
+    const subscription = AppState.addEventListener('change', state => {
+      if (state === 'active') refreshSunlight();
     });
-    return Array.from(petMap.entries()).map(([name, image]) => ({ name, image }));
-  }, []);
+    return () => {
+      isCurrent = false;
+      subscription.remove();
+    };
+  }, [pets]);
+
+  const todayWalkSecondsByPet = useMemo(() => {
+    const todayKey = getSeoulDateKey(new Date());
+    return walkRecords.reduce<Record<number, number>>((totals, record) => {
+      const startedAt = record.startedAt ? new Date(record.startedAt) : null;
+      if (!startedAt || !Number.isFinite(startedAt.getTime()) || getSeoulDateKey(startedAt) !== todayKey) {
+        return totals;
+      }
+      totals[record.petId] = (totals[record.petId] ?? 0) + Math.max(0, record.durationSec || 0);
+      return totals;
+    }, {});
+  }, [walkRecords]);
+
+  const petOptions = useMemo(
+    () =>
+      pets.map((pet) => {
+        const resolved = resolveImageUri(pet.profilePicture);
+        return {
+          id: pet.id,
+          name: pet.name || '이름 없음',
+          image: resolved ? { uri: resolved } : null,
+        };
+      }),
+    [pets]
+  );
 
   const openBottomSheet = () => {
-    setSelectedPet(null);
+    setSelectedPetId(null);
     setBottomSheetVisible(true);
     bottomSheetY.setValue(WALK_SHEET_HEIGHT);
     Animated.spring(bottomSheetY, {
@@ -88,74 +331,133 @@ export default function WalkScreen() {
   };
 
   const handleStartWalk = () => {
-    const pet = petOptions.find((p) => p.name === selectedPet);
+    const pet = petOptions.find((p) => p.id === selectedPetId);
     if (!pet) return;
-    closeBottomSheet();
-    navigation.navigate('WalkActive', { petName: pet.name, petImage: pet.image });
+
+    setBottomSheetVisible(false);
+    setSunlightIntroVisible(true);
   };
 
-  // 산책 기록을 기반으로 요일별 산책 그래프 데이터 생성 (거리 총합 km)
+  const confirmStartWalk = () => {
+    const pet = petOptions.find((p) => p.id === selectedPetId);
+    if (!pet) {
+      setSunlightIntroVisible(false);
+      return;
+    }
+    setSunlightIntroVisible(false);
+    navigation.navigate('WalkActive', {
+      petId: pet.id,
+      petName: pet.name,
+      petImage: pet.image,
+    });
+  };
+
+  const handleOpenPetWalkHistory = () => {
+    const pet = petOptions.find((p) => p.id === selectedPetId);
+    if (!pet) return;
+
+    closeBottomSheet();
+    navigation.navigate('WalkPetHistory', {
+      petId: pet.id,
+      petName: pet.name,
+      petImage: pet.image,
+    });
+  };
+
   const weeklyData = useMemo(() => {
-    const totals: Record<string, { [pet: string]: number }> = {};
+    const currentWeekRecords = filterToCurrentSeoulWeek(
+      walkRecords,
+      (record) => record.startedAt
+    );
+    const primaryPetId = currentWeekRecords.find((record) => record.petId)?.petId;
+    const totals: Record<string, { pet1: number; pet2: number }> = {};
 
     DAYS.forEach((day) => {
-      totals[day] = {};
+      totals[day] = { pet1: 0, pet2: 0 };
     });
 
-    WALK_RECORDS.forEach((record) => {
+    currentWeekRecords.forEach((record) => {
       const day = getDayLabel(record.date);
-      const distance = parseDistanceKm(record.distance);
-      totals[day][record.petName] = (totals[day][record.petName] ?? 0) + distance;
+      const key = record.petId === primaryPetId ? 'pet1' : 'pet2';
+      totals[day][key] += record.distanceKm;
     });
 
     return DAYS.map((day) => ({
       day,
-      pet1: totals[day]['뽀삐'] ?? 0,
-      pet2: totals[day]['나비'] ?? 0,
+      pet1: totals[day].pet1,
+      pet2: totals[day].pet2,
     }));
-  }, []);
+  }, [walkRecords]);
+
+  const maxDailyDistance = useMemo(
+    () => Math.max(...weeklyData.map((item) => item.pet1 + item.pet2), 0),
+    [weeklyData]
+  );
+
+  const getPetPaletteIndex = useCallback(
+    (petId: number) => {
+      const index = pets.findIndex((pet) => pet.id === petId);
+      return index >= 0 ? index : 0;
+    },
+    [pets]
+  );
+
+  const getPetColor = useCallback(
+    (petId: number) => PET_COLORS[getPetPaletteIndex(petId) % PET_COLORS.length],
+    [getPetPaletteIndex]
+  );
+
+  const getPetBadgeColor = useCallback(
+    (petId: number) => PET_BADGE_BG_COLORS[getPetPaletteIndex(petId) % PET_BADGE_BG_COLORS.length],
+    [getPetPaletteIndex]
+  );
 
   return (
     <View style={styles.container}>
-      {/* HEADER */}
       <View style={styles.headerContainer}>
         <View style={styles.headerRow}>
           <View style={styles.titleSection}>
-            <Text style={styles.titleLine}>
+            <Text style={styles.titleLine} numberOfLines={1}>
               <Text style={styles.titlePrimary}>오늘도 건강하</Text>
               <Text style={styles.titleHighlight}>개</Text>
             </Text>
-            <Text style={styles.subtitle}>산책해 볼까요?</Text>
-            <Text style={styles.tipText}>{randomTip}</Text>
+
+            <Text style={styles.subtitle} numberOfLines={1}>
+              산책해 볼까요?
+            </Text>
+
+            <Text style={styles.tipText} numberOfLines={1}>
+              {randomTip}
+            </Text>
           </View>
-          
-          {/* 산책 시작 아이콘 */}
+
           <TouchableOpacity style={styles.startIconContainer} activeOpacity={0.8} onPress={openBottomSheet}>
             <Image source={require('../assets/icon_startWalk.png')} style={styles.startIcon} />
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 요일별 산책 그래프 섹션 */}
       <View style={styles.graphSection}>
         <View style={styles.graphHeader}>
-          <Text style={styles.graphTitle}>요일별 산책 그래프</Text>
+          <Text style={styles.graphTitle}>요일 별 산책 그래프</Text>
           <TouchableOpacity activeOpacity={0.8} onPress={() => navigation.navigate('WalkWeeklyReport')}>
             <Image source={require('../assets/btn_more.png')} style={styles.graphMoreButton} />
           </TouchableOpacity>
         </View>
-        
+
         <View style={styles.graphContainer}>
           {weeklyData.map((item, index) => {
-            const totalHeight = item.pet1 + item.pet2;
-            const maxHeight = 120; // 최대 막대 높이
-            const scaledTotal = totalHeight > 0 ? (totalHeight / 5) * (maxHeight / 2) : 0; // km 단위, 적당히 스케일링
-            const scaledPet1 = totalHeight > 0 ? (item.pet1 / totalHeight) * scaledTotal : 0;
-            const scaledPet2 = totalHeight > 0 ? (item.pet2 / totalHeight) * scaledTotal : 0;
-            const hasPet1 = scaledPet1 > 0;
-            const hasPet2 = scaledPet2 > 0;
+            const total = item.pet1 + item.pet2;
+            const maxHeight = 90;
+            const scaledTotal =
+              total > 0 && maxDailyDistance > 0
+                ? Math.max(10, (total / maxDailyDistance) * maxHeight)
+                : 0;
+            const h1 = total > 0 ? (item.pet1 / total) * scaledTotal : 0;
+            const h2 = total > 0 ? (item.pet2 / total) * scaledTotal : 0;
+            const hasPet1 = h1 > 0;
+            const hasPet2 = h2 > 0;
             const barRadius = 4;
-            
             return (
               <View key={index} style={styles.barColumn}>
                 <View style={styles.barWrapper}>
@@ -163,7 +465,7 @@ export default function WalkScreen() {
                     style={[
                       styles.barSegment,
                       {
-                        height: scaledPet1,
+                        height: h1,
                         backgroundColor: '#6665DD',
                         borderTopLeftRadius: barRadius,
                         borderTopRightRadius: barRadius,
@@ -176,7 +478,7 @@ export default function WalkScreen() {
                     style={[
                       styles.barSegment,
                       {
-                        height: scaledPet2,
+                        height: h2,
                         backgroundColor: '#74BC8C',
                         borderBottomLeftRadius: barRadius,
                         borderBottomRightRadius: barRadius,
@@ -191,93 +493,163 @@ export default function WalkScreen() {
             );
           })}
         </View>
+        <View style={styles.petDailySummaryWrapper}>
+        <Animated.ScrollView
+          style={{ height: Math.min(pets.length * 28, 56) }}
+          contentContainerStyle={[styles.petDailySummaryList, pets.length > 2 && styles.petDailySummaryScrollable]}
+          nestedScrollEnabled
+          scrollEnabled={pets.length > 2}
+          showsVerticalScrollIndicator={false}
+          onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: summaryScrollY } } }], { useNativeDriver: true })}
+          scrollEventThrottle={16}
+        >
+          {pets.map((pet) => {
+            const sunlightPercent = todaySunlightPercentByPet[pet.id];
+            return (
+              <View key={pet.id} style={styles.petDailySummary}>
+                <Text style={[styles.petDailySummaryName, { color: getPetColor(pet.id) }]} numberOfLines={1}>
+                  {pet.name || '이름 없음'}
+                </Text>
+                <Text style={styles.petDailySummaryText} numberOfLines={1}>
+                  산책 시간 {formatWalkDuration(todayWalkSecondsByPet[pet.id] ?? 0)} · <Text style={styles.petDailySunlightLabel}>조도 측정량</Text> {sunlightPercent == null ? '--' : `${Math.round(sunlightPercent)}%`}
+                </Text>
+              </View>
+            );
+          })}
+        </Animated.ScrollView>
+        {pets.length > 2 && (
+          <View style={styles.summaryScrollTrack} accessible={false} pointerEvents="none">
+            <Animated.View style={[styles.summaryScrollThumb, {
+              height: Math.max(16, 56 * 2 / pets.length),
+              transform: [{ translateY: summaryScrollY.interpolate({
+                inputRange: [0, (pets.length - 2) * 28],
+                outputRange: [0, 56 - Math.max(16, 56 * 2 / pets.length)],
+                extrapolate: 'clamp',
+              }) }],
+            }]} />
+          </View>
+        )}
+        </View>
       </View>
 
-      {/* 하단 시트 - 산책 기록 리스트 */}
       <View style={styles.bottomSheet}>
-        <ScrollView
-          style={styles.recordScrollView}
-          contentContainerStyle={styles.recordScrollContent}
-          showsVerticalScrollIndicator={false}
-        >
-          {WALK_RECORDS.map((record) => (
-            <TouchableOpacity
-              key={record.id}
-              activeOpacity={0.9}
-              onPress={() => navigation.navigate('WalkLogDetail', { record })}
-            >
-              <View style={styles.recordCard}>
-                <Image source={record.petImage} style={styles.petImage} />
-                <View style={styles.recordInfo}>
-                  <View style={[styles.petNameBadge, { backgroundColor: getPetBadgeColor(record.petName) }]}>
-                    <Text style={[styles.petNameText, { color: getPetColor(record.petName) }]}>
-                      {record.petName}
+        {isLoading ? (
+          <ActivityIndicator style={{ marginTop: 30 }} color="#0081D5" />
+        ) : (
+          <ScrollView
+            style={styles.recordScrollView}
+            contentContainerStyle={styles.recordScrollContent}
+            showsVerticalScrollIndicator={false}
+          >
+            {walkRecords.map((record) => (
+              <TouchableOpacity
+                key={`${record.petId}-${record.id}`}
+                activeOpacity={0.9}
+                onPress={() => navigation.navigate('WalkLogDetail', { record })}
+              >
+                <View style={styles.recordCard}>
+                  {record.petImage ? (
+                    <Image source={record.petImage} style={styles.petImage} />
+                  ) : (
+                    <View style={styles.petImagePlaceholder} />
+                  )}
+                  <View style={styles.recordInfo}>
+                    <View style={[styles.petNameBadge, { backgroundColor: getPetBadgeColor(record.petId) }]}>
+                      <Text style={[styles.petNameText, { color: getPetColor(record.petId) }]}>
+                        {record.petName || '이름 없음'}
+                      </Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>산책일시</Text>
+                      <Text style={styles.infoValue}>{record.date}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                      <Text style={styles.infoLabel}>이동거리</Text>
+                      <Text style={styles.infoValue}>{record.distance}</Text>
+                    </View>
+
+                    <Text style={[styles.durationText, { color: getPetColor(record.petId) }]}>
+                      {record.duration}
                     </Text>
                   </View>
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>산책일시</Text>
-                    <Text style={styles.infoValue}>{record.date}</Text>
-                  </View>
-                  <View style={styles.infoRow}>
-                    <Text style={styles.infoLabel}>이동거리</Text>
-                    <Text style={styles.infoValue}>{record.distance}</Text>
-                  </View>
-                  <Text style={[styles.durationText, { color: getPetColor(record.petName) }]}>
-                    {record.duration}
-                  </Text>
                 </View>
-              </View>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
+              </TouchableOpacity>
+            ))}
+            {walkRecords.length === 0 && <Text style={{ marginTop: 20 }}>이번 주 산책 기록이 없습니다.</Text>}
+          </ScrollView>
+        )}
       </View>
 
-      {/* 산책 시작 바텀시트 */}
       <Modal visible={isBottomSheetVisible} transparent animationType="none" onRequestClose={closeBottomSheet}>
         <View style={styles.bottomSheetOverlay}>
           <TouchableOpacity style={styles.bottomSheetBackground} activeOpacity={1} onPress={closeBottomSheet} />
-          <Animated.View
-            style={[
-              styles.selectionSheetContainer,
-              {
-                transform: [{ translateY: bottomSheetY }],
-              },
-            ]}
-          >
+          <Animated.View style={[styles.selectionSheetContainer, { transform: [{ translateY: bottomSheetY }] }]}>
             <View style={styles.dragHandleArea}>
               <View style={styles.dragHandle} />
             </View>
 
             <View style={styles.selectionSheetContent}>
               <Text style={styles.sheetTitle}>산책할 반려동물을 선택해주세요</Text>
-
-              <View style={styles.petCardsRow}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.petCardsRow}
+              >
                 {petOptions.map((pet, index) => {
-                  const isLast = index === petOptions.length - 1;
-                  const isSelected = selectedPet === pet.name;
+                  const isSelected = selectedPetId === pet.id;
                   return (
                     <TouchableOpacity
-                      key={pet.name}
+                      key={pet.id}
                       activeOpacity={0.9}
-                      onPress={() => setSelectedPet(pet.name)}
-                      style={[
-                        styles.petCard,
-                        !isLast && styles.petCardGap,
-                        isSelected && styles.petCardSelected,
-                      ]}
+                      onPress={() => setSelectedPetId(pet.id)}
+                      style={[styles.petCard, index !== petOptions.length - 1 && styles.petCardGap, isSelected && styles.petCardSelected]}
                     >
-                      <Image source={pet.image} style={styles.petCardImage} />
+                      {pet.image ? (
+                        <Image source={pet.image} style={styles.petCardImage} />
+                      ) : (
+                        <View style={styles.petCardImagePlaceholder} />
+                      )}
                       <Text style={styles.petCardName}>{pet.name}</Text>
                     </TouchableOpacity>
                   );
                 })}
-              </View>
-
+              </ScrollView>
               <View style={styles.selectionButtonContainer}>
-                <CustomButton text="산책하기" onPress={handleStartWalk} disabled={!selectedPet} width={350} />
+                <View style={styles.selectionButtonRow}>
+                  <CustomButton text="기록 보기" onPress={handleOpenPetWalkHistory} disabled={!selectedPetId} width={165} />
+                  <CustomButton text="산책하기" onPress={handleStartWalk} disabled={!selectedPetId} width={165} />
+                </View>
               </View>
             </View>
           </Animated.View>
+        </View>
+      </Modal>
+      <Modal
+        visible={isSunlightIntroVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setSunlightIntroVisible(false)}
+      >
+        <View style={styles.sunlightModalOverlay}>
+          <View style={styles.sunlightModal}>
+            <Text style={styles.sunlightModalTitle}><Text style={styles.sunlightModalHighlight}>햇빛</Text> 산책을 측정할게요</Text>
+            <Text style={styles.sunlightModalDescription}>• 오전 8시 ~ 오후 6시 산책 중 일광 노출을 측정해요</Text>
+            <Text style={styles.sunlightModalDescription}>• 10분 평균 조도가 2,000 lux 이상이면 20,000 Lux·min이 적립돼요</Text>
+            <Text style={styles.sunlightModalDescription}>• 하루 최대 60,000 Lux·min까지 적립할 수 있어요</Text>
+            <View style={styles.sunlightModalActions}>
+              <TouchableOpacity
+                style={[styles.sunlightModalButton, styles.sunlightCancelButton]}
+                onPress={() => setSunlightIntroVisible(false)}
+              >
+                <Text style={styles.sunlightCancelText}>취소</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.sunlightModalButton, styles.sunlightStartButton]} onPress={confirmStartWalk}>
+                <Text style={styles.sunlightStartText}>산책 시작</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
       </Modal>
     </View>
@@ -285,165 +657,78 @@ export default function WalkScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F8F8F8',
-  },
-
-  headerContainer: {
-    paddingHorizontal: 20,
-    paddingTop: 48,
-    marginBottom: 12,
-  },
-
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-
-  titleSection: {
-    flex: 1,
-  },
-
-  titleLine: {
-    fontSize: 32,
-    lineHeight: 40,
-  },
-
-  titlePrimary: {
-    color: '#0081D5',
-    fontSize: 32,
-    fontWeight: '600',
-    lineHeight: 40,
-  },
-
-  titleHighlight: {
-    color: '#FFC94D',
-    fontWeight: '600',
-    fontSize: 32,
-    lineHeight: 40,
-  },
-
-  subtitle: {
-    color: '#000',
-    fontSize: 32,
-    fontWeight: '600',
-    lineHeight: 40,
-    marginTop: 2,
-  },
-
-  tipText: {
-    color: '#7B7C7D',
-    fontSize: 12,
-    fontWeight: '500',
-    marginTop: 15,
-    fontFamily: undefined,
-  },
-
+  sunlightModalOverlay: { flex: 1, justifyContent: 'center', paddingHorizontal: 28, backgroundColor: 'rgba(0,0,0,0.6)' },
+  sunlightModal: { padding: 24, borderRadius: 20, backgroundColor: '#FFF' },
+  sunlightModalTitle: { color: '#0081D5', fontSize: 20, fontWeight: '700', textAlign: 'center', marginBottom: 16 },
+  sunlightModalHighlight: { color: '#FFC94D' },
+  sunlightModalDescription: { color: '#7B7C7D', fontSize: 14, lineHeight: 22, marginBottom: 8 },
+  sunlightModalActions: { flexDirection: 'row', gap: 12, marginTop: 12 },
+  sunlightModalButton: { flex: 1, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  sunlightCancelButton: { backgroundColor: '#F2F4F7' },
+  sunlightStartButton: { backgroundColor: '#0081D5' },
+  sunlightCancelText: { color: '#7B7C7D', fontSize: 15, fontWeight: '600' },
+  sunlightStartText: { color: '#FFF', fontSize: 15, fontWeight: '600' },
+  container: { flex: 1, backgroundColor: '#F8F8F8' },
+  headerContainer: { paddingHorizontal: 20, paddingTop: 48, marginBottom: 4 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  titleSection: { flex: 1, paddingRight: 12 },
+  titleLine: { fontSize: 28, lineHeight: 34, fontWeight: '700' },
+  titlePrimary: { color: '#0081D5', fontSize: 28, fontWeight: '700', lineHeight: 34 },
+  titleHighlight: { color: '#FFC94D', fontSize: 28, fontWeight: '700', lineHeight: 34 },
+  subtitle: { color: '#000000', fontSize: 28, fontWeight: '700', lineHeight: 34, marginTop: 2 },
+  tipText: { color: '#7B7C7D', fontSize: 11, fontWeight: '500', marginTop: 10 },
   startIconContainer: {
-    marginLeft: 30,
+    width: 96,
+    height: 96,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 6,
   },
-
-  startIcon: {
-    width: 120,
-    height: 120,
-  },
-
-  graphSection: {
-    paddingHorizontal: 20,
-    marginTop: 30,
-    alignItems: 'center',
-  },
-
-  graphHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    width: '100%',
-  },
-
-  graphTitle: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '600',
-    alignSelf: 'flex-start',
-  },
-
-  graphMoreButton: {
-    width: 56,
-    height: 30,
-    resizeMode: 'contain',
-  },
-
-  graphContainer: {
-    width: 310,
-    height: 160,
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    marginTop: 20,
-    paddingBottom: 24,
-  },
-
-  barColumn: {
-    alignItems: 'center',
-    width: 20,
-  },
-
-  barWrapper: {
-    width: 20,
-    alignItems: 'center',
-  },
-
-  barSegment: {
-    width: 20,
-  },
-
-  dayText: {
-    color: '#040505',
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '600',
-    marginTop: 8,
-  },
-
+  startIcon: { width: 96, height: 96 },
+  graphSection: { paddingHorizontal: 20, marginTop: 18, alignItems: 'center' },
+  graphHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%' },
+  graphTitle: { color: '#000000', fontSize: 18, fontWeight: '600', alignSelf: 'flex-start' },
+  graphMoreButton: { width: 56, height: 30, resizeMode: 'contain' },
+  graphContainer: { width: 310, height: 135, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', marginTop: 12, paddingBottom: 22 },
+  petDailySummaryWrapper: { alignSelf: 'stretch' },
+  petDailySummaryList: { width: '100%' },
+  petDailySummaryScrollable: { paddingRight: 12 },
+  summaryScrollTrack: { position: 'absolute', right: 0, top: 0, width: 4, height: 56, borderRadius: 2, backgroundColor: '#E1E4E8' },
+  summaryScrollThumb: { width: 4, borderRadius: 2, backgroundColor: '#A9B2BA' },
+  petDailySummary: { width: '100%', height: 28, flexDirection: 'row', alignItems: 'center' },
+  petDailySummaryName: { width: 76, fontSize: 12, fontWeight: '600' },
+  petDailySummaryText: { flex: 1, color: '#7B7C7D', fontSize: 12 },
+  petDailySunlightLabel: { color: '#F4B844' },
+  barColumn: { alignItems: 'center', width: 20 },
+  barWrapper: { width: 20, alignItems: 'center' },
+  barSegment: { width: 20 },
+  dayText: { color: '#040505', textAlign: 'center', fontSize: 14, fontWeight: '600', marginTop: 8 },
   bottomSheet: {
     flex: 1,
-    marginTop: 30,
+    marginTop: 12,
     borderTopLeftRadius: 30,
     borderTopRightRadius: 30,
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: -4 },
     shadowOpacity: 0.1,
     shadowRadius: 20,
     elevation: 10,
   },
-
-  recordScrollView: {
-    flex: 1,
-  },
-
-  recordScrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-    paddingBottom: 100,
-    alignItems: 'center',
-  },
-
+  recordScrollView: { flex: 1 },
+  recordScrollContent: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 100, alignItems: 'center' },
   recordCard: {
     width: 340,
     height: 140,
     borderRadius: 12,
     borderWidth: 1,
     borderColor: '#EAECEE',
-    backgroundColor: '#FFF',
+    backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     padding: 16,
     paddingHorizontal: 20,
@@ -451,138 +736,54 @@ const styles = StyleSheet.create({
     gap: 16,
     marginBottom: 12,
   },
-
-  petImage: {
+  petImage: { width: 90, height: 90, borderRadius: 45 },
+  petImagePlaceholder: {
     width: 90,
     height: 90,
     borderRadius: 45,
+    backgroundColor: '#E0E0E0',
   },
-
-  recordInfo: {
-    flex: 1,
-  },
-
+  recordInfo: { flex: 1 },
   petNameBadge: {
     paddingVertical: 2,
     paddingHorizontal: 8,
     borderRadius: 39,
-    backgroundColor: '#EFF3FE',
     alignSelf: 'flex-start',
     marginBottom: 4,
   },
-
-  petNameText: {
-    textAlign: 'center',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-
-  infoRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 2,
-  },
-
-  infoLabel: {
-    color: '#7B7C7D',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  infoValue: {
-    color: '#040505',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
-  },
-
-  durationText: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginTop: 4,
-  },
-
-  bottomSheetOverlay: {
-    flex: 1,
-  },
-  bottomSheetBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.30)',
-  },
-  selectionSheetContainer: {
-    backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    height: WALK_SHEET_HEIGHT,
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  dragHandleArea: {
-    width: '100%',
-    height: 44,
-    alignItems: 'center',
-    paddingTop: 20,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#B3B6B8',
-    borderRadius: 2,
-  },
-  selectionSheetContent: {
-    paddingHorizontal: 20,
-  },
+  petNameText: { textAlign: 'center', fontSize: 16, fontWeight: '600' },
+  infoRow: { flexDirection: 'row', alignItems: 'center', marginTop: 2 },
+  infoLabel: { color: '#7B7C7D', fontSize: 14, fontWeight: '600' },
+  infoValue: { color: '#040505', fontSize: 14, fontWeight: '500', marginLeft: 8 },
+  durationText: { fontSize: 24, fontWeight: '600', marginTop: 4 },
+  bottomSheetOverlay: { flex: 1 },
+  bottomSheetBackground: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.30)' },
+  selectionSheetContainer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, height: WALK_SHEET_HEIGHT, position: 'absolute', left: 0, right: 0, bottom: 0 },
+  dragHandleArea: { width: '100%', height: 44, alignItems: 'center', paddingTop: 20 },
+  dragHandle: { width: 40, height: 4, backgroundColor: '#B3B6B8', borderRadius: 2 },
+  selectionSheetContent: { paddingHorizontal: 20 },
   sheetTitle: {
     marginTop: 35,
-    color: '#000',
+    color: '#000000',
     fontFamily: 'Pretendard',
     fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
     marginBottom: 30,
   },
-  petCardsRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginBottom: 30,
-  },
-  petCard: {
-    width: 167,
-    height: 170,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#EAECEE',
-    backgroundColor: '#FFFFFF',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 12,
-  },
-  petCardGap: {
-    marginRight: 16,
-  },
-  petCardSelected: {
-    borderColor: '#0081D5',
-    backgroundColor: '#EEF7FD',
-  },
-  petCardImage: {
+  petCardsRow: { flexDirection: 'row', paddingHorizontal: 4, paddingBottom: 4, marginBottom: 26 },
+  petCard: { width: 167, height: 170, borderRadius: 12, borderWidth: 1, borderColor: '#EAECEE', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 12 },
+  petCardGap: { marginRight: 16 },
+  petCardSelected: { borderColor: '#0081D5', backgroundColor: '#EEF7FD' },
+  petCardImage: { width: 80, height: 80, borderRadius: 40, marginBottom: 12, resizeMode: 'cover' },
+  petCardImagePlaceholder: {
     width: 80,
     height: 80,
     borderRadius: 40,
     marginBottom: 12,
-    resizeMode: 'cover',
+    backgroundColor: '#E0E0E0',
   },
-  petCardName: {
-    color: '#000',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  selectionButtonContainer: {
-    alignItems: 'center',
-  },
+  petCardName: { color: '#000', fontSize: 16, fontWeight: '600' },
+  selectionButtonContainer: { alignItems: 'center' },
+  selectionButtonRow: { width: 350, flexDirection: 'row', justifyContent: 'space-between' },
 });

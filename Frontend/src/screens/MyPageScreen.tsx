@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useCallback, useMemo, useState, useEffect, useRef } from "react";
 import {
   View,
   Text,
@@ -7,13 +7,22 @@ import {
   Image,
   TouchableOpacity,
   Dimensions,
+  ActivityIndicator,
+  ImageSourcePropType,
 } from "react-native";
 
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
-import { useNavigation } from "@react-navigation/native";
+import { getMyPets, PetListItem } from "../api/pets";
+import { getMyProfile, UserProfile } from "../api/users";
+import { resolveImageUri } from "../utils/imageUri";
+import { getStoredAccessToken } from "../storage/tokenStorage";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
+import { healthStore } from "../store/healthStore";
+import type { HealthSummary } from "../types/health";
+import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
 
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
@@ -23,61 +32,176 @@ const MyPageScreen = () => {
   type MyPageNavProp = StackNavigationProp<RootStackParamList, "MyPage">;
   const navigation = useNavigation<MyPageNavProp>();
 
-  const user = {
-    name: "한국항공대",
-    imageUrl: require("../assets/img_emblem.png"),
-  };
-  const hasUserImage = !!user.imageUrl;
+  const scrollRef = useRef<ScrollView>(null);
+  useTabScrollToTop(scrollRef);
 
-  const petList = [
-    {
-      name: "뽀삐",
-      type: "골든리트리버",
-      gender: "여",
-      birth: "25-11-04",
-      imageUrl: require("../assets/img_adoptDog.png"),
-      healthInfo: ["4.2kg", "치주염"],
-      condition: "양호",
-    },
-    {
-      name: "나비",
-      type: "페르시안",
-      gender: "남",
-      birth: "2022-01-01",
-      imageUrl: require("../assets/img_adoptCat.png"),
-      healthInfo: ["슬개골", "알러지"],
-      condition: "주의",
-    },
-  ];
-
+  const [user, setUser] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
+  const [petList, setPetList] = useState<PetListItem[]>([]);
+  const [isPetsLoading, setIsPetsLoading] = useState(false);
+  const [petsError, setPetsError] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [userImageLoadFailed, setUserImageLoadFailed] = useState(false);
+  const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+  const isMountedRef = useRef(true);
+  const petLoadGeneration = useRef(0);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    getStoredAccessToken()
+      .then((token) => {
+        if (mounted) setAccessToken(token);
+      })
+      .catch(() => {
+        if (mounted) setAccessToken(null);
+      });
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const mapSpeciesLabel = (species?: string) => {
+    if (!species) return "";
+    const normalized = species.toLowerCase();
+    if (normalized.includes("dog") || normalized.includes("강아지")) return "강아지";
+    if (normalized.includes("cat") || normalized.includes("고양이")) return "고양이";
+    return species;
+  };
+
+  const mapGenderLabel = (sex?: string) => {
+    if (!sex) return "";
+    const normalized = sex.toLowerCase();
+    if (normalized.includes("female") || normalized.includes("여")) return "여";
+    if (normalized.includes("male") || normalized.includes("남")) return "남";
+    return sex;
+  };
+
+  const formatBirthDate = (birthDate?: string) => {
+    if (!birthDate) return "";
+    const [datePart] = birthDate.split("T");
+    return datePart;
+  };
+
+  const loadData = useCallback(async () => {
+    const generation = ++petLoadGeneration.current;
+    const isCurrent = () => isMountedRef.current && generation === petLoadGeneration.current;
+    setIsPetsLoading(true);
+    setPetsError(null);
+
+    try {
+      const [profileData, petsData] = await Promise.all([
+        getMyProfile(),
+        getMyPets(),
+      ]);
+      if (!isCurrent()) return;
+      setUser(profileData);
+      setPetList(petsData);
+
+    } catch (error) {
+      if (!isCurrent()) return;
+      const message =
+        error instanceof Error ? error.message : "정보를 불러오지 못했습니다.";
+      setPetsError(message);
+    } finally {
+      if (!isCurrent()) return;
+      setIsPetsLoading(false);
+    }
+  }, []);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+      return () => { petLoadGeneration.current += 1; };
+    }, [loadData])
+  );
+
+  // HealthCheckInputScreen / HealthCheckResultScreen 에서 돌아올 때마다 캐시 동기화
+  useFocusEffect(
+    useCallback(() => {
+      setHealthData(healthStore.getAll());
+    }, [])
+  );
+
+  const petCards = useMemo(
+    () =>
+      petList.map((pet) => {
+        const summary = healthData[pet.id];
+        return {
+          id: pet.id,
+          name: pet.name || "이름 없음",
+          type: pet.breed || mapSpeciesLabel(pet.species) || "",
+          gender: mapGenderLabel(pet.sex) || "",
+          birth: formatBirthDate(pet.birthDate) || "",
+          imageUrl: resolveImageUri(pet.profilePicture) || null,
+          healthInfo: summary
+            ? summary.healthTags.length > 0
+              ? summary.healthTags
+              : ["특이사항 없음"]
+            : Array.isArray(pet.healthInfo)
+              ? pet.healthInfo
+              : [],
+          condition: summary ? summary.overallCondition : "정보 없음",
+        };
+      }),
+    [petList, healthData]
+  );
+
+  const resolvedUserImage = resolveImageUri(user?.profilePicture);
+  const shouldUseAuthHeaderForUserImage = Boolean(
+    resolvedUserImage && /^https?:\/\/api\.puppydoc\.ovh:8080\//i.test(resolvedUserImage)
+  );
+  useEffect(() => {
+    setUserImageLoadFailed(false);
+  }, [resolvedUserImage]);
+  const userImageSource: ImageSourcePropType | undefined = resolvedUserImage
+    ? !userImageLoadFailed
+      ? {
+        uri: resolvedUserImage,
+        headers:
+          shouldUseAuthHeaderForUserImage && accessToken
+            ? { Authorization: `Bearer ${accessToken}` }
+            : undefined,
+      }
+      : undefined
+    : undefined;
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <View style={styles.container}>
       <Header />
+      <ScrollView
+        ref={scrollRef}
+        style={styles.pageScroll}
+        contentContainerStyle={styles.pageScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
 
-      {/* 🔹 누르면 ProfileEditScreen으로 이동 */}
+      {/* 유저 프로필 영역 */}
       <TouchableOpacity
         style={styles.userBox}
         onPress={() => navigation.navigate("ProfileEdit")}
         activeOpacity={0.8}
       >
-        {hasUserImage ? (
+        {userImageSource ? (
           <Image
-            source={
-              typeof user.imageUrl === "string"
-                ? { uri: user.imageUrl }
-                : user.imageUrl
-            }
+            source={userImageSource}
             style={styles.userImage}
+            onError={() => {
+              setUserImageLoadFailed(true);
+            }}
           />
         ) : (
-          <View style={styles.userCircle} />
+          <View style={styles.userImage} />
         )}
 
         <View style={styles.userRightBox}>
-          <Text style={styles.userName}>{user.name}</Text>
-
+          <Text style={styles.userName}>{user?.nickname || "사용자"} 님</Text>
           <Image
             source={require("../assets/icon_right.png")}
             style={styles.rightIcon}
@@ -85,47 +209,128 @@ const MyPageScreen = () => {
         </View>
       </TouchableOpacity>
 
-      {/* 🔹 반려동물 프로필 */}
-      <Text style={styles.sectionTitle}>반려동물 프로필</Text>
+      {/* 반려동물 프로필 */}
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>반려동물 프로필</Text>
+        <TouchableOpacity
+          style={styles.addButton}
+          onPress={() => navigation.navigate("PetSignup", { mode: "add" })}
+        >
+          <Text style={styles.addButtonText}>+ 추가</Text>
+        </TouchableOpacity>
+      </View>
 
-      {petList.length === 1 && <PetProfileCard {...petList[0]} />}
+      {isPetsLoading && (
+        <View style={{ marginTop: 20 }}>
+          <ActivityIndicator size="small" color="#2A7BE4" />
+        </View>
+      )}
 
-      {petList.length > 1 && (
+      {!!petsError && !isPetsLoading && (
+        <Text style={styles.errorText}>{petsError}</Text>
+      )}
+
+      {!isPetsLoading && petCards.length === 0 && (
+        <Text style={styles.helperText}>등록된 반려동물이 없습니다.</Text>
+      )}
+
+      {petCards.length === 1 && (
         <>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            snapToInterval={CARD_WIDTH + SPACING}
-            decelerationRate="fast"
-            contentContainerStyle={{
-              paddingHorizontal: (SCREEN_WIDTH - CARD_WIDTH) / 2,
-            }}
-            onScroll={(e) => {
-              const x = e.nativeEvent.contentOffset.x;
-              const index = Math.round(x / (CARD_WIDTH + SPACING));
-              setCurrentIndex(index);
-            }}
-            scrollEventThrottle={16}
-          >
-            {petList.map((pet, idx) => (
-              <View key={idx} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
-                <PetProfileCard
-                  {...pet}
-                  onPressEdit={() => navigation.navigate("PetEdit")}
-                />
-              </View>
-            ))}
-          </ScrollView>
+          <View style={styles.singlePetCardWrap}>
+            <PetProfileCard
+              {...petCards[0]}
+              onPressEdit={() => navigation.navigate("PetEdit", { petId: petCards[0].id })}
+              onPressHistory={() =>
+                navigation.navigate("DiagnosisHistory", {
+                  petId: petCards[0].id,
+                  petName: petCards[0].name,
+                })
+              }
+            />
+          </View>
+          {!healthData[petCards[0].id] && (
+            <TouchableOpacity
+              style={styles.healthInputBtn}
+              onPress={() =>
+                navigation.navigate("HealthCheckInput", {
+                  petId: petCards[0].id,
+                  petName: petCards[0].name,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
+              <Image
+                source={require("../assets/icon_right.png")}
+                style={styles.healthInputBtnArrow}
+              />
+            </TouchableOpacity>
+          )}
+        </>
+      )}
 
-          {/* Dots */}
+      {petCards.length > 1 && (
+        <>
+          <View style={styles.petCarouselWrap}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              snapToInterval={CARD_WIDTH + SPACING}
+              decelerationRate="fast"
+              contentContainerStyle={{
+                paddingHorizontal: (SCREEN_WIDTH - CARD_WIDTH) / 2,
+              }}
+              onScroll={(e) => {
+                const x = e.nativeEvent.contentOffset.x;
+                const index = Math.round(x / (CARD_WIDTH + SPACING));
+                setCurrentIndex(index);
+              }}
+              scrollEventThrottle={16}
+            >
+              {petCards.map((pet) => (
+                <View key={pet.id} style={{ width: CARD_WIDTH, marginRight: SPACING }}>
+                  <PetProfileCard
+                    {...pet}
+                    onPressEdit={() => navigation.navigate("PetEdit", { petId: pet.id })}
+                    onPressHistory={() =>
+                      navigation.navigate("DiagnosisHistory", {
+                        petId: pet.id,
+                        petName: pet.name,
+                      })
+                    }
+                  />
+                </View>
+              ))}
+            </ScrollView>
+          </View>
+
           <View style={styles.dotContainer}>
-            {petList.map((_, i) => (
+            {petCards.map((_, i) => (
               <View
                 key={i}
                 style={[styles.dot, currentIndex === i && styles.activeDot]}
               />
             ))}
           </View>
+
+          {petCards[currentIndex] && !healthData[petCards[currentIndex].id] && (
+            <TouchableOpacity
+              style={styles.healthInputBtn}
+              onPress={() =>
+                navigation.navigate("HealthCheckInput", {
+                  petId: petCards[currentIndex].id,
+                  petName: petCards[currentIndex].name,
+                })
+              }
+              activeOpacity={0.8}
+            >
+              <Text style={styles.healthInputBtnText}>건강검진 정보 입력</Text>
+              <Image
+                source={require("../assets/icon_right.png")}
+                style={styles.healthInputBtnArrow}
+              />
+            </TouchableOpacity>
+          )}
         </>
       )}
 
@@ -134,15 +339,47 @@ const MyPageScreen = () => {
       <TouchableOpacity
         style={styles.btiSection}
         onPress={() => navigation.navigate("GameScreen")}
+        activeOpacity={0.8}
       >
-        <Text style={styles.btiTitle}>멍냥 성향테스트</Text>
-        <Text style={styles.btiDesc}>
-          나와 가장 성격이 비슷한 강아지, 고양이는?!{"\n"}
-          간단한 테스트로 알아보아요
-        </Text>
-      </TouchableOpacity>
+        <View style={styles.btiCard}>
+          <View style={styles.btiIconRow}>
+            <Image
+              source={require('../assets/img_adoptDog.png')}
+              style={styles.btiPetIcon}
+              resizeMode="contain"
+            />
+            <View style={styles.btiDots}>
+              <View style={styles.btiDot} />
+              <View style={styles.btiDot} />
+              <View style={styles.btiDot} />
+            </View>
+            <Image
+              source={require('../assets/img_adoptCat.png')}
+              style={styles.btiPetIcon}
+              resizeMode="contain"
+            />
+          </View>
 
-    </ScrollView>
+          <View style={styles.btiContent}>
+            <Text style={styles.btiTitle}>멍냥 성향테스트</Text>
+            <Text style={styles.btiDesc}>
+              나와 가장 성격이 비슷한 강아지, 고양이는?!{"\n"}
+              간단한 테스트로 알아보아요
+            </Text>
+          </View>
+
+          <View style={styles.btiFooter}>
+            <Text style={styles.btiCta}>테스트하기</Text>
+            <Image
+              source={require('../assets/icon_right.png')}
+              style={styles.btiArrow}
+              tintColor="#0081D5"
+            />
+          </View>
+        </View>
+      </TouchableOpacity>
+      </ScrollView>
+    </View>
   );
 };
 
@@ -153,8 +390,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#ffffff",
   },
-
-  /* -------------------------- 유저 영역 -------------------------- */
+  pageScroll: {
+    flex: 1,
+  },
+  pageScrollContent: {
+    paddingBottom: 28,
+  },
   userBox: {
     marginTop: 16,
     flexDirection: "row",
@@ -162,20 +403,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
-
-  userCircle: {
+  userImage: {
     width: 80,
     height: 80,
     borderRadius: 40,
     backgroundColor: "#E0E0E0",
   },
-
-  userImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-  },
-
   userRightBox: {
     flexDirection: "row",
     alignItems: "center",
@@ -183,68 +416,180 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: "space-between",
   },
-
   userName: {
     fontSize: 18,
     fontWeight: "600",
     color: "#040505",
   },
-
   rightIcon: {
     width: 16,
     height: 16,
     tintColor: "#7B7C7D",
   },
 
-  /* -------------------------- 공통 스타일 -------------------------- */
-  sectionTitle: {
-    marginTop: 40,
-    fontSize: 18,
+  /* ────── 건강검진 정보 입력 ────── */
+  healthInputBtn: {
+    width: "90%",
+    alignSelf: "center",
+    marginTop: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: "#FFF6D8",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: "#F4B844",
+  },
+  healthInputBtnText: {
+    fontSize: 14,
     fontWeight: "600",
-    paddingHorizontal: 20,
-    color: "#000",
+    color: "#F4B844",
+  },
+  healthInputBtnArrow: {
+    width: 14,
+    height: 14,
+    tintColor: "#F4B844",
   },
 
+  sectionTitle: {
+    fontSize: 18,
+    fontWeight: "600",
+    color: "#000",
+  },
+  sectionHeader: {
+    marginTop: 40,
+    paddingHorizontal: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  addButton: {
+    borderWidth: 1,
+    borderColor: "#2A7BE4",
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  addButtonText: {
+    color: "#2A7BE4",
+    fontSize: 12,
+    fontWeight: "600",
+  },
   dotContainer: {
     flexDirection: "row",
     alignSelf: "center",
     marginTop: 32,
     gap: 8,
   },
-
+  petCarouselWrap: {
+    minHeight: 360,
+  },
+  singlePetCardWrap: {
+    width: CARD_WIDTH,
+    alignSelf: "center",
+  },
   dot: {
     width: 8,
     height: 8,
     borderRadius: 8,
     backgroundColor: "#C4C4C4",
   },
-
   activeDot: {
     backgroundColor: "#2A7BE4",
   },
-
   divider: {
     width: "100%",
     height: 6,
     backgroundColor: "#F3F4F5",
     marginTop: 32,
   },
-
-  btiSection: {
-    marginTop: 10,
-    paddingVertical: 20,
+   btiSection: {
+     marginTop: 10,
+     paddingVertical: 0,
+     paddingHorizontal: 20,
+     marginBottom: 2,
+   },
+   btiCard: {
+     backgroundColor: '#F0F7FF',
+     borderRadius: 16,
+     borderWidth: 1.5,
+     borderColor: '#E0F0FF',
+     paddingVertical: 24,
+     paddingHorizontal: 20,
+     shadowColor: '#0081D5',
+     shadowOffset: { width: 0, height: 2 },
+     shadowOpacity: 0.08,
+     shadowRadius: 8,
+     elevation: 3,
+   },
+   btiIconRow: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+     paddingVertical: 6,
+     marginBottom: 10,
+   },
+    btiPetIcon: {
+      width: 100,
+      height: 100,
+    },
+   btiDots: {
+     flexDirection: 'row',
+     gap: 6,
+   },
+   btiDot: {
+     width: 6,
+     height: 6,
+     borderRadius: 3,
+     backgroundColor: '#0081D5',
+   },
+   btiContent: {
+     marginBottom: 16,
+   },
+   btiTitle: {
+     fontSize: 18,
+     fontWeight: '700',
+     color: '#000000',
+     marginBottom: 8,
+   },
+   btiDesc: {
+     fontSize: 14,
+     color: '#555',
+     lineHeight: 20,
+     fontWeight: '500',
+   },
+   btiFooter: {
+     flexDirection: 'row',
+     alignItems: 'center',
+     justifyContent: 'space-between',
+     paddingTop: 12,
+     borderTopWidth: 1,
+     borderTopColor: '#D0E8FF',
+   },
+   btiCta: {
+     fontSize: 14,
+     fontWeight: '600',
+     color: '#0081D5',
+   },
+   btiArrow: {
+     width: 16,
+     height: 16,
+   },
+  helperText: {
+    fontSize: 14,
+    color: "#7B7C7D",
     paddingHorizontal: 20,
+    marginTop: 16,
+    textAlign: "center",
   },
-
-  btiTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    marginBottom: 4,
-  },
-
-  btiDesc: {
-    fontSize: 13,
-    color: "#555",
-    lineHeight: 18,
+  errorText: {
+    fontSize: 12,
+    color: "#EF5F5F",
+    paddingHorizontal: 20,
+    marginTop: 8,
   },
 });
+
+

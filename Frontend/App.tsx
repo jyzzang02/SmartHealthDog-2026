@@ -4,126 +4,284 @@
  *
  * @format
  */
-//import 'react-native-gesture-handler';
 
 import React from 'react';
 import { StatusBar, useColorScheme } from 'react-native';
+import { NavigationContainer, DefaultTheme } from '@react-navigation/native';
+import type { NavigatorScreenParams } from '@react-navigation/native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
+
+import AuthLoadingScreen from './src/screens/AuthLoadingScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import OrdinaryLogin from './src/screens/OrdinaryLogin';
 import OrdinarySignup from './src/screens/OrdinarySignup';
 import UserSignup from './src/screens/UserSignup';
 import PetSignup from './src/screens/PetSignup';
 import TabNavigator from './src/navigation/TabBar';
+
 import AnimalDetailScreen from './src/screens/AnimalDetailScreen';
-import SymptomResultScreen from './src/screens/SymptomResultScreen';
+import DiagnosisHistoryScreen from './src/screens/DiagnosisHistoryScreen';
+
 import EyeDiagnosisScreen from './src/screens/EyeDiagnosisScreen';
+import EyeCameraScreen from './src/screens/EyeCameraScreen';
+import EyeDiagnosisResultScreen from './src/screens/EyeDiagnosisResultScreen';
 import UrineDiagnosisScreen from './src/screens/UrineDiagnosisScreen';
+import UrineCameraScreen from './src/screens/UrineCameraScreen';
+import UrineDiagnosisResultScreen from './src/screens/UrineDiagnosisResultScreen';
+
 import MyPageScreen from './src/screens/MyPageScreen';
 import GameScreen from './src/screens/GameScreen';
 import PetEditScreen from './src/screens/PetEditScreen';
 import ProfileEditScreen from './src/screens/ProfileEditScreen';
+
 import WalkLogDetailScreen from './src/screens/WalkLogDetailScreen';
 import WalkWeeklyReportScreen from './src/screens/WalkWeeklyReportScreen';
 import WalkActiveScreen from './src/screens/WalkActiveScreen';
-
-
-
+import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
+import HealthCheckInputScreen from './src/screens/HealthCheckInputScreen';
+import HealthCheckResultScreen from './src/screens/HealthCheckResultScreen';
+import HealthDetailScreen from './src/screens/HealthDetailScreen';
+import BreedDetailScreen from './src/screens/BreedDetailScreen';
+import PetQnaSelectScreen from './src/screens/PetQnaSelectScreen';
+import PetQnaListScreen from './src/screens/PetQnaListScreen';
+import SelfCheckScreen from './src/screens/SelfCheckScreen';
+import SelfCheckHistoryScreen from './src/screens/SelfCheckHistoryScreen';
+import type { HealthSummary } from './src/types/health';
+import type { PetSpecies } from './src/data/petQna';
 
 export type RootStackParamList = {
+  AuthLoading: undefined;
   Login: undefined;
   Home: undefined;
+
   OrdinaryLogin: undefined;
   OrdinarySignup: undefined;
-  SymptomResult: undefined;
-  EyeDiagnosis: undefined;
-  UrineDiagnosis: undefined;
-  MyPage: undefined;
-  GameScreen: undefined; 
-  PetEdit: undefined; 
-  ProfileEdit: undefined;
+
   UserSignup: {
     email: string;
     password: string;
     verificationCode: string;
   };
+
   PetSignup: {
-    email: string;
-    password: string;
-    verificationCode: string;
-    nickname: string;
+    mode?: 'add';
+    email?: string;
+    password?: string;
+    verificationCode?: string;
+    nickname?: string;
+    profileImage?: string | null;
   };
-  Main: undefined;
+
+  Main: NavigatorScreenParams<{ '건강': { openHospitalSearch?: boolean } | undefined }> | undefined;
+
+  EyeDiagnosis: undefined;
+  EyeCamera: undefined;
+  EyeDiagnosisResult: {
+    petId: number;
+    submissionId?: string;
+  };
+
+   UrineDiagnosis: undefined;
+   UrineCamera: undefined;
+   UrineDiagnosisResult: {
+     petId: number;
+     submissionId?: string;
+   };
+
+  MyPage: undefined;
+  GameScreen: undefined;
+  ProfileEdit: undefined;
+
+  DiagnosisHistory: {
+    petId: number;
+    petName?: string;
+  };
+
+  PetEdit: {
+    petId: number;
+  };
+
   AnimalDetail: {
     animalData: {
-      type: '강아지' | '고양이';
+      id?: number;
+      name?: string;
+      shelterId?: number;
+      shelterName?: string;
+      shelterPhone?: string;
+      shelterAddress?: string;
+      type: string;
       tags: string[];
       breed: string;
       age: string;
-      location: string;
       image: any;
     };
   };
+
   WalkLogDetail: {
     record: {
-      id: number;
+      id?: number;
+      petId: number;
       petName: string;
       petImage: any;
       date: string;
       distance: string;
       duration: string;
+      distanceKm?: number;
+      durationSec?: number;
       startTime?: string;
       endTime?: string;
+      pathCoordinates?: Array<[number, number]>;
     };
   };
+
   WalkWeeklyReport: undefined;
-  WalkActive: {
+
+  WalkPetHistory: {
+    petId: number;
     petName: string;
     petImage: any;
   };
+
+  WalkActive: {
+    petId: number;
+    petName: string;
+    petImage: any;
+  };
+
+  HealthCheckInput: {
+    petId: number;
+    petName: string;
+  };
+
+  HealthCheckResult: {
+    petId: number;
+    petName: string;
+    summary: HealthSummary;
+  };
+
+  HealthDetail: {
+    petId: number;
+    petName: string;
+  };
+
+  BreedDetail: {
+    breedName: string;
+  };
+
+  PetQnaSelect: undefined;
+  PetQnaList: {
+    species: PetSpecies;
+  };
+
+  SelfCheck: { petId?: number; recordId?: number } | undefined;
+  SelfCheckHistory: { petId: number; petName: string };
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
-function App() {
-  const isDarkMode = useColorScheme() === 'dark';
+const AppTheme = {
+  ...DefaultTheme,
+  colors: {
+    ...DefaultTheme.colors,
+    background: '#FFFFFF',
+    card: '#FFFFFF',
+  },
+};
+
+function AppNavigator() {
+  const colorScheme = useColorScheme();
 
   return (
-    <SafeAreaProvider>
-      <NavigationContainer>
-        <StatusBar barStyle={isDarkMode ? 'light-content' : 'dark-content'} />
-        <Stack.Navigator
-          initialRouteName="Login"
-          screenOptions={{
-            headerShown: false,
-          }}
-        >
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
-          <Stack.Screen name="OrdinarySignup" component={OrdinarySignup} />
-          <Stack.Screen name="UserSignup" component={UserSignup} />
-          <Stack.Screen name="PetSignup" component={PetSignup} />
-          <Stack.Screen name="Main" component={TabNavigator} />
-          <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
-          <Stack.Screen name="SymptomResult" component={SymptomResultScreen} />
-          <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
-          <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
-          <Stack.Screen name="MyPage" component={MyPageScreen} />
-          <Stack.Screen name="GameScreen" component={GameScreen} />
-          <Stack.Screen name="PetEdit" component={PetEditScreen} />
-          <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
-          <Stack.Screen name="WalkLogDetail" component={WalkLogDetailScreen} />
-          <Stack.Screen name="WalkWeeklyReport" component={WalkWeeklyReportScreen} />
-          <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
+    <NavigationContainer theme={AppTheme}>
+      <StatusBar
+        backgroundColor="#FFFFFF"
+        barStyle={colorScheme === 'dark' ? 'light-content' : 'dark-content'}
+      />
 
+      <Stack.Navigator
+        initialRouteName="AuthLoading"
+        screenOptions={{
+          headerShown: false,
+          contentStyle: {
+            backgroundColor: '#FFFFFF',
+          },
+        }}
+      >
+        {/* Auth Loading (Splash screen with token check) */}
+        <Stack.Screen name="AuthLoading" component={AuthLoadingScreen} />
 
+        {/* Auth */}
+        <Stack.Screen name="Login" component={LoginScreen} />
+        <Stack.Screen name="OrdinaryLogin" component={OrdinaryLogin} />
+        <Stack.Screen name="OrdinarySignup" component={OrdinarySignup} />
+        <Stack.Screen name="UserSignup" component={UserSignup} />
+        <Stack.Screen name="PetSignup" component={PetSignup} />
 
-        </Stack.Navigator>
-      </NavigationContainer>
+        {/* Main Tab */}
+        <Stack.Screen name="Main" component={TabNavigator} />
+
+        {/* Adoption */}
+        <Stack.Screen name="AnimalDetail" component={AnimalDetailScreen} />
+
+        {/* Health */}
+        <Stack.Screen name="EyeDiagnosis" component={EyeDiagnosisScreen} />
+        <Stack.Screen name="EyeCamera" component={EyeCameraScreen} />
+        <Stack.Screen
+          name="EyeDiagnosisResult"
+          component={EyeDiagnosisResultScreen}
+        />
+        <Stack.Screen name="UrineDiagnosis" component={UrineDiagnosisScreen} />
+        <Stack.Screen name="UrineCamera" component={UrineCameraScreen} />
+        <Stack.Screen
+          name="UrineDiagnosisResult"
+          component={UrineDiagnosisResultScreen}
+        />
+        <Stack.Screen
+          name="DiagnosisHistory"
+          component={DiagnosisHistoryScreen}
+        />
+
+        {/* My Page */}
+        <Stack.Screen name="MyPage" component={MyPageScreen} />
+        <Stack.Screen name="GameScreen" component={GameScreen} />
+        <Stack.Screen name="PetEdit" component={PetEditScreen} />
+        <Stack.Screen name="ProfileEdit" component={ProfileEditScreen} />
+
+        {/* Walk */}
+        <Stack.Screen name="WalkLogDetail" component={WalkLogDetailScreen} />
+        <Stack.Screen
+          name="WalkWeeklyReport"
+          component={WalkWeeklyReportScreen}
+        />
+        <Stack.Screen name="WalkPetHistory" component={WalkPetHistoryScreen} />
+        <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
+
+        {/* Health Check Input */}
+        <Stack.Screen name="HealthCheckInput" component={HealthCheckInputScreen} />
+        <Stack.Screen name="HealthCheckResult" component={HealthCheckResultScreen} />
+        <Stack.Screen name="HealthDetail" component={HealthDetailScreen} />
+        <Stack.Screen name="BreedDetail" component={BreedDetailScreen} />
+
+        {/* Pet Q&A */}
+        <Stack.Screen name="PetQnaSelect" component={PetQnaSelectScreen} />
+        <Stack.Screen name="PetQnaList" component={PetQnaListScreen} />
+
+        {/* Self Check */}
+        <Stack.Screen name="SelfCheck" component={SelfCheckScreen} />
+        <Stack.Screen name="SelfCheckHistory" component={SelfCheckHistoryScreen} />
+      </Stack.Navigator>
+    </NavigationContainer>
+  );
+}
+
+function App() {
+  return (
+    <SafeAreaProvider style={{ flex: 1, backgroundColor: '#FFFFFF' }}>
+      <AppNavigator />
     </SafeAreaProvider>
   );
 }
 
 export default App;
+
