@@ -57,10 +57,6 @@ export interface SubmissionCreateResponse {
   submissionId?: string;
 }
 
-export interface SubmissionStatusPayload {
-  status: string;
-}
-
 interface DiagnosisSubmissionDetail<T> {
   id?: string;
   petInfo?: { id: number; name: string; species: string };
@@ -495,20 +491,6 @@ export const getPetSubmissions = async (
   }
 };
 
-export const getMySubmissions = async (): Promise<SubmissionSummary[]> => {
-  const response = await authorizedFetch(`${API_BASE_URL}/api/submissions`, {
-    method: 'GET',
-  });
-
-  if (!response.ok) {
-    const message = await parseErrorResponse(response);
-    throw new Error(message);
-  }
-
-  const data = await parseJsonSafe(response);
-  return (Array.isArray(data) ? data : []) as SubmissionSummary[];
-};
-
 export const getEyeSubmissionResult = async (
   submissionId: string,
   signal?: AbortSignal
@@ -543,58 +525,4 @@ export const getUrineSubmissionResult = async (
 
   const data = await parseJsonSafe(response);
   return data as UrineDiagnosisResult;
-};
-
-export const updateEyeSubmissionResult = async (
-  submissionId: number,
-  payload: Record<string, unknown>
-): Promise<void> => {
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/submissions/${submissionId}/eye`,
-    {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!response.ok) {
-    const message = await parseErrorResponse(response);
-    throw new Error(message);
-  }
-};
-
-export const updateSubmissionStatus = async (
-  submissionId: number,
-  payload: SubmissionStatusPayload
-): Promise<void> => {
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/submissions/${submissionId}/status`,
-    {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-    }
-  );
-
-  if (!response.ok) {
-    const message = await parseErrorResponse(response);
-    throw new Error(message);
-  }
-};
-
-export const deleteSubmission = async (submissionId: number): Promise<void> => {
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/submissions/${submissionId}`,
-    { method: 'DELETE' }
-  );
-
-  if (!response.ok && response.status !== 204) {
-    const message = await parseErrorResponse(response);
-    throw new Error(message);
-  }
 };

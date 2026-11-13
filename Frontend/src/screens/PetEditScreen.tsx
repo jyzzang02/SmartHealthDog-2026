@@ -101,7 +101,7 @@ const PetEditScreen = () => {
     return `${year}/${month}/${day}`;
   };
 
-  const handleDateChange = (event: any, selectedDate?: Date) => {
+  const handleDateChange = (_event: any, selectedDate?: Date) => {
     if (Platform.OS === "android") {
       setShowDatePicker(false);
     }

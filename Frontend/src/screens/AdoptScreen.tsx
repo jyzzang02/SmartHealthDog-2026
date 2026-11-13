@@ -1017,10 +1017,6 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-start',
     marginBottom: 20,
   },
-  placeholderText: {
-    fontSize: 16,
-    color: '#71727A',
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',

@@ -1,6 +1,11 @@
 import { getMyPets, updatePetPartial, requestUrineDiagnosis } from './pets';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+}));
+
 const originalFetch = globalThis.fetch;
 const formDataGlobal = globalThis as typeof globalThis & { FormData: typeof FormData };
 const originalFormData = formDataGlobal.FormData;

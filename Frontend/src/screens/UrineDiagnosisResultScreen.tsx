@@ -55,7 +55,7 @@ const formatUrineValue = (value: string | null | undefined) => {
     'non hemolyzed': '비용혈', hemolyzed: '용혈',
   };
   return value.replace(/(^|[^a-z])(non hemolyzed|hemolyzed|neg\.|negative|positive|normal|trace|small|moderate|large)(?![a-z])/gi,
-    (match, prefix: string, label: string) => prefix + (labels[label.toLowerCase()] ?? label));
+    (_match, prefix: string, label: string) => prefix + (labels[label.toLowerCase()] ?? label));
 };
 
 const STATUS_PENDING = 'PENDING';

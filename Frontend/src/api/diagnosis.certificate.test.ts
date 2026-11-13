@@ -1,6 +1,11 @@
 import { getCertificateOcrResult, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+}));
+
 const id = '550e8400-e29b-41d4-a716-446655440000';
 const originalFetch = globalThis.fetch;
 let fetchMock: jest.Mock;
