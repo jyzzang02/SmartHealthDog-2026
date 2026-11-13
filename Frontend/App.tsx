@@ -106,6 +106,7 @@ export type RootStackParamList = {
   };
 
   AnimalDetail: {
+    isExample?: boolean;
     animalData: {
       id?: number;
       name?: string;

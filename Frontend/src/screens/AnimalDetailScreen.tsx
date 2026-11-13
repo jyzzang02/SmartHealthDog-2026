@@ -23,7 +23,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 export default function AnimalDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<AnimalDetailRouteProp>();
-  const { animalData } = route.params;
+  const { animalData, isExample } = route.params;
   const callInFlight = useRef(false);
   const [petDetail, setPetDetail] = useState<PetDetail | null>(null);
   const [petError, setPetError] = useState<string | null>(null);
@@ -43,8 +43,7 @@ export default function AnimalDetailScreen() {
       setIsPetLoading(true);
       setPetError(null);
       try {
-        const mock = getAdoptionMock();
-        const detail = mock ? mock.getPetDetail(shelterId, petId)
+        const detail = isExample ? getAdoptionMock().getPetDetail(shelterId, petId)
           : await getShelterPetDetail(shelterId, petId, controller.signal);
         if (!isActive) return;
         setPetDetail(detail);
@@ -66,7 +65,7 @@ export default function AnimalDetailScreen() {
       isActive = false;
       controller.abort();
     };
-  }, [animalData.id, animalData.shelterId, detailRefreshVersion]);
+  }, [animalData.id, animalData.shelterId, detailRefreshVersion, isExample]);
 
   const imageSource = useMemo(() => {
     if (petDetail?.images?.[0]) {
@@ -98,7 +97,7 @@ export default function AnimalDetailScreen() {
 
   const dialNumber = /^[+\d\s()-]+$/.test(shelterPhone)
     ? shelterPhone.replace(/[\s()-]/g, '') : '';
-  const canCall = /^\+?\d{3,15}$/.test(dialNumber);
+  const canCall = !isExample && /^\+?\d{3,15}$/.test(dialNumber);
   const handleCall = async () => {
     if (!canCall || callInFlight.current) return;
     callInFlight.current = true;

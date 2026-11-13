@@ -1,12 +1,7 @@
 import { Image } from 'react-native';
 import type { PetDetail, ShelterListItem, ShelterSearchParams, ShelterSearchResponse } from '../api/shelters';
 
-// Temporary preview for debug and test release APKs. Disable before distribution.
-export const ADOPTION_MOCK = { enabled: true };
-
 export const getAdoptionMock = () => {
-  if (!ADOPTION_MOCK.enabled) return null;
-
   const shelter: ShelterListItem = {
     shelter_id: 9000001,
     name: '[목업] 테스트 동물보호센터',

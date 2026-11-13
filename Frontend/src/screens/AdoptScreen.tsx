@@ -108,6 +108,7 @@ export default function AdoptScreen() {
   const [shelterError, setShelterError] = useState<string | null>(null);
   const [showAllShelters, setShowAllShelters] = useState(false);
   const [shelterSearchVersion, setShelterSearchVersion] = useState(0);
+  const [showAdoptExample, setShowAdoptExample] = useState(false);
   const [adoptPets, setAdoptPets] = useState<AnimalInfo[]>([]);
   const [isAdoptLoading, setIsAdoptLoading] = useState(false);
   const [adoptError, setAdoptError] = useState<string | null>(null);
@@ -234,17 +235,16 @@ export default function AdoptScreen() {
     let active = true;
     const controller = new AbortController();
     const fetchAdoptPets = async () => {
+      setShowAdoptExample(false);
       setIsAdoptLoading(true);
       setAdoptError(null);
       setAdoptPets([]);
       try {
-        const mock = getAdoptionMock();
         const filters = {
           province: selectedRegion || undefined,
           district: selectedRegion ? selectedDistrict || undefined : undefined,
         };
-        const response = mock ? mock.searchShelters(filters)
-          : await searchAllShelters(filters, controller.signal);
+        const response = await searchAllShelters(filters, controller.signal);
         if (!active) return;
         const results: AnimalInfo[][] = new Array(response.items.length);
         let nextIndex = 0;
@@ -252,8 +252,7 @@ export default function AdoptScreen() {
           while (nextIndex < response.items.length && !controller.signal.aborted) {
             const index = nextIndex++;
             const shelter = response.items[index];
-            const pets = mock ? mock.getPets(shelter.shelter_id)
-              : await getAllShelterPets(shelter.shelter_id, controller.signal);
+            const pets = await getAllShelterPets(shelter.shelter_id, controller.signal);
             if (!active || controller.signal.aborted) return;
             results[index] = pets.map(pet => mapPetToAnimalInfo(pet, shelter));
           }
@@ -393,12 +392,17 @@ export default function AdoptScreen() {
   }, []);
 
   const filteredAnimals = useMemo(() => {
+    const example = showAdoptExample ? getAdoptionMock() : null;
+    const pets = example
+      ? example.searchShelters({}).items.flatMap(shelter =>
+        example.getPets(shelter.shelter_id).map(pet => mapPetToAnimalInfo(pet, shelter)))
+      : adoptPets;
     const list =
       selectedPetType === '모두'
-        ? adoptPets
-        : adoptPets.filter((animal) => animal.type === selectedPetType);
+        ? pets
+        : pets.filter((animal) => animal.type === selectedPetType);
     return list;
-  }, [adoptPets, selectedPetType]);
+  }, [adoptPets, selectedPetType, showAdoptExample, mapPetToAnimalInfo]);
 
   return (
     <View style={styles.container}>
@@ -589,6 +593,9 @@ export default function AdoptScreen() {
 
             {/* 동물 카드 리스트 */}
             <View style={styles.animalListContainer}>
+                {showAdoptExample && (
+                  <Text style={styles.emptyText}>예시 화면입니다. 실제 입양 공고가 아닙니다.</Text>
+                )}
                 {isAdoptLoading ? (
                   <Text style={styles.emptyText}>입양 동물 정보를 불러오는 중...</Text>
                 ) : adoptError ? (
@@ -604,13 +611,20 @@ export default function AdoptScreen() {
                     </TouchableOpacity>
                   </View>
                 ) : filteredAnimals.length === 0 ? (
-                  <Text style={styles.emptyText}>입양 홍보 동물이 없어요.</Text>
+                  <View style={styles.adoptErrorContainer}>
+                    <Text style={styles.emptyText}>입양 홍보 동물이 없어요.</Text>
+                    {!showAdoptExample && (
+                      <TouchableOpacity accessibilityRole="button" style={styles.adoptRetryButton} onPress={() => setShowAdoptExample(true)}>
+                        <Text style={styles.adoptRetryText}>예시 화면 보기</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
                 ) : (
                   filteredAnimals.map((animal) => (
                     <TouchableOpacity
                       key={`${animal.shelterId}:${animal.id}`}
                       style={styles.animalCard}
-                      onPress={() => navigation.navigate('AnimalDetail', { animalData: animal })}
+                      onPress={() => navigation.navigate('AnimalDetail', showAdoptExample ? { animalData: animal, isExample: true } : { animalData: animal })}
                       activeOpacity={0.7}
                     >
                       {/* 동물 사진 */}
