@@ -39,9 +39,6 @@ export const useLatestWalkLightSample = (
             !Number.isFinite(timestamp) || timestamp <= lastTimestamp) return;
         lastTimestamp = timestamp;
         setLatest({ walkId, sample });
-        if (__DEV__) console.info('[walk-light] display:updated', {
-          walkId, lux: sample.lux, measuredAt: sample.measured_at,
-        });
       } catch {
         // A display read failure must not stop native sampling or API uploads.
       } finally {

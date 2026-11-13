@@ -1,4 +1,4 @@
-import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
+import { allowInlineMapNavigation, KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import { formatDistanceMeters } from '../utils/formatDistanceMeters';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
@@ -169,7 +169,7 @@ const HospitalSearchMap: React.FC<Props> = ({ center, hospitals, loading = false
             key={mapDocument.documentId}
             style={styles.map}
             source={{ html: mapDocument.html }}
-            originWhitelist={['*']}
+            originWhitelist={['*']} onShouldStartLoadWithRequest={allowInlineMapNavigation} setSupportMultipleWindows={false}
             javaScriptEnabled
             domStorageEnabled
             cacheEnabled={false}

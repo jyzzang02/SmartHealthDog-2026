@@ -1,4 +1,4 @@
-import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
+import { allowInlineMapNavigation, KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { WebView } from 'react-native-webview';
@@ -122,7 +122,7 @@ const ShelterNearbyMap: React.FC<Props> = ({ center, shelters, loading, error, o
               <Text style={styles.retryText}>다시 시도</Text>
             </TouchableOpacity>
           </View> : <WebView ref={webViewRef} key={document.documentId} source={{ html: document.html }}
-            originWhitelist={['*']} style={styles.map} javaScriptEnabled domStorageEnabled cacheEnabled={false}
+            originWhitelist={['*']} onShouldStartLoadWithRequest={allowInlineMapNavigation} setSupportMultipleWindows={false} style={styles.map} javaScriptEnabled domStorageEnabled cacheEnabled={false}
             nestedScrollEnabled startInLoadingState
             renderLoading={() => <View style={[styles.status, StyleSheet.absoluteFill]}><ActivityIndicator color="#0081D5" /></View>}
             onMessage={handleMessage} onError={() => setFailedDocumentId(document.documentId)}

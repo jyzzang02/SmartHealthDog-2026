@@ -1,4 +1,4 @@
-import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
+import { allowInlineMapNavigation, KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -351,7 +351,7 @@ export default function WalkLogDetailScreen() {
         <View style={styles.mapContainer}>
           <WebView
             key={`walk-detail-map-${record.id}-${pathPoints.length}`}
-            originWhitelist={['*']}
+            originWhitelist={['*']} onShouldStartLoadWithRequest={allowInlineMapNavigation} setSupportMultipleWindows={false}
             source={{ html: kakaoMapHtml }}
             style={styles.mapWebView}
             javaScriptEnabled

@@ -225,3 +225,11 @@ it.each([[999, '999m'], [1000, '1km'], [1134, '1.1km'], [2012, '2km'], [2313, '2
   sendMessage('{"type":"hospital-select","index":0}');
   expect(texts().map(value => [value].flat().join(''))).toContain('현재 위치에서 ' + expected);
 });
+
+it('permits the inline map but blocks external page navigation', () => {
+  renderMap();
+  const guard = tree.root.findByType(WebView).props.onShouldStartLoadWithRequest;
+  expect(guard({ url: 'about:blank' })).toBe(true);
+  expect(guard({ url: 'https://example.test/' })).toBe(false);
+  expect(guard({ url: 'intent://map' })).toBe(false);
+});

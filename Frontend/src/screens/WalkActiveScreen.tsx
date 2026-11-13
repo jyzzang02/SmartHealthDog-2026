@@ -1,4 +1,4 @@
-import { KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
+import { allowInlineMapNavigation, KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -220,6 +220,8 @@ export default function WalkActiveScreen() {
   const initialCoordRef = useRef<WalkLocation | null>(null);
   const currentCoordRef = useRef<WalkLocation | null>(null);
   const distanceKmRef = useRef(0);
+  const persistPendingAtRef = useRef<number | null>(null);
+  const persistRunningRef = useRef(false);
   const persistQueueRef = useRef<Promise<void>>(Promise.resolve());
   const lastPersistedAtRef = useRef(0);
   const isFinishingRef = useRef(false);
@@ -269,26 +271,36 @@ export default function WalkActiveScreen() {
     if (!force && now - lastPersistedAtRef.current < 5000) return;
     lastPersistedAtRef.current = now;
 
-    const snapshot: ActiveWalkSession = {
-      version: 1,
-      petId,
-      walkId: walkIdRef.current,
-      timer: { ...timerStateRef.current },
-      distanceKm: distanceKmRef.current,
-      pathCoordinates: pathCoordinatesRef.current.map((point) => [...point] as WalkCoordinate),
-      pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
-      initialCoord: initialCoordRef.current ? { ...initialCoordRef.current } : null,
-      currentCoord: currentCoordRef.current ? { ...currentCoordRef.current } : null,
-      lastCoord: lastCoordRef.current ? { ...lastCoordRef.current } : null,
-      lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
-      lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
-      updatedAtMs: now,
-    };
-
-    persistQueueRef.current = persistQueueRef.current
-      .catch(() => undefined)
-      .then(() => saveActiveWalkSession(snapshot))
-      .catch(() => undefined);
+    persistPendingAtRef.current = now;
+    if (persistRunningRef.current) return;
+    persistRunningRef.current = true;
+    persistQueueRef.current = (async () => {
+      try {
+        while (persistPendingAtRef.current !== null) {
+          const updatedAtMs = persistPendingAtRef.current;
+          persistPendingAtRef.current = null;
+          // Storage serializes the path synchronously before the next location can be appended.
+          const snapshot: ActiveWalkSession = {
+            version: 1,
+            petId,
+            walkId: walkIdRef.current,
+            timer: { ...timerStateRef.current },
+            distanceKm: distanceKmRef.current,
+            pathCoordinates: pathCoordinatesRef.current,
+            pathSegmentStartIndices: [...pathSegmentStartIndicesRef.current],
+            initialCoord: initialCoordRef.current ? { ...initialCoordRef.current } : null,
+            currentCoord: currentCoordRef.current ? { ...currentCoordRef.current } : null,
+            lastCoord: lastCoordRef.current ? { ...lastCoordRef.current } : null,
+            lastAcceptedLocationAtMs: lastAcceptedLocationAtMsRef.current,
+            lastProcessedLocationAtMs: lastProcessedLocationAtMsRef.current,
+            updatedAtMs,
+          };
+          await saveActiveWalkSession(snapshot).catch(() => undefined);
+        }
+      } finally {
+        persistRunningRef.current = false;
+      }
+    })();
   }, [petId]);
 
   const syncElapsedTime = useCallback(() => {
@@ -306,16 +318,9 @@ export default function WalkActiveScreen() {
       if (uploadedCount > 0 && appStateRef.current === 'active') {
         try {
           const sunlight = await getPetTodaySunlight(petId);
-          if (__DEV__) console.info('[walk-light] summary:after-upload', {
-            walkId,
-            sampleCount: sunlight.sample_count,
-            qualifyingMinutes: sunlight.qualifying_minutes,
-            achievedLuxMinutes: sunlight.achieved_lux_minutes,
-          });
           setTodaySunlight(sunlight);
           setSunlightUnavailable(false);
         } catch (error) {
-          if (__DEV__) console.warn('[walk-light] summary:refresh-failed', error);
           // The samples are already saved; a progress refresh can retry later.
         }
       }
@@ -323,9 +328,6 @@ export default function WalkActiveScreen() {
     lightUploadPromiseRef.current = upload;
     try {
       await upload;
-    } catch (error) {
-      if (__DEV__) console.warn('[walk-light] upload:failed', { walkId, error });
-      throw error;
     } finally {
       lightUploadPromiseRef.current = null;
     }
@@ -437,17 +439,11 @@ export default function WalkActiveScreen() {
     getPetTodaySunlight(petId)
       .then((sunlight) => {
         if (isMounted) {
-          if (__DEV__) console.info('[walk-light] summary:initial', {
-            sampleCount: sunlight.sample_count,
-            qualifyingMinutes: sunlight.qualifying_minutes,
-            achievedLuxMinutes: sunlight.achieved_lux_minutes,
-          });
           setTodaySunlight(sunlight);
           setSunlightUnavailable(false);
         }
       })
-      .catch((error) => {
-        if (__DEV__) console.warn('[walk-light] summary:initial-failed', error);
+      .catch(() => {
         if (isMounted) setSunlightUnavailable(true);
       });
     return () => {
@@ -680,7 +676,8 @@ export default function WalkActiveScreen() {
             (location) =>
               Number.isFinite(location.latitude) &&
               Number.isFinite(location.longitude) &&
-              Number.isFinite(location.timestamp)
+              Number.isFinite(location.timestamp) &&
+              location.timestamp > (lastProcessedLocationAtMsRef.current ?? -Infinity)
           )
           .sort((a, b) => a.timestamp - b.timestamp)
           .forEach((location) => {
@@ -764,14 +761,9 @@ export default function WalkActiveScreen() {
               walkIdRef.current!,
               timerStateRef.current.startedAtMs,
             );
-            if (__DEV__) console.info('[walk-light] service:started', {
-              walkId: walkIdRef.current,
-              startedAt: new Date(timerStateRef.current.startedAtMs).toISOString(),
-            });
           }
           nativeTrackingStarted = !pauseTrackingRef.current;
         } catch (error) {
-          if (__DEV__) console.warn('[walk-light] service:start-failed', error);
           // Foreground location tracking remains available if native tracking cannot start.
         }
       }
@@ -984,19 +976,13 @@ export default function WalkActiveScreen() {
     const refreshResult = async () => {
       try {
         await flushLightSamples();
-      } catch (error) {
-        if (__DEV__) console.warn('[walk-light] result:upload-failed', error);
+      } catch {
+        // Leave unconfirmed samples available for retry.
       }
       try {
         const sunlight = await getPetTodaySunlight(petId);
-        if (__DEV__) console.info('[walk-light] result:summary', {
-          sampleCount: sunlight.sample_count,
-          qualifyingMinutes: sunlight.qualifying_minutes,
-          achievedLuxMinutes: sunlight.achieved_lux_minutes,
-        });
         setTodaySunlight(sunlight);
       } catch (error) {
-        if (__DEV__) console.warn('[walk-light] result:summary-failed', error);
         setSunlightUnavailable(true);
       }
     };
@@ -1252,6 +1238,8 @@ export default function WalkActiveScreen() {
           ref={webViewRef}
           key="walk-active-map"
           originWhitelist={['*']}
+          onShouldStartLoadWithRequest={allowInlineMapNavigation}
+          setSupportMultipleWindows={false}
           source={{ html: kakaoHtml }}
           style={[styles.mapBackground, styles.mapViewport, { bottom: 338 + insets.bottom }]}
           javaScriptEnabled

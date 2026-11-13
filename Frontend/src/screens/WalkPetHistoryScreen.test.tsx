@@ -77,7 +77,7 @@ it('does not request an extra page when the first page contains all records', as
   expect(texts()).toContain('50회 · 50.0km');
 });
 
-it('logs HTTP 500 details without credentials and preserves the original UI error', async () => {
+it('logs HTTP 500 metadata without response bodies and preserves the original UI error', async () => {
   const body = JSON.stringify({
     message: 'Server query failed', code: ['INTERNAL_SERVER_ERROR'],
     access_token: 'never-log-this', detail: 'Bearer never-log-that',
@@ -94,13 +94,12 @@ it('logs HTTP 500 details without credentials and preserves the original UI erro
   const errorLog = messages.find(message => message.startsWith('[walk-debug] walk-list:http-error '))!;
   const request = JSON.parse(requestLog.slice(requestLog.indexOf('{')));
   const error = JSON.parse(errorLog.slice(errorLog.indexOf('{')));
-  expect(request).toEqual(expect.objectContaining({ limit: 50, offset: 0, startDate: null, endDate: null }));
+  expect(request).toEqual(expect.objectContaining({ limit: 50, offset: 0 }));
   expect(error).toEqual(expect.objectContaining({ requestId: request.requestId, status: 500, serverRequestId: 'request-123' }));
-  expect(error.responseBody).toContain('INTERNAL_SERVER_ERROR');
-  expect(error.responseBody).not.toContain('never-log-this');
-  expect(error.responseBody).not.toContain('never-log-that');
+  expect(error).not.toHaveProperty('responseBody');
+  expect(messages.join(' ')).not.toContain('never-log');
   expect(messages.join(' ')).not.toContain('test-access');
-  expect(clone).toHaveBeenCalledTimes(1);
+  expect(clone).not.toHaveBeenCalled();
   expect(texts()).toContain('Server query failed');
 });
 
