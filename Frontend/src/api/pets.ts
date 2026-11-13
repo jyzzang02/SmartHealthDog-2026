@@ -256,44 +256,7 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
 
   const data = await parseJsonSafe(response);
   const items = (Array.isArray(data) ? data : []) as PetListItem[];
-  const normalizedPets = items.map((item) => normalizePet(item));
-  const needsImageEnrichment = normalizedPets.some(
-    (pet) => !extractPetImage(pet) && Number.isFinite(pet.id)
-  );
-
-  if (!needsImageEnrichment) {
-    return normalizedPets;
-  }
-
-  const enriched = await Promise.all(
-    normalizedPets.map(async (pet) => {
-      if (extractPetImage(pet) || !Number.isFinite(pet.id)) {
-        return pet;
-      }
-
-      try {
-        const detailResponse = await authorizedFetch(`${API_BASE_URL}/api/pets/${pet.id}`, {
-          method: 'GET',
-        });
-
-        if (!detailResponse.ok) {
-          return pet;
-        }
-
-        const detailData = await parseJsonSafe(detailResponse);
-        const detail = normalizePet(detailData as PetListItem);
-        return {
-          ...pet,
-          ...detail,
-          profilePicture: detail.profilePicture || pet.profilePicture,
-        };
-      } catch {
-        return pet;
-      }
-    })
-  );
-
-  return enriched;
+  return items.map(normalizePet);
 };
 
 export const getPetDetail = async (id: number, signal?: AbortSignal): Promise<PetListItem> => {

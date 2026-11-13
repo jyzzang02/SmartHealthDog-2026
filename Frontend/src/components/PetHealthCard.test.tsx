@@ -9,7 +9,7 @@ jest.mock('../api/pets', () => ({ getMyPets: jest.fn() }));
 
 it('shows each pet health information and passes the selected pet', () => {
   const onPressPet = jest.fn();
-  const pets = [{ id: 1, name: '하나', weightKg: 5 }, { id: 2, name: '멍멍이' }];
+  const pets = [{ id: 1, name: '하나', species: 'CAT', weightKg: 5 }, { id: 2, name: '멍멍이', species: 'DOG' }];
   const healthData = { 1: { checkupDate: '2026-11-10' } as HealthSummary };
   let tree!: renderer.ReactTestRenderer;
   act(() => { tree = renderer.create(<PetHealthCard pets={pets} healthData={healthData} onPressPet={onPressPet} />); });
