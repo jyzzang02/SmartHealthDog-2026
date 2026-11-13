@@ -166,6 +166,7 @@ export type RootStackParamList = {
     petName: string;
     summary: HealthSummary;
     certificateSubmissionId?: string;
+    certificateOwnerId?: number;
     viewOnly?: boolean;
   };
 

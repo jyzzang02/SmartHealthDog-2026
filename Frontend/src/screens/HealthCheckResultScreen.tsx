@@ -6,6 +6,7 @@ import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { updateCertificate } from '../api/diagnosis';
+import { clearPendingCertificate } from '../storage/certificateRecovery';
 import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
 
@@ -16,7 +17,7 @@ const HealthCheckResultScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
-  const { petId, petName, summary, certificateSubmissionId, viewOnly } = route.params;
+  const { petId, petName, summary, certificateSubmissionId, certificateOwnerId, viewOnly } = route.params;
   const [saving, setSaving] = useState(false);
   const saveRequest = useRef<AbortController | null>(null);
   const session = useRef(getAuthSession()).current;
@@ -47,6 +48,9 @@ const HealthCheckResultScreen = () => {
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
       await updateCertificate(certificateSubmissionId, summary.certificate, controller.signal);
+      if (certificateOwnerId !== undefined) {
+        await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
+      }
       if (controller.signal.aborted || getAuthSession() !== session) return;
       healthStore.set(petId, summary);
       navigation.pop(2);

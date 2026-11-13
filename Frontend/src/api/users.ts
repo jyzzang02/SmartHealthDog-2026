@@ -91,14 +91,16 @@ const authorizedFetch = async (
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
 
-  const doFetch = (token: string) =>
-    fetch(input, {
+  const doFetch = (token: string) => {
+    if (init?.signal?.aborted) throw new Error('Request aborted');
+    return fetch(input, {
       ...(init || {}),
       headers: {
         ...(init?.headers || {}),
         ...buildAuthHeaders(token),
       },
     });
+  };
 
   let response = await doFetch(accessToken);
   if (response.status !== 401 && response.status !== 403) {
@@ -121,9 +123,10 @@ const authorizedFetch = async (
   return response;
 };
 
-export const getMyProfile = async (options?: { preserveRefreshError?: boolean }): Promise<UserProfile> => {
+export const getMyProfile = async (options?: { preserveRefreshError?: boolean; signal?: AbortSignal }): Promise<UserProfile> => {
   const response = await authorizedFetch(`${API_BASE_URL}/api/users/me/profile`, {
     method: 'GET',
+    signal: options?.signal,
   }, options?.preserveRefreshError);
 
   if (!response.ok) {

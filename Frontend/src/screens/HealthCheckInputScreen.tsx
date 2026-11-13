@@ -24,7 +24,9 @@ import type { RootStackParamList } from '../../App';
 import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
 import { getCertificateOcrResult, logCertificateOcr, requestCertificateOcr } from '../api/diagnosis';
-import { getAuthSession } from '../storage/tokenStorage';
+import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
+import { getMyProfile } from '../api/users';
+import { clearPendingCertificate, readPendingCertificate, storePendingCertificate } from '../storage/certificateRecovery';
 
 /* ─── 상수 ─── */
 const CERTIFICATE_FIELDS: {
@@ -58,8 +60,7 @@ const IMAGE_PICKER_OPTIONS = {
 const OCR_POLL_INTERVAL_MS = 5000;
 const OCR_TIMEOUT_MS = 90_000;
 
-type OcrSubmission = { id: string; petId: number; session: symbol };
-let pendingCertificate: OcrSubmission | null = null;
+type OcrSubmission = { id: string; petId: number; ownerId?: number; session: symbol; completed?: boolean };
 
 const todayString = () => {
   const d = new Date();
@@ -135,6 +136,26 @@ const HealthCheckInputScreen = () => {
   const ocrPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocrDeadlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pickerOpen = useRef(false);
+  const ownerRequest = useRef<{ session: symbol; promise: Promise<number | undefined> } | null>(null);
+  const resolveOwner = useCallback((session: symbol) => {
+    if (ownerRequest.current?.session === session) return ownerRequest.current.promise;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const promise = getMyProfile({ signal: controller.signal }).then(profile => {
+      assertAuthSession(session);
+      return Number.isSafeInteger(profile.id) && profile.id > 0 ? profile.id : undefined;
+    }).catch(() => undefined).finally(() => clearTimeout(timeout));
+    ownerRequest.current = { session, promise };
+    promise.then(ownerId => {
+      if (ownerId === undefined && ownerRequest.current?.promise === promise) ownerRequest.current = null;
+    });
+    return promise;
+  }, []);
+  const removeRecovery = useCallback((submission: OcrSubmission) => {
+    if (submission.ownerId !== undefined) {
+      clearPendingCertificate(submission.ownerId, submission.petId, submission.id, submission.session).catch(() => undefined);
+    }
+  }, []);
   const checkupDate = certificateOverrides.diagnosisDate ?? ocrFields.diagnosisDate ?? defaultCheckupDate;
   const selectedPet = pets.find(pet => pet.id === selectedPetId);
   const species = selectedPet?.species?.trim() ?? '';
@@ -241,10 +262,6 @@ const HealthCheckInputScreen = () => {
     if (ocrDeadlineTimer.current !== null) clearTimeout(ocrDeadlineTimer.current);
   }, []);
 
-  useFocusEffect(useCallback(() => {
-    return cancelOcrRequest;
-  }, [cancelOcrRequest]));
-
   usePreventRemove(ocrBusy, () => {
     Alert.alert(
       '진단서 처리 중',
@@ -254,9 +271,9 @@ const HealthCheckInputScreen = () => {
     );
   });
 
-  const clearCertificateImage = () => {
+  const clearCertificateImage = (discard = true) => {
     cancelOcrRequest();
-    if (pendingCertificate === ocrSubmission.current) pendingCertificate = null;
+    if (discard && ocrSubmission.current) removeRecovery(ocrSubmission.current);
     ocrSubmission.current = null;
     setCertificateImageUri(null);
     setOcrFields({});
@@ -294,10 +311,17 @@ const HealthCheckInputScreen = () => {
 
     try {
       if (image) {
+        const owner = resolveOwner(session);
         const id = await requestCertificateOcr(selectedPetId, image, controller.signal);
         if (!isCurrent()) return;
         ocrSubmission.current = { id, petId: selectedPetId, session };
-        pendingCertificate = ocrSubmission.current;
+        const ownerId = await owner;
+        if (!isCurrent()) return;
+        ocrSubmission.current.ownerId = ownerId;
+        if (ownerId !== undefined) {
+          await storePendingCertificate(ownerId, selectedPetId, id, session).catch(() => undefined);
+          if (!isCurrent()) return;
+        }
         setOcrMessage('진단서를 분석 중이에요.');
       }
       const submission = ocrSubmission.current;
@@ -308,15 +332,15 @@ const HealthCheckInputScreen = () => {
           const result = await getCertificateOcrResult(submission.petId, submission.id, controller.signal);
           if (!isCurrent()) return;
           logCertificateOcr('analysis:status', result.status);
-          if (result.status === 'COMPLETED' || result.status === 'FAILED') {
-            if (pendingCertificate === submission) pendingCertificate = null;
-          }
           if (result.status === 'COMPLETED') {
+            submission.completed = true;
             setOcrFields(result.fields);
             finish(Object.keys(result.fields).length > 0
               ? '인식한 내용을 채웠어요. 확인하고 필요한 내용을 수정해 주세요.'
               : '자동으로 채울 수 있는 내용이 없어요. 직접 입력해 주세요.');
           } else if (result.status === 'FAILED') {
+            removeRecovery(submission);
+            ocrSubmission.current = null;
             finish('진단서를 인식하지 못했어요. 다른 사진을 선택하거나 직접 입력해 주세요.');
           } else {
             ocrPollTimer.current = setTimeout(() => { checkResult(); }, OCR_POLL_INTERVAL_MS);
@@ -341,16 +365,32 @@ const HealthCheckInputScreen = () => {
         : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.';
       finish(message);
     }
-  }, [cancelOcrRequest, selectedPetId]);
+  }, [cancelOcrRequest, removeRecovery, resolveOwner, selectedPetId]);
 
-  useEffect(() => {
+  useFocusEffect(useCallback(() => {
+    let active = true;
     const session = getAuthSession();
-    if (pendingCertificate && pendingCertificate.session !== session) pendingCertificate = null;
-    if (pendingCertificate?.petId !== selectedPetId) return;
-    ocrSubmission.current = pendingCertificate;
-    logCertificateOcr('analysis:resume');
-    runCertificateOcr();
-  }, [selectedPetId, runCertificateOcr]);
+    const isCurrent = () => active && session === getAuthSession();
+    const resume = async () => {
+      const current = ocrSubmission.current;
+      if (current?.session === session && current.petId === selectedPetId) {
+        if (!current.completed) await runCertificateOcr();
+        return;
+      }
+      const ownerId = await resolveOwner(session);
+      if (ownerId === undefined || !isCurrent()) return;
+      const id = await readPendingCertificate(ownerId, selectedPetId, session);
+      if (!id || !isCurrent() || pickerOpen.current || ocrRequest.current || ocrSubmission.current) return;
+      ocrSubmission.current = { id, petId: selectedPetId, ownerId, session };
+      logCertificateOcr('analysis:resume');
+      await runCertificateOcr();
+    };
+    resume().catch(() => undefined);
+    return () => {
+      active = false;
+      cancelOcrRequest();
+    };
+  }, [cancelOcrRequest, resolveOwner, runCertificateOcr, selectedPetId]));
 
   /* ─── 핸들러 ─── */
   const setCertificateField = (key: keyof DiagnosisCertificate, value: string) => {
@@ -425,14 +465,17 @@ const HealthCheckInputScreen = () => {
       petId: selectedPetId,
       petName: selectedPetName,
       summary,
-      certificateSubmissionId: submission?.id,
+      certificateSubmissionId: submission?.completed ? submission.id : undefined,
+      certificateOwnerId: submission?.completed ? submission.ownerId : undefined,
     });
   };
 
   const handleSelectPet = (pet: PetListItem) => {
     if (pet.id !== selectedPetId) {
-      clearCertificateImage();
+      const switchingOcr = ocrSubmission.current !== null;
+      clearCertificateImage(false);
       setCertificateOverrides(prev => {
+        if (switchingOcr) return {};
         const next = { ...prev };
         delete next.animalName;
         delete next.species;
@@ -539,7 +582,7 @@ const HealthCheckInputScreen = () => {
               />
               <TouchableOpacity
                 style={styles.certRemoveBtn}
-                onPress={clearCertificateImage}
+                onPress={() => clearCertificateImage()}
               >
                 <Text style={styles.certRemoveBtnText}>삭제</Text>
               </TouchableOpacity>
