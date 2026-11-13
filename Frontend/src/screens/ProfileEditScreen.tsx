@@ -204,10 +204,6 @@ const ProfileEditScreen = () => {
     }
   }, [isSavingProfile, nickname, profileImageUri, navigation]);
 
-  const handleChangeAddress = useCallback(() => {
-    Alert.alert('주소 변경', '주소 검색 기능은 준비 중입니다.');
-  }, []);
-
   // 비회원(로그인 에러) 상태일 때 저장 버튼 숨김 여부 결정
   const isGuestMode = !!profileError;
   const resolvedServerProfileImage = resolveImageUri(profile?.profilePicture);
@@ -285,20 +281,6 @@ const ProfileEditScreen = () => {
         <Text style={styles.label}>이메일 아이디</Text>
         <View style={styles.emailBox}>
           <Text style={styles.emailText}>{profile?.email ?? "-"}</Text>
-        </View>
-
-        {/* 주소 */}
-        <Text style={styles.label}>내 주소</Text>
-        <View style={styles.addressRow}>
-          <TextInput
-            style={styles.addressInput}
-            placeholder="서울시 마포구 양xxxxx"
-            placeholderTextColor="#999"
-          />
-
-          <TouchableOpacity style={styles.changeAddressBtn} onPress={handleChangeAddress}>
-            <Text style={styles.changeAddressText}>주소 변경</Text>
-          </TouchableOpacity>
         </View>
 
         {/* 로그아웃 */}
@@ -444,38 +426,8 @@ const styles = StyleSheet.create({
     color: "#7B7C7D",
   },
 
-  addressRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
-  addressInput: {
-    flex: 1,
-    backgroundColor: "#F3F4F5",
-    padding: 16,
-    borderRadius: 10,
-    fontSize: 16,
-    marginRight: 10,
-    color: "#7B7C7D",
-    fontWeight: "500",
-  },
-
-  changeAddressBtn: {
-    borderWidth: 1,
-    borderColor: "#C4C4C4",
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 8,
-  },
-
-  changeAddressText: {
-    fontSize: 14,
-    color: "#1F2024",
-  },
-
   logoutBtn: {
-    marginTop: 40,
+    marginTop: 24,
     paddingVertical: 10,
     alignSelf: 'flex-start',
   },
