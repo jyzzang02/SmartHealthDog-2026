@@ -60,7 +60,8 @@ const getQueryParameter = (url: string, name: string) => {
   if (!parameter) return null;
 
   const value = parameter.slice(parameter.indexOf('=') + 1).replace(/\+/g, ' ');
-  return value ? decodeURIComponent(value) : null;
+  try { return value ? decodeURIComponent(value) : null; }
+  catch { return null; }
 };
 
 const isKakaoCallbackUrl = (url: string) => url.split('?')[0].split('#')[0] === KAKAO_REDIRECT_URI;
@@ -97,8 +98,8 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
     openingKakao.current = true;
     try {
-      const state: string | null = Platform.OS === 'android' ? await NativeModules.KakaoOAuth.createState() : null;
-      if (Platform.OS === 'android' && !state) throw new Error('OAuth state unavailable');
+      const state: unknown = await NativeModules.KakaoOAuth?.createState();
+      if (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error('OAuth state unavailable');
       pendingState.current = state;
       setOAuthState(state);
       hasHandledKakaoCallback.current = false;
@@ -117,7 +118,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       hasHandledKakaoCallback.current = true;
       const expectedState = pendingState.current;
       pendingState.current = null;
-      if (Platform.OS === 'android' && (!expectedState || getQueryParameter(url, 'state') !== expectedState)) {
+      if (!expectedState || getQueryParameter(url, 'state') !== expectedState) {
         setIsKakaoLoginVisible(false);
         Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
         return;
