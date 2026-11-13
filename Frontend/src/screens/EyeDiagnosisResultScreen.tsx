@@ -108,10 +108,6 @@ const isEyeType = (type?: string) => {
   return normalized.includes('EYE');
 };
 
-const logEyeDiagnosis = (event: string, details: Record<string, unknown>) => {
-  if (__DEV__) console.log(`[eye-diagnosis] ${event}`, details);
-};
-
 const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const { petId, submissionId } = route.params;
 
@@ -175,7 +171,6 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
   const requestIdRef = useRef(0);
   const requestRef = useRef<AbortController | null>(null);
   const pollRef = useRef({ startedAt: 0, attempts: 0 });
-  const lastLoggedStatusRef = useRef('');
 
   useEffect(() => {
     return () => {
@@ -196,12 +191,6 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
     const canUpdate = () => isMountedRef.current && requestIdRef.current === requestId && !controller.signal.aborted;
 
     setIsLoading(true);
-    logEyeDiagnosis('status-check:start', {
-      requestId,
-      petId,
-      submissionId: submissionId ?? null,
-      directLookupTried: directLookupTriedRef.current,
-    });
 
     try {
       if (submissionId && !directLookupTriedRef.current) {
@@ -212,14 +201,10 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setSubmission({ id: submissionId, type: 'EYE', status: STATUS_COMPLETED });
           setResult(direct);
           setMessage('');
-          logEyeDiagnosis('direct-result:success', { submissionId });
+
           return;
-        } catch (directError) {
-          if (__DEV__) console.warn('[eye-diagnosis] direct-result:failed', {
-            submissionId,
-            message:
-              directError instanceof Error ? directError.message : String(directError),
-          });
+        } catch {
+          // The submission list remains the fallback.
         }
       }
 
@@ -229,11 +214,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       const eyeSubmissions = submissions.filter((item) => isEyeType(item.type));
 
       if (eyeSubmissions.length === 0) {
-        logEyeDiagnosis('submission:not-found', {
-          petId,
-          submissionId: submissionId ?? null,
-          totalSubmissions: submissions.length,
-        });
+
         setSubmission(null);
         setResult(null);
         setMessage('안구 진단 요청이 아직 없습니다.');
@@ -248,11 +229,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
             )[0];
 
       if (!target) {
-        logEyeDiagnosis('submission:id-not-found', {
-          petId,
-          submissionId,
-          availableSubmissionIds: eyeSubmissions.map(getSubmissionId),
-        });
+
         setSubmission(null);
         setResult(null);
         setMessage('해당 진단 기록을 찾을 수 없습니다.');
@@ -263,24 +240,8 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
       const normalizedStatus = normalizeStatus(target.status);
       const idToFetch = getSubmissionId(target);
-      const failureReason = getFailureReason(target);
-      const statusKey = `${idToFetch}:${normalizedStatus}:${failureReason ?? ''}`;
-      const isNewStatus = lastLoggedStatusRef.current !== statusKey;
-
-      if (isNewStatus) {
-        lastLoggedStatusRef.current = statusKey;
-        logEyeDiagnosis('submission:status', {
-          submissionId: idToFetch || null,
-          status: normalizedStatus || null,
-          submittedAt: target.submittedAt ?? target.submitted_at ?? null,
-          completedAt: target.completedAt ?? target.completed_at ?? null,
-          failureReason,
-          submission: target,
-        });
-      }
-
       if (!idToFetch) {
-        if (__DEV__) console.warn('[eye-diagnosis] submission:missing-id', { target });
+
         setResult(null);
         setMessage('진단 기록 ID를 확인할 수 없습니다.');
         return;
@@ -293,13 +254,6 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (isFailedStatus(normalizedStatus)) {
-        if (isNewStatus) {
-          if (__DEV__) console.warn('[eye-diagnosis] submission:failed', {
-            submissionId: idToFetch,
-            status: normalizedStatus,
-            failureReason,
-          });
-        }
         setResult(null);
         setMessage(
           getFailureReason(target) ||
@@ -309,13 +263,6 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       }
 
       if (isDeletedStatus(normalizedStatus)) {
-        if (isNewStatus) {
-          if (__DEV__) console.warn('[eye-diagnosis] submission:deleted', {
-            submissionId: idToFetch,
-            status: normalizedStatus,
-            failureReason,
-          });
-        }
         setResult(null);
         setMessage(
           getFailureReason(target) === 'TIMEOUT'
@@ -331,17 +278,10 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           if (!canUpdate()) return;
           setResult(detail);
           setMessage('');
-          logEyeDiagnosis('detail-result:success', {
-            submissionId: idToFetch,
-            status: normalizedStatus,
-          });
+
           return;
         } catch (detailError) {
-          if (__DEV__) console.warn('[eye-diagnosis] detail-result:failed', {
-            status: normalizedStatus,
-            submissionId: idToFetch,
-            error: String(detailError),
-          });
+
           if (!canUpdate()) return;
           if (!isCompletedStatus(normalizedStatus)) {
             setResult(null);
@@ -361,12 +301,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           : '결과를 불러오지 못했습니다.';
 
       if (!canUpdate()) return;
-      if (__DEV__) console.error('[eye-diagnosis] status-check:failed', {
-        requestId,
-        petId,
-        submissionId: submissionId ?? null,
-        error: errorMessage,
-      });
+
       setResult(null);
       setMessage(errorMessage);
       Alert.alert('오류', errorMessage);

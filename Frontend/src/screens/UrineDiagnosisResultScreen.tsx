@@ -237,12 +237,8 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
           setResult(direct);
           setMessage('');
           return;
-        } catch (directError) {
-          if (__DEV__) console.log('[urine] direct submission lookup skipped; using list fallback', {
-            submissionId,
-            message:
-              directError instanceof Error ? directError.message : String(directError),
-          });
+        } catch {
+          // The submission list remains the fallback.
         }
       }
 
