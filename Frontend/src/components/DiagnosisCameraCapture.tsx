@@ -33,7 +33,6 @@ import {
   type PinchGestureHandlerStateChangeEvent,
 } from 'react-native-gesture-handler';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getPetSubmissions } from '../api/diagnosis';
 
 type CapturedDiagnosisImage = {
   uri: string;
@@ -51,6 +50,7 @@ type GalleryDiagnosisImage = CapturedDiagnosisImage & {
 };
 
 type DiagnosisImageCropperModule = {
+  discardCrop?: (uri: string) => Promise<void>;
   cropImage: (
     uri: string,
     cropX: number,
@@ -107,25 +107,6 @@ const toFileUri = (path: string) =>
   path.startsWith('file://') || path.startsWith('content://')
     ? path
     : `file://${path}`;
-
-const getSubmissionId = (submission: any) =>
-  String(submission?.id ?? submission?.submissionId ?? '');
-
-const getSubmissionTime = (submission: any) => {
-  const raw =
-    submission?.submittedAt ??
-    submission?.createdAt ??
-    submission?.completedAt ??
-    submission?.date ??
-    '';
-  const time = Date.parse(raw);
-  return Number.isFinite(time) ? time : 0;
-};
-
-const matchesDiagnosisType = (submission: any, type: 'eye' | 'urine') => {
-  const rawType = String(submission?.type ?? submission?.diagnosisType ?? '').toUpperCase();
-  return type === 'eye' ? rawType.includes('EYE') : rawType.includes('URINE');
-};
 
 const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   type,
@@ -188,30 +169,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       renderedScale,
     };
   }, [galleryAlignment, galleryImage]);
-
-  const resolveLatestSubmissionId = useCallback(
-    async (petId: number, created: CreateSubmissionResponse | null) => {
-      const directId = created?.submissionId || created?.id;
-      if (directId) {
-        return directId;
-      }
-
-      try {
-        const submissions = await getPetSubmissions(petId);
-        const latest = submissions
-          .filter((submission) => matchesDiagnosisType(submission, type))
-          .sort((a, b) => getSubmissionTime(b) - getSubmissionTime(a))[0];
-        const resolvedId = getSubmissionId(latest);
-
-
-        return resolvedId || undefined;
-      } catch (error) {
-
-        return undefined;
-      }
-    },
-    [type]
-  );
 
   const guideCopy = useMemo(() => {
     if (type === 'eye') {
@@ -431,12 +388,13 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
 
       const fileName = getFileNameFromPath(photo.path, `${type}.jpg`);
       const created = await requestDiagnosis(petId, { uri: fileUri, type: 'image/jpeg', fileName });
-      const submissionId = await resolveLatestSubmissionId(petId, created);
+      const submissionId = created?.submissionId || created?.id;
 
 
       if (!isMountedRef.current) return;
 
-      navigation.navigate('DiagnosisHistory');
+      navigation.navigate('DiagnosisHistory', { petId, petName: selectedPet?.name });
+      if (!submissionId) return;
       navigation.navigate(resultRouteName, {
         petId,
         ...(submissionId ? { submissionId } : {}),
@@ -464,7 +422,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     navigation,
     requestDiagnosis,
     resultRouteName,
-    resolveLatestSubmissionId,
     selectedPet?.name,
     selectedPetId,
     type,
@@ -504,12 +461,13 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
         fileName,
         fileSize: image.fileSize,
       });
-      const submissionId = await resolveLatestSubmissionId(petId, created);
+      const submissionId = created?.submissionId || created?.id;
 
 
       if (!isMountedRef.current) return;
 
-      navigation.navigate('DiagnosisHistory');
+      navigation.navigate('DiagnosisHistory', { petId, petName: selectedPet?.name });
+      if (!submissionId) return;
       navigation.navigate(resultRouteName, {
         petId,
         ...(submissionId ? { submissionId } : {}),
@@ -536,7 +494,6 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     promptPetSelection,
     requestDiagnosis,
     resultRouteName,
-    resolveLatestSubmissionId,
     selectedPet?.name,
     selectedPetId,
   ]);
@@ -609,9 +566,10 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     );
 
     uploadLock.current = true;
+    let croppedUri: string | undefined;
     try {
       setIsUploading(true);
-      const croppedUri = await diagnosisImageCropper.cropImage(
+      croppedUri = await diagnosisImageCropper.cropImage(
         galleryImage.uri,
         cropX,
         cropY,
@@ -631,6 +589,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
 
       Alert.alert('오류', '사진을 정렬하지 못했습니다. 다시 시도해 주세요.');
     } finally {
+      if (croppedUri) await diagnosisImageCropper.discardCrop?.(croppedUri).catch(() => undefined);
       uploadLock.current = false;
       if (isMountedRef.current) {
         setIsUploading(false);

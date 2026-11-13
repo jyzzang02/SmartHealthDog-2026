@@ -68,19 +68,40 @@ class DiagnosisImageCropperModule(
       }
 
       val outputFile = File(outputDirectory, "${UUID.randomUUID()}.jpg")
-      FileOutputStream(outputFile).use { output ->
-        if (!cropped.compress(Bitmap.CompressFormat.JPEG, 92, output)) {
-          throw IllegalStateException("사진 저장에 실패했습니다.")
+      try {
+        FileOutputStream(outputFile).use { output ->
+          if (!cropped.compress(Bitmap.CompressFormat.JPEG, 92, output)) {
+            throw IllegalStateException("사진 저장에 실패했습니다.")
+          }
         }
+      } catch (error: Exception) {
+        outputFile.delete()
+        throw error
+      } finally {
+        if (cropped != source) cropped.recycle()
+        source.recycle()
       }
-
-      if (cropped != source) cropped.recycle()
-      source.recycle()
       promise.resolve("file://${outputFile.absolutePath}")
     } catch (error: Exception) {
       promise.reject("CROP_FAILED", "사진을 정렬하지 못했습니다.", error)
     }
   }
+
+  @ReactMethod
+  fun discardCrop(uri: String, promise: Promise) {
+    try {
+      require(uri.startsWith("file://"))
+      val directory = File(reactContext.cacheDir, "diagnosis-crops").canonicalFile
+      val file = File(uri.removePrefix("file://")).canonicalFile
+      require(file.parentFile == directory && CROP_NAME.matches(file.name))
+      check(!file.exists() || file.delete())
+      promise.resolve(null)
+    } catch (_: Exception) {
+      promise.reject("DELETE_FAILED", "Cannot discard crop")
+    }
+  }
+
+  private val CROP_NAME = Regex("[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}[.]jpg")
 
   private fun openInputStream(uri: String): InputStream {
     return if (uri.startsWith("content://")) {

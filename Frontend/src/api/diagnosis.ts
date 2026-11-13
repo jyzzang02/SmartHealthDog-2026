@@ -330,6 +330,15 @@ export const logCertificateOcr = (stage: string, status?: number | string) => {
 const CERTIFICATE_MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 const SUBMISSION_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
+const normalizeCertificateDiagnosisDate = (value: unknown): string | undefined => {
+  if (typeof value !== 'string') return undefined;
+  const match = value.trim().match(/^(\d{4})(?:\s*[-./]\s*|\s*년\s*)(\d{1,2})(?:\s*[-./]\s*|\s*월\s*)(\d{1,2})\s*[일.]?$/);
+  if (!match) return undefined;
+  const date = [match[1], match[2].padStart(2, '0'), match[3].padStart(2, '0')].join('-');
+  const parsed = new Date(date + 'T00:00:00Z');
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : undefined;
+};
+
 export const mapCertificateOcrFields = (result: Record<string, unknown>): Partial<DiagnosisCertificate> => {
   const fields = {
     animalName: result.animal_name,
@@ -341,7 +350,8 @@ export const mapCertificateOcrFields = (result: Record<string, unknown>): Partia
     features: result.features,
     diseaseName: result.disease_name,
     onsetDate: result.onset_date,
-    diagnosisDate: result.diagnosed_date,
+    diagnosisDate: normalizeCertificateDiagnosisDate(result.diagnosed_date) ??
+      normalizeCertificateDiagnosisDate(result.diagnosed_date_text),
     prognosis: result.prognosis,
     remarks: result.remarks,
   };
@@ -350,6 +360,34 @@ export const mapCertificateOcrFields = (result: Record<string, unknown>): Partia
       .filter((entry): entry is [string, string] => typeof entry[1] === 'string' && entry[1].trim() !== '')
       .map(([key, value]) => [key, value.trim()]),
   );
+};
+
+export const updateCertificate = async (
+  submissionId: string,
+  certificate: DiagnosisCertificate,
+  signal?: AbortSignal,
+): Promise<void> => {
+  if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate', {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      animal_name: certificate.animalName,
+      species_text: certificate.species,
+      breed: certificate.breed,
+      gender_text: certificate.sex,
+      coat_color: certificate.coatColor,
+      age_text: certificate.age,
+      features: certificate.features,
+      disease_name: certificate.diseaseName,
+      onset_date_text: certificate.onsetDate,
+      diagnosed_date_text: certificate.diagnosisDate,
+      prognosis: certificate.prognosis,
+      remarks: certificate.remarks,
+    }),
+  });
+  if (!response.ok) throw new Error(await parseErrorResponse(response));
 };
 
 export const requestCertificateOcr = async (
@@ -446,39 +484,24 @@ export const getCertificateOcrResult = async (
 
 export const getPetSubmissions = async (
   petId: number,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  allPages = false,
 ): Promise<SubmissionSummary[]> => {
-  const endpoints = [
-    `${API_BASE_URL}/api/submissions/pets/${petId}`,
-    `${API_BASE_URL}/api/pets/${petId}/submissions`,
-  ];
-
-  let lastError: Error | null = null;
-
-  for (const url of endpoints) {
+  const items = new Map<string, SubmissionSummary>();
+  for (let page = 0; ; page += 1) {
     if (signal?.aborted) throw new Error('Request aborted');
-    try {
-      const response = await authorizedFetch(url, { method: 'GET', signal });
-      if (!response.ok) {
-        const message = await parseErrorResponse(response);
-        throw new Error(message);
-      }
-
-      const data = await parseJsonSafe(response);
-      const rawList = extractSubmissionList(data);
-      const list = rawList
-        .map((item) => normalizeSubmissionItem(item))
-        .filter((item): item is SubmissionSummary => !!item);
-      if (list.length > 0 || url === endpoints[endpoints.length - 1]) {
-        return list;
-      }
-    } catch (error) {
-      lastError = error instanceof Error ? error : new Error('unknown error');
+    const base = `${API_BASE_URL}/api/submissions/pets/${petId}`;
+    const response = await authorizedFetch(page === 0 ? base : base + '?page=' + page, { method: 'GET', signal });
+    if (!response.ok) throw new Error(await parseErrorResponse(response));
+    const data = await parseJsonSafe(response);
+    const raw = extractSubmissionList(data);
+    for (const entry of raw) {
+      const item = normalizeSubmissionItem(entry);
+      if (item?.id && !items.has(item.id)) items.set(item.id, item);
     }
+    if (!allPages || data?.hasNext !== true) return [...items.values()];
+    if (data.pageNumber !== page + 1 || raw.length === 0) throw new Error('진단 이력을 불러오지 못했습니다.');
   }
-
-  if (lastError) throw lastError;
-  return [];
 };
 
 export const getMySubmissions = async (): Promise<SubmissionSummary[]> => {

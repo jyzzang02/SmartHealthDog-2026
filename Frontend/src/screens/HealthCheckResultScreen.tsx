@@ -1,10 +1,12 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import React, { useCallback, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { updateCertificate } from '../api/diagnosis';
+import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckResult'>;
@@ -14,7 +16,14 @@ const HealthCheckResultScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
-  const { petId, petName, summary, viewOnly } = route.params;
+  const { petId, petName, summary, certificateSubmissionId, viewOnly } = route.params;
+  const [saving, setSaving] = useState(false);
+  const saveRequest = useRef<AbortController | null>(null);
+  const session = useRef(getAuthSession()).current;
+  useFocusEffect(useCallback(() => () => {
+    saveRequest.current?.abort();
+    saveRequest.current = null;
+  }, []));
   const fields = [
     ['동물명', summary.certificate.animalName], ['종류', summary.certificate.species],
     ['품종', summary.certificate.breed], ['성별', summary.certificate.sex],
@@ -24,9 +33,33 @@ const HealthCheckResultScreen = () => {
     ['예후 소견', summary.certificate.prognosis], ['그 외의 사항(비고)', summary.certificate.remarks],
   ];
 
-  const handleSave = () => {
-    healthStore.set(petId, summary);
-    navigation.pop(2);
+  const handleSave = async () => {
+    if (viewOnly || saveRequest.current || getAuthSession() !== session) return;
+    if (!certificateSubmissionId) {
+      healthStore.set(petId, summary);
+      navigation.pop(2);
+      return;
+    }
+
+    const controller = new AbortController();
+    saveRequest.current = controller;
+    setSaving(true);
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      await updateCertificate(certificateSubmissionId, summary.certificate, controller.signal);
+      if (controller.signal.aborted || getAuthSession() !== session) return;
+      healthStore.set(petId, summary);
+      navigation.pop(2);
+    } catch (error) {
+      if (saveRequest.current !== controller || getAuthSession() !== session) return;
+      Alert.alert('오류', error instanceof Error ? error.message : '요청을 처리하지 못했습니다.');
+    } finally {
+      clearTimeout(timeout);
+      if (saveRequest.current === controller) {
+        saveRequest.current = null;
+        setSaving(false);
+      }
+    }
   };
 
   return (
@@ -78,10 +111,10 @@ const HealthCheckResultScreen = () => {
 
       {/* 하단 버튼 */}
       {!viewOnly && <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
-        <TouchableOpacity style={styles.editBtn} onPress={() => navigation.goBack()}>
+        <TouchableOpacity style={styles.editBtn} disabled={saving} onPress={() => navigation.goBack()}>
           <Text style={styles.editBtnText}>수정하기</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+        <TouchableOpacity style={styles.saveBtn} disabled={saving} onPress={handleSave}>
           <Text style={styles.saveBtnText}>저장하기</Text>
         </TouchableOpacity>
       </View>}

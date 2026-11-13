@@ -122,7 +122,7 @@ const HealthCheckInputScreen = () => {
   const [selectedPetId, setSelectedPetId] = useState(petId);
   const [selectedPetName, setSelectedPetName] = useState(petName);
   const [isPetSelectorVisible, setPetSelectorVisible] = useState(false);
-  const [checkupDate, setCheckupDate] = useState(todayString());
+  const [defaultCheckupDate] = useState(todayString);
   const [hospitalName, setHospitalName] = useState('');
   const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
   const [certificateOverrides, setCertificateOverrides] = useState<Partial<DiagnosisCertificate>>({});
@@ -135,6 +135,7 @@ const HealthCheckInputScreen = () => {
   const ocrPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocrDeadlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pickerOpen = useRef(false);
+  const checkupDate = certificateOverrides.diagnosisDate ?? ocrFields.diagnosisDate ?? defaultCheckupDate;
   const selectedPet = pets.find(pet => pet.id === selectedPetId);
   const species = selectedPet?.species?.trim() ?? '';
   const sex = selectedPet?.gender?.trim() || selectedPet?.sex?.trim() || '';
@@ -148,6 +149,7 @@ const HealthCheckInputScreen = () => {
     age: getCertificateAge(selectedPet?.birthDate || selectedPet?.birthday, checkupDate),
     ...ocrFields,
     ...certificateOverrides,
+    diagnosisDate: checkupDate,
   };
 
   const revealFocusedInput = useCallback(() => {
@@ -410,16 +412,20 @@ const HealthCheckInputScreen = () => {
 
     const summary: HealthSummary = {
       petId: selectedPetId,
-      checkupDate,
+      checkupDate: trimmedCertificate.diagnosisDate,
       hospitalName: hospitalName.trim() || undefined,
       certificate: trimmedCertificate,
       certificateImageUri: certificateImageUri || undefined,
     };
 
+    const submission = ocrSubmission.current;
+    if (submission && (submission.session !== getAuthSession() || submission.petId !== selectedPetId)) return;
+
     navigation.navigate('HealthCheckResult', {
       petId: selectedPetId,
       petName: selectedPetName,
       summary,
+      certificateSubmissionId: submission?.id,
     });
   };
 
@@ -499,7 +505,7 @@ const HealthCheckInputScreen = () => {
             style={styles.inputValue}
             onFocus={revealFocusedInput}
             value={checkupDate}
-            onChangeText={setCheckupDate}
+            onChangeText={value => setCertificateField('diagnosisDate', value)}
             placeholder="YYYY-MM-DD"
             placeholderTextColor="#aaa"
             keyboardType="numeric"

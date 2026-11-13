@@ -243,7 +243,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       const target =
         submissionId
           ? eyeSubmissions.find((item) => getSubmissionId(item) === submissionId)
-          : [...eyeSubmissions].sort(
+          : origin === 'upload' ? undefined : [...eyeSubmissions].sort(
               (a, b) => getSubmissionTime(b) - getSubmissionTime(a)
             )[0];
 
@@ -377,7 +377,7 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         setIsLoading(false);
       }
     }
-  }, [petId, submissionId]);
+  }, [origin, petId, submissionId]);
 
   useFocusEffect(useCallback(() => {
     pollRef.current = { startedAt: Date.now(), attempts: 0 };

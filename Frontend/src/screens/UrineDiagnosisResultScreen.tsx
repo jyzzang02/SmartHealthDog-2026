@@ -261,7 +261,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       const target =
         submissionId
           ? urineSubmissions.find((item) => getSubmissionId(item) === submissionId)
-          : [...urineSubmissions].sort((a, b) => getSubmissionTime(b) - getSubmissionTime(a))[0];
+          : origin === 'upload' ? undefined : [...urineSubmissions].sort((a, b) => getSubmissionTime(b) - getSubmissionTime(a))[0];
 
       if (!target) {
         setSubmission(null);
@@ -343,7 +343,7 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
         setIsLoading(false);
       }
     }
-  }, [petId, submissionId]);
+  }, [origin, petId, submissionId]);
 
   useFocusEffect(useCallback(() => {
     pollRef.current = { startedAt: Date.now(), attempts: 0 };
