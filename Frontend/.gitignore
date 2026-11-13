@@ -82,3 +82,5 @@ yarn-error.log
 .expo/
 *.jks
 /android/app/src/main/assets/index.android.bundle
+
+.npm-cache/
