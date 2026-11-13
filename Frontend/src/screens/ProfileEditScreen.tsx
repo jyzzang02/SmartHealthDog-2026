@@ -74,7 +74,11 @@ const ProfileEditScreen = () => {
         error instanceof Error ? error.message : "로그아웃에 실패했습니다.";
       Alert.alert("로그아웃 실패", message);
     } finally {
-      await clearAuthTokens();
+      try {
+        await clearAuthTokens();
+      } catch {
+        Alert.alert("로그아웃 실패", "로그아웃에 실패했습니다.");
+      }
       setIsLoggingOut(false);
       navigation.reset({
         index: 0,

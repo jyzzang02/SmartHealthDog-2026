@@ -53,7 +53,12 @@ const AuthLoadingScreen: React.FC = () => {
       const expired = error instanceof MissingRefreshTokenError ||
         (isApiError(error) && error.status === 401 && error.codes.includes('INVALID_JWT'));
       if (expired) {
-        await clearAuthTokens();
+        try {
+          await clearAuthTokens();
+        } catch {
+          if (mounted.current) setFailed(true);
+          return;
+        }
         if (mounted.current) navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
       } else {
         setFailed(true);
