@@ -230,31 +230,24 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
     setPhase('uploading');
     setMessage('');
     let step = 'upload-url';
-    if (__DEV__) console.log('[수면 영상] 등록 시작', { sizeBytes: clip.size, durationSec: clip.seconds });
     try {
       assertAuthSession(session.current);
       if (!uploadedId.current) {
         const size = await files.size(clip.path);
         if (size !== clip.size) throw new Error('FILE_SIZE_CHANGED');
-        if (__DEV__) console.log('[수면 영상] 업로드 URL 요청');
         const prepared = await prepareRespirationUpload(petId, size, clip.seconds);
         assertAuthSession(session.current);
         step = 'S3 PUT';
-        if (__DEV__) console.log('[수면 영상] S3 업로드 시작');
         setCanCancelUpload(typeof files.cancelUpload === 'function');
-        const uploadStatus = await files.upload(clip.path, prepared.uploadUrl);
+        await files.upload(clip.path, prepared.uploadUrl);
         setCanCancelUpload(false);
-        if (__DEV__) console.log('[수면 영상] S3 업로드 응답', { status: uploadStatus });
         uploadedId.current = prepared.videoId;
       }
       step = 'complete';
       assertAuthSession(session.current);
       const videoId = uploadedId.current;
-      if (__DEV__) console.log('[수면 영상] 완료 처리 요청');
       const record = await completeRespirationUpload(petId, videoId).catch(async error => {
-        if (__DEV__) console.log('[수면 영상] 완료 응답 실패, 등록 상태 조회');
         const existing = await getRespirationRecord(petId, videoId).catch(() => null);
-        if (__DEV__) console.log('[수면 영상] 조회 결과', { status: existing?.status ?? '확인 실패' });
         if (existing?.videoId === videoId && existing.petId === petId && existing.status !== 'UPLOADING') return existing;
         if (existing?.status === 'UPLOADING' && error instanceof RespirationHttpError &&
             (error.status === 400 || error.status === 409)) {
@@ -264,14 +257,12 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
       });
       if (record.videoId !== videoId || record.petId !== petId ||
           !['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'].includes(record.status)) throw new Error('UNCONFIRMED');
-      if (__DEV__) console.log('[수면 영상] 등록 완료', { status: record.status });
       reset();
       setRegistered(record);
       setPhase('done');
     } catch (error) {
       const code = (error as { code?: unknown })?.code;
       const status = typeof code === 'string' ? /^UPLOAD_HTTP_(\d{3})$/.exec(code)?.[1] : undefined;
-      if (__DEV__) console.log('[수면 영상] 등록 실패', { step, status: status ?? null });
       setMessage(step === 'complete' && uploadedId.current
         ? '등록을 확인하지 못했습니다. 같은 영상으로 완료 확인을 다시 시도해 주세요.'
         : `영상을 등록하지 못했습니다. (${step}${status ? ` · HTTP ${status}` : ''}) 다시 시도해 주세요.`);

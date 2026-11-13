@@ -20,7 +20,6 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import org.json.JSONArray
 import org.json.JSONObject
@@ -44,21 +43,18 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
   private var walkId: Long = 0L
   private var startedAtMs: Long = 0L
   private var wakeLock: PowerManager.WakeLock? = null
-  private var loggedFirstLightEvent = false
   private var firstLightSampleQueued = false
 
   private val sampleLight = object : Runnable {
     override fun run() {
       val lux = latestLux
       if (walkId > 0L && lux != null && System.currentTimeMillis() >= startedAtMs) {
-        val uploadDecision = cctDiagnostics.evaluateForUpload(lux, latestLuxTimestampNs)
+        val uploadDecision = cctDiagnostics.evaluateForUpload(latestLuxTimestampNs)
         try {
           WalkLightStore.record(applicationContext, walkId, lux.toDouble(), uploadDecision)
-        } catch (error: Exception) {
-          if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sample:store-failed walkId=$walkId", error)
+        } catch (_: Exception) {
+          // Keep sampling if a local write fails.
         }
-      } else {
-        if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sample:skipped walkId=$walkId freshEvent=${lux != null}")
       }
       latestLux = null
       latestLuxTimestampNs = 0L
@@ -69,11 +65,9 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
             this@WalkLocationService, sensor, SensorManager.SENSOR_DELAY_NORMAL,
           )
           if (!registered) {
-            if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:re-register-failed walkId=$walkId")
             stopLightTracking()
           }
-        } catch (error: Exception) {
-          if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sensor:re-register-error walkId=$walkId", error)
+        } catch (_: Exception) {
           stopLightTracking()
         }
       }
@@ -90,21 +84,17 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     stopLightTracking()
     walkId = intent?.getLongExtra(EXTRA_WALK_ID, 0L) ?: 0L
     startedAtMs = intent?.getLongExtra(EXTRA_STARTED_AT_MS, 0L) ?: 0L
-    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "service:start walkId=$walkId startedAtMs=$startedAtMs")
     if (walkId > 0L && startedAtMs > 0L) {
       try {
         startLightTracking()
-      } catch (error: Exception) {
-        if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sensor:start-error walkId=$walkId", error)
+      } catch (_: Exception) {
         stopLightTracking()
       }
     }
-    else if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:not-started invalid-walk-session")
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
-    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "service:stop walkId=$walkId")
     stopLightTracking()
     locationManager.removeUpdates(this)
     super.onDestroy()
@@ -117,10 +107,6 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
       latestLux = value
       latestLuxTimestampNs = event.timestamp
       cctDiagnostics.onLuxEvent(event.timestamp)
-      if (!loggedFirstLightEvent) {
-        loggedFirstLightEvent = true
-        if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "sensor:first-event walkId=$walkId lux=$value")
-      }
       if (!firstLightSampleQueued) {
         firstLightSampleQueued = true
         handler.removeCallbacks(sampleLight)
@@ -134,20 +120,16 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
   private fun startLightTracking() {
     val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
     if (sensor == null) {
-      if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:unavailable walkId=$walkId")
       return
     }
     lightSensor = sensor
     latestLux = null
-    loggedFirstLightEvent = false
     firstLightSampleQueued = false
     if (!sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)) {
-      if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:register-failed walkId=$walkId")
       lightSensor = null
       return
     }
-    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "sensor:registered walkId=$walkId name=${sensor.name}")
-    cctDiagnostics.start(walkId)
+    cctDiagnostics.start()
     val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:WalkLight")
       .apply { acquire() }
@@ -245,7 +227,6 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     const val EXTRA_WALK_ID = "walk_id"
     const val EXTRA_STARTED_AT_MS = "started_at_ms"
     private const val LIGHT_SAMPLE_INTERVAL_MS = 30_000L
-    private const val LIGHT_LOG_TAG = "WalkLight"
   }
 }
 
@@ -295,10 +276,6 @@ object WalkLightStore {
       if (WalkCctUploadPolicy.permitsStoredSample(mode, candidate)) {
         eligible.put(sample)
       }
-    }
-    val blocked = pending.length() - eligible.length()
-    if (blocked > 0) {
-      if (BuildConfig.DEBUG) Log.i("WalkLight", "queue:cct-blocked walkId=$walkId count=$blocked reason=missing_or_invalid_cct")
     }
     return eligible
   }

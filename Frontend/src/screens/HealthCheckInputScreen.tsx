@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getCertificateOcrResult, logCertificateOcr, requestCertificateOcr } from '../api/diagnosis';
+import { getCertificateOcrResult, requestCertificateOcr } from '../api/diagnosis';
 import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
 import { getMyProfile } from '../api/users';
 import { clearPendingCertificate, readPendingCertificate, storePendingCertificate } from '../storage/certificateRecovery';
@@ -303,7 +303,6 @@ const HealthCheckInputScreen = () => {
     ocrDeadlineTimer.current = setTimeout(() => {
       if (!isCurrent()) return;
       const registered = ocrSubmission.current !== null;
-      logCertificateOcr('timeout', registered ? 'after-acceptance' : 'acceptance-unknown');
       finish(registered
         ? '아직 분석 결과가 준비되지 않았어요. 잠시 후 다시 확인하거나 직접 입력해 주세요.'
         : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.', registered);
@@ -311,17 +310,15 @@ const HealthCheckInputScreen = () => {
 
     try {
       if (image) {
-        const owner = resolveOwner(session);
+        const ownerId = await resolveOwner(session);
+        if (!isCurrent()) return;
+        if (ownerId === undefined) throw new TypeError();
         const id = await requestCertificateOcr(selectedPetId, image, controller.signal);
         if (!isCurrent()) return;
-        ocrSubmission.current = { id, petId: selectedPetId, session };
-        const ownerId = await owner;
+        ocrSubmission.current = { id, petId: selectedPetId, session, ownerId };
+        const persist = () => storePendingCertificate(ownerId, selectedPetId, id, session);
+        await persist().catch(() => persist()).catch(() => undefined);
         if (!isCurrent()) return;
-        ocrSubmission.current.ownerId = ownerId;
-        if (ownerId !== undefined) {
-          await storePendingCertificate(ownerId, selectedPetId, id, session).catch(() => undefined);
-          if (!isCurrent()) return;
-        }
         setOcrMessage('진단서를 분석 중이에요.');
       }
       const submission = ocrSubmission.current;
@@ -331,7 +328,6 @@ const HealthCheckInputScreen = () => {
         try {
           const result = await getCertificateOcrResult(submission.petId, submission.id, controller.signal);
           if (!isCurrent()) return;
-          logCertificateOcr('analysis:status', result.status);
           if (result.status === 'COMPLETED') {
             submission.completed = true;
             setOcrFields(result.fields);
@@ -347,7 +343,6 @@ const HealthCheckInputScreen = () => {
           }
         } catch {
           if (!isCurrent()) return;
-          logCertificateOcr('analysis:lookup-error');
           finish('분석 결과를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.', true);
         }
       };
@@ -359,7 +354,6 @@ const HealthCheckInputScreen = () => {
       }
     } catch (error) {
       if (!isCurrent()) return;
-      logCertificateOcr('upload:error');
       const message = error instanceof Error && !(error instanceof TypeError)
         ? error.message
         : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.';
@@ -382,7 +376,6 @@ const HealthCheckInputScreen = () => {
       const id = await readPendingCertificate(ownerId, selectedPetId, session);
       if (!id || !isCurrent() || pickerOpen.current || ocrRequest.current || ocrSubmission.current) return;
       ocrSubmission.current = { id, petId: selectedPetId, ownerId, session };
-      logCertificateOcr('analysis:resume');
       await runCertificateOcr();
     };
     resume().catch(() => undefined);
@@ -405,6 +398,7 @@ const HealthCheckInputScreen = () => {
       return;
     }
     clearCertificateImage();
+    setCertificateOverrides({});
     setCertificateImageUri(asset.uri);
     runCertificateOcr({ ...asset, uri: asset.uri });
   };

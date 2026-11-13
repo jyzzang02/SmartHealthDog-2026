@@ -13,7 +13,7 @@ jest.mock('@react-navigation/native', () => ({
 }));
 jest.mock('../api/hospitals', () => ({
   ...jest.requireActual('../api/hospitals'),
-  searchHospitals: jest.fn(), logHospitalSearch: jest.fn(),
+  searchHospitals: jest.fn(),
 }));
 
 const coarse = PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION;

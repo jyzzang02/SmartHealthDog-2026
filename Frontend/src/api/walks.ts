@@ -147,16 +147,9 @@ const buildAuthHeaders = (accessToken: string) => ({
   Accept: 'application/json',
 });
 
-let walkListRequestSequence = 0;
-
-const logWalkListDiagnostic = (event: string, data: Record<string, unknown>) => {
-  if (__DEV__) console.info('[walk-debug] walk-list:' + event + ' ' + JSON.stringify(data));
-};
-
 const authorizedFetch = async (
   input: string,
   init?: RequestInit,
-  diagnosticId?: string,
 ): Promise<Response> => {
   const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
@@ -166,7 +159,7 @@ const authorizedFetch = async (
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
 
-  const doFetch = async (token: string, attempt = 1) => {
+  const doFetch = async (token: string) => {
     const response = await fetch(input, {
       ...(init || {}),
       headers: {
@@ -174,7 +167,6 @@ const authorizedFetch = async (
         ...buildAuthHeaders(token),
       },
     });
-    if (diagnosticId) logWalkListDiagnostic('http', { requestId: diagnosticId, attempt, status: response.status });
     return response;
   };
 
@@ -186,7 +178,7 @@ const authorizedFetch = async (
   try {
     accessToken = await refreshSessionAccessToken(session, accessToken);
     assertAuthSession(session);
-    response = await doFetch(accessToken, 2);
+    response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
@@ -412,35 +404,12 @@ export const getPetWalks = async (
     offset: params?.offset,
   });
 
-  const requestId = Date.now().toString(36) + '-' + (++walkListRequestSequence);
   const url = API_BASE_URL + '/api/pets/' + petId + '/walks' + query;
-  const startedAt = Date.now();
-  logWalkListDiagnostic('request', {
-    requestId, method: 'GET',
-    limit: params?.limit ?? null, offset: params?.offset ?? null,
-  });
-  let response: Response;
-  try {
-    response = await authorizedFetch(url, { method: 'GET' }, requestId);
-  } catch (error) {
-    logWalkListDiagnostic('request-failed', {
-      requestId, elapsedMs: Date.now() - startedAt,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    });
-    throw error;
-  }
+  const response = await authorizedFetch(url, { method: 'GET' });
 
   if (!response.ok) {
-    if (__DEV__) {
-      logWalkListDiagnostic('http-error', {
-        requestId, status: response.status, elapsedMs: Date.now() - startedAt,
-        contentType: response.headers?.get('content-type') ?? null,
-        serverRequestId: response.headers?.get('x-request-id') ?? response.headers?.get('x-correlation-id') ?? null,
-      });
-    }
     await throwHttpError(response, '산책 목록을 불러오지 못했습니다.');
   }
-  logWalkListDiagnostic('http-success', { requestId, status: response.status, elapsedMs: Date.now() - startedAt });
 
   const data = await parseJsonSafe(response);
   const result = (data || {}) as PetWalkListResponse;

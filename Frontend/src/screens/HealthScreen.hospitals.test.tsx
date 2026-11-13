@@ -21,7 +21,7 @@ jest.mock('../components/HospitalSearchMap', () => 'HospitalSearchMap');
 jest.mock('../api/pets', () => ({ getMyPets: jest.fn(async () => []) }));
 jest.mock('../store/healthStore', () => ({ healthStore: { getAll: () => ({}) } }));
 jest.mock('../api/hospitals', () => ({
-  ...jest.requireActual('../api/hospitals'), searchHospitals: jest.fn(), logHospitalSearch: jest.fn(),
+  ...jest.requireActual('../api/hospitals'), searchHospitals: jest.fn(),
 }));
 
 it('connects the health screen controls, map and server page navigation to the same API response', async () => {

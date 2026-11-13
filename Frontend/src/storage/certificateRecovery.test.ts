@@ -2,6 +2,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { clearPendingCertificate, readPendingCertificate, storePendingCertificate } from './certificateRecovery';
 import { clearAuthTokens, getAuthSession } from './tokenStorage';
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+}));
+
 const first = '550e8400-e29b-41d4-a716-446655440000';
 const second = '550e8400-e29b-41d4-a716-446655440001';
 

@@ -323,10 +323,6 @@ export const requestEyeDiagnosis = async (
 };
 
 
-export const logCertificateOcr = (stage: string, status?: number | string) => {
-  if (__DEV__) console.info('[certificate-ocr]', stage, status ?? '');
-};
-
 const CERTIFICATE_MAX_IMAGE_BYTES = 7 * 1024 * 1024;
 const SUBMISSION_UUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 
@@ -414,14 +410,12 @@ export const requestCertificateOcr = async (
     type,
     name: type === 'image/png' ? 'certificate.png' : 'certificate.jpg',
   } as unknown as Blob);
-  logCertificateOcr('upload:start');
   const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${petId}/submissions/certificate`, {
     method: 'POST',
     body: formData,
     signal,
   });
   if (!response.ok) {
-    logCertificateOcr('upload:http', response.status);
     const error = await parseJsonSafe(response);
     if (response.status === 429 || error?.code?.includes?.('REQUEST_TOO_FREQUENT')) {
       throw new Error('진단서 등록 요청이 너무 잦아요. 잠시 후 다시 시도해 주세요.');
@@ -434,7 +428,6 @@ export const requestCertificateOcr = async (
   if (typeof data?.submission_id !== 'string' || !SUBMISSION_UUID.test(data.submission_id)) {
     throw new Error('진단서 접수를 확인하지 못했어요. 사진은 다시 올리지 않고 직접 입력할 수 있어요.');
   }
-  logCertificateOcr('upload:accepted', response.status);
   return data.submission_id;
 };
 
@@ -448,7 +441,6 @@ export const getCertificateOcrResult = async (
   signal: AbortSignal,
 ): Promise<CertificateOcrResult> => {
   const detail = await authorizedFetch(`${API_BASE_URL}/api/submissions/${submissionId}/certificate`, { signal });
-  logCertificateOcr('detail:http', detail.status);
   if (detail.ok) {
     const data = await parseJsonSafe(detail);
     const result = data?.results?.[0];
@@ -466,7 +458,6 @@ export const getCertificateOcrResult = async (
       `${API_BASE_URL}/api/submissions/pets/${petId}?type=HEALTH_CERTIFICATE`,
       { signal },
     );
-    logCertificateOcr('status-list:http', list.status);
     if (list.ok) {
       const page = await parseJsonSafe(list);
       const item = Array.isArray(page?.submissions)

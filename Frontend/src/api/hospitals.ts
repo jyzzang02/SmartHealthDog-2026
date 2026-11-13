@@ -41,10 +41,6 @@ export interface HospitalSearchResponse {
   page: { limit: number; offset: number };
 }
 
-export const logHospitalSearch = (event: string, data: Record<string, unknown>) => {
-  if (__DEV__) console.info(`[hospital-search] ${event}`, data);
-};
-
 export const isHospitalCoordinates = (value: unknown): value is HospitalCoordinates => {
   const point = value as HospitalCoordinates | null;
   return !!point && Number.isFinite(point.lat) && Math.abs(point.lat) <= 90 &&
@@ -79,7 +75,6 @@ const authorizedFetch = async (url: string, signal: AbortSignal) => {
     headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
   });
   let response = await request(accessToken);
-  logHospitalSearch('http', { status: response.status });
   // Follow the existing shelter API: refresh on 401, not on permission-related 403.
   if (response.status === 401) {
     checkAborted(signal);
@@ -87,7 +82,6 @@ const authorizedFetch = async (url: string, signal: AbortSignal) => {
     assertAuthSession(session);
     checkAborted(signal);
     response = await request(token);
-    logHospitalSearch('http:retry', { status: response.status });
   }
   return response;
 };
@@ -127,10 +121,7 @@ export const searchHospitals = async (
   if (signal?.aborted) controller.abort();
   let timedOut = false;
   const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, 25000);
-  logHospitalSearch('request', {
-    endpoint: '/api/hospitals/search', hasCoordinates: params.lat !== undefined,
-    hasLocation: !!params.location, hasQuery: !!params.query, radiusKm: radius, limit, offset,
-  });
+
   try {
     checkAborted(controller.signal);
     const response = await authorizedFetch(`${API_BASE_URL}/api/hospitals/search?${query}`, controller.signal);
@@ -138,7 +129,6 @@ export const searchHospitals = async (
       const message = await getResponseErrorMessage(response,
         response.status === 403 ? '병원검색 API 접근이 거부되었습니다. (HTTP 403)' :
           `병원을 불러오지 못했습니다. (HTTP ${response.status})`);
-      logHospitalSearch('http:error', { status: response.status, message });
       throw new Error(message);
     }
     // Java Long IDs exceed JS number precision; quote only this numeric field before parsing.
@@ -174,14 +164,7 @@ export const searchHospitals = async (
     if (data.items.length > 0 && items.length === 0) {
       throw new Error('서버에서 올바른 병원 좌표와 거리를 받지 못했습니다.');
     }
-    logHospitalSearch('response', {
-      status: response.status, responseKeys: Object.keys(data), total: data.total,
-      count: items.length, skippedCount: data.items.length - items.length,
-      sample: items.slice(0, 5).map((item) => ({
-        name: item.name, distanceM: item.distance_m, hasAddress: !!item.address,
-        hasCoordinates: true, hasPhone: !!item.phone_number, hasWebsite: !!item.website_url,
-      })),
-    });
+
     return {
       center: { lat: data.center.lat, lng: data.center.lng }, items,
       radius_km: nullableNumber(data.radius_km) ?? radius, sort_by: 'distance',
@@ -190,7 +173,6 @@ export const searchHospitals = async (
   } catch (error) {
     if (timedOut && !signal?.aborted) throw new Error('병원검색 응답이 지연되고 있습니다. 다시 시도해 주세요.');
     if (signal?.aborted) throw abortError();
-    logHospitalSearch('error', { name: error instanceof Error ? error.name : 'UnknownError' });
     if (error instanceof TypeError) throw new Error('서버에 연결할 수 없습니다. 네트워크를 확인한 뒤 다시 시도해 주세요.');
     throw error;
   } finally {
