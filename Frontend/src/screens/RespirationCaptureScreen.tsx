@@ -4,6 +4,7 @@ import { useIsFocused, usePreventRemove } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useCameraFormat, useCameraPermission, useMicrophonePermission } from 'react-native-vision-camera';
+import { launchImageLibrary } from 'react-native-image-picker';
 import type { RootStackParamList } from '../../App';
 import { getMyPets, type PetListItem } from '../api/pets';
 import { RespirationPendingView } from '../components/DiagnosisAnalysisProgress';
@@ -27,8 +28,8 @@ async function discardClip(path: string): Promise<void> {
 
 export const supportsRespirationCapture = !!files;
 
-type Clip = { path: string; seconds: number; size: number };
-type Phase = 'idle' | 'recording' | 'checking' | 'ready' | 'uploading' | 'done';
+type Clip = { path: string; seconds: number; size: number; fromGallery?: boolean };
+type Phase = 'idle' | 'picking' | 'recording' | 'checking' | 'ready' | 'uploading' | 'done';
 
 export default function RespirationCaptureScreen({ route, navigation }: NativeStackScreenProps<RootStackParamList, 'RespirationCapture'>) {
   const [{ petId, petName }, setPet] = useState(route.params);
@@ -143,8 +144,41 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
     }
   };
 
+  const pickGalleryVideo = async () => {
+    if (!files || busy.current || recording.current || phase !== 'idle') return;
+    busy.current = true;
+    setPhase('picking');
+    setMessage('');
+    let pickedPath: string | undefined;
+    try {
+      const result = await launchImageLibrary({ mediaType: 'video', selectionLimit: 1 });
+      const asset = result.assets?.[0];
+      pickedPath = asset?.uri;
+      if (!mounted.current || result.didCancel) return;
+      if (result.errorCode || !asset || !pickedPath) throw new Error('갤러리에서 영상을 불러오지 못했습니다.');
+      if (asset.type?.toLowerCase() !== 'video/mp4') throw new Error('MP4 형식의 영상을 선택해 주세요.');
+      const seconds = asset.duration;
+      if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds < 30 || seconds > 120) {
+        throw new Error('영상 길이는 30~120초여야 합니다. 다른 영상을 선택해 주세요.');
+      }
+      const size = await files.size(pickedPath).catch(() => 0);
+      if (!mounted.current) return;
+      if (!Number.isSafeInteger(size) || size < 1) throw new Error('영상 파일을 읽을 수 없습니다.');
+      if (size > 31457280) throw new Error('영상이 30MB를 초과했습니다. 더 작은 영상을 선택해 주세요.');
+      filePath.current = pickedPath;
+      setClip({ path: pickedPath, seconds: Math.floor(seconds), size, fromGallery: true });
+      setPhase('ready');
+    } catch (error) {
+      if (mounted.current) setMessage(error instanceof Error ? error.message : '갤러리에서 영상을 불러오지 못했습니다.');
+    } finally {
+      if (pickedPath && filePath.current !== pickedPath) await discardClip(pickedPath);
+      if (mounted.current && !filePath.current) setPhase('idle');
+      busy.current = false;
+    }
+  };
+
   const start = () => {
-    if (!files || !camera.current || !initialized || recording.current || phase !== 'idle') return;
+    if (!files || !camera.current || !initialized || busy.current || recording.current || phase !== 'idle') return;
     recording.current = true;
     recordingStartedAt.current = Date.now();
     setElapsedSeconds(0);
@@ -295,11 +329,11 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
         </View>
       </Modal>
       <View style={styles.guide}><Text style={styles.guideText}>편히 쉬는 반려동물의 가슴이나 배 움직임이 보이도록 약 <Text style={styles.guideHighlight}>60초</Text> 동안 촬영해 주세요.</Text></View>
-      {files && permission.hasPermission && device && ['idle', 'recording', 'checking'].includes(phase) && (
+      {files && permission.hasPermission && device && ['idle', 'picking', 'recording', 'checking'].includes(phase) && (
         <View style={styles.preview}>
           <Camera key={cameraKey} ref={camera} style={StyleSheet.absoluteFill} device={device}
             format={format} videoBitRate={format ? 1.5 : undefined} video audio={microphone.hasPermission && audioEnabled}
-            isActive={focused && foreground} onInitialized={() => { setCameraError(false); setInitialized(true); }}
+            isActive={focused && foreground && phase !== 'picking'} onInitialized={() => { setCameraError(false); setInitialized(true); }}
             onError={() => {
               recording.current = false;
               if (timer.current !== undefined) clearTimeout(timer.current);
@@ -333,13 +367,14 @@ export default function RespirationCaptureScreen({ route, navigation }: NativeSt
       {files && permission.hasPermission && phase === 'idle' && (cameraError
         ? button('다시 촬영', () => { setCameraError(false); setMessage(''); setCameraKey(key => key + 1); })
         : button('촬영 시작', start, !initialized || !device))}
+      {files && phase === 'idle' && button('갤러리에서 영상 선택', pickGalleryVideo, false, 'secondary')}
       {phase === 'recording' && button('촬영 종료', () => { void stop(); })}
       {phase === 'checking' && <Text style={styles.text}>영상 확인 중...</Text>}
       {phase === 'uploading' && <Text style={styles.text}>영상 등록 중...</Text>}
       {canCancelUpload && button('업로드 취소', () => { files?.cancelUpload?.(); setCanCancelUpload(false); }, false, 'secondary')}
       {phase === 'ready' && clip && <Text style={styles.text}>{clip.seconds}초 · {(clip.size / 1048576).toFixed(1)}MB</Text>}
       {phase === 'ready' && button(uploadedId.current ? '등록 완료 다시 확인' : '영상 등록', () => { void upload(); })}
-      {phase === 'ready' && !uploadedId.current && button('다시 촬영', () => reset())}
+      {phase === 'ready' && !uploadedId.current && button(clip?.fromGallery ? '선택 취소' : '다시 촬영', () => reset())}
       {!!message && <Text accessibilityRole="alert" style={styles.text}>{message}</Text>}
       {phase === 'idle' && button('최근 분석 결과', () => navigation.navigate('RespirationResult', { petId, petName }), false, 'secondary')}
       {phase !== 'uploading' && phase !== 'recording' && button('뒤로', () => navigation.goBack(), false, 'secondary')}
