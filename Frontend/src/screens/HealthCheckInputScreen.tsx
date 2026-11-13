@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   View,
   Text,
   StyleSheet,
@@ -15,13 +16,15 @@ import {
   KeyboardAvoidingView,
 } from 'react-native';
 import { launchCamera, launchImageLibrary, ImagePickerResponse } from 'react-native-image-picker';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useFocusEffect, useNavigation, usePreventRemove, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
+import { getCertificateOcrResult, logCertificateOcr, requestCertificateOcr } from '../api/diagnosis';
+import { getAuthSession } from '../storage/tokenStorage';
 
 /* ─── 상수 ─── */
 const CERTIFICATE_FIELDS: {
@@ -47,9 +50,16 @@ const CERTIFICATE_FIELDS: {
 const IMAGE_PICKER_OPTIONS = {
   mediaType: 'photo',
   quality: 0.8,
+  assetRepresentationMode: 'compatible',
   maxWidth: 2048,
   maxHeight: 2048,
 } as const;
+
+const OCR_POLL_INTERVAL_MS = 5000;
+const OCR_TIMEOUT_MS = 90_000;
+
+type OcrSubmission = { id: string; petId: number; session: symbol };
+let pendingCertificate: OcrSubmission | null = null;
 
 const todayString = () => {
   const d = new Date();
@@ -116,6 +126,15 @@ const HealthCheckInputScreen = () => {
   const [hospitalName, setHospitalName] = useState('');
   const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
   const [certificateOverrides, setCertificateOverrides] = useState<Partial<DiagnosisCertificate>>({});
+  const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate>>({});
+  const [ocrMessage, setOcrMessage] = useState<string | null>(null);
+  const [ocrBusy, setOcrBusy] = useState(false);
+  const [canCheckOcr, setCanCheckOcr] = useState(false);
+  const ocrSubmission = useRef<OcrSubmission | null>(null);
+  const ocrRequest = useRef<AbortController | null>(null);
+  const ocrPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ocrDeadlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pickerOpen = useRef(false);
   const selectedPet = pets.find(pet => pet.id === selectedPetId);
   const species = selectedPet?.species?.trim() ?? '';
   const sex = selectedPet?.gender?.trim() || selectedPet?.sex?.trim() || '';
@@ -127,6 +146,7 @@ const HealthCheckInputScreen = () => {
     breed: selectedPet?.breed ?? '',
     sex: CERTIFICATE_SEX[sex.toUpperCase()] ?? sex,
     age: getCertificateAge(selectedPet?.birthDate || selectedPet?.birthday, checkupDate),
+    ...ocrFields,
     ...certificateOverrides,
   };
 
@@ -212,6 +232,124 @@ const HealthCheckInputScreen = () => {
     };
   }, [petId]);
 
+  const cancelOcrRequest = useCallback(() => {
+    ocrRequest.current?.abort();
+    ocrRequest.current = null;
+    if (ocrPollTimer.current !== null) clearTimeout(ocrPollTimer.current);
+    if (ocrDeadlineTimer.current !== null) clearTimeout(ocrDeadlineTimer.current);
+  }, []);
+
+  useFocusEffect(useCallback(() => {
+    return cancelOcrRequest;
+  }, [cancelOcrRequest]));
+
+  usePreventRemove(ocrBusy, () => {
+    Alert.alert(
+      '진단서 처리 중',
+      ocrSubmission.current
+        ? '진단서 분석이 진행 중입니다. 결과를 확인할 때까지 잠시 기다려 주세요.'
+        : '진단서 사진을 등록 중입니다. 잠시 기다려 주세요.',
+    );
+  });
+
+  const clearCertificateImage = () => {
+    cancelOcrRequest();
+    if (pendingCertificate === ocrSubmission.current) pendingCertificate = null;
+    ocrSubmission.current = null;
+    setCertificateImageUri(null);
+    setOcrFields({});
+    setOcrMessage(null);
+    setOcrBusy(false);
+    setCanCheckOcr(false);
+  };
+
+  const runCertificateOcr = useCallback(async (image?: NonNullable<ImagePickerResponse['assets']>[number] & { uri: string }) => {
+    if (ocrRequest.current) return;
+    const session = getAuthSession();
+    if (!image && ocrSubmission.current?.session !== session) return;
+
+    const controller = new AbortController();
+    ocrRequest.current = controller;
+    const isCurrent = () => ocrRequest.current === controller && getAuthSession() === session;
+    const finish = (message: string, checkAgain = false) => {
+      cancelOcrRequest();
+      setOcrBusy(false);
+      setCanCheckOcr(checkAgain);
+      setOcrMessage(message);
+    };
+
+    setOcrBusy(true);
+    setCanCheckOcr(false);
+    setOcrMessage(image ? '진단서 사진을 등록하는 중이에요.' : '진단서를 분석 중이에요.');
+    ocrDeadlineTimer.current = setTimeout(() => {
+      if (!isCurrent()) return;
+      const registered = ocrSubmission.current !== null;
+      logCertificateOcr('timeout', registered ? 'after-acceptance' : 'acceptance-unknown');
+      finish(registered
+        ? '아직 분석 결과가 준비되지 않았어요. 잠시 후 다시 확인하거나 직접 입력해 주세요.'
+        : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.', registered);
+    }, OCR_TIMEOUT_MS);
+
+    try {
+      if (image) {
+        const id = await requestCertificateOcr(selectedPetId, image, controller.signal);
+        if (!isCurrent()) return;
+        ocrSubmission.current = { id, petId: selectedPetId, session };
+        pendingCertificate = ocrSubmission.current;
+        setOcrMessage('진단서를 분석 중이에요.');
+      }
+      const submission = ocrSubmission.current;
+      if (!submission) return;
+
+      const checkResult = async () => {
+        try {
+          const result = await getCertificateOcrResult(submission.petId, submission.id, controller.signal);
+          if (!isCurrent()) return;
+          logCertificateOcr('analysis:status', result.status);
+          if (result.status === 'COMPLETED' || result.status === 'FAILED') {
+            if (pendingCertificate === submission) pendingCertificate = null;
+          }
+          if (result.status === 'COMPLETED') {
+            setOcrFields(result.fields);
+            finish(Object.keys(result.fields).length > 0
+              ? '인식한 내용을 채웠어요. 확인하고 필요한 내용을 수정해 주세요.'
+              : '자동으로 채울 수 있는 내용이 없어요. 직접 입력해 주세요.');
+          } else if (result.status === 'FAILED') {
+            finish('진단서를 인식하지 못했어요. 다른 사진을 선택하거나 직접 입력해 주세요.');
+          } else {
+            ocrPollTimer.current = setTimeout(() => { checkResult(); }, OCR_POLL_INTERVAL_MS);
+          }
+        } catch {
+          if (!isCurrent()) return;
+          logCertificateOcr('analysis:lookup-error');
+          finish('분석 결과를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.', true);
+        }
+      };
+
+      if (image) {
+        ocrPollTimer.current = setTimeout(() => { checkResult(); }, OCR_POLL_INTERVAL_MS);
+      } else {
+        await checkResult();
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      logCertificateOcr('upload:error');
+      const message = error instanceof Error && !(error instanceof TypeError)
+        ? error.message
+        : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.';
+      finish(message);
+    }
+  }, [cancelOcrRequest, selectedPetId]);
+
+  useEffect(() => {
+    const session = getAuthSession();
+    if (pendingCertificate && pendingCertificate.session !== session) pendingCertificate = null;
+    if (pendingCertificate?.petId !== selectedPetId) return;
+    ocrSubmission.current = pendingCertificate;
+    logCertificateOcr('analysis:resume');
+    runCertificateOcr();
+  }, [selectedPetId, runCertificateOcr]);
+
   /* ─── 핸들러 ─── */
   const setCertificateField = (key: keyof DiagnosisCertificate, value: string) => {
     setCertificateOverrides(prev => ({ ...prev, [key]: value }));
@@ -219,12 +357,14 @@ const HealthCheckInputScreen = () => {
 
   const handleImageResponse = (response: ImagePickerResponse) => {
     if (response.didCancel) return;
-    const uri = response.assets?.[0]?.uri;
-    if (response.errorCode || !uri) {
+    const asset = response.assets?.[0];
+    if (response.errorCode || !asset?.uri) {
       Alert.alert('오류', '이미지를 불러올 수 없습니다.');
       return;
     }
-    setCertificateImageUri(uri);
+    clearCertificateImage();
+    setCertificateImageUri(asset.uri);
+    runCertificateOcr({ ...asset, uri: asset.uri });
   };
 
   const requestCameraPermission = async () => {
@@ -242,20 +382,27 @@ const HealthCheckInputScreen = () => {
     }
   };
 
-  const handleTakePhoto = async () => {
-    const hasPermission = await requestCameraPermission();
-    if (!hasPermission) {
-      Alert.alert('권한 필요', '진단서를 촬영하려면 카메라 권한을 허용해 주세요.');
-      return;
+  const openCertificatePicker = async (source: 'camera' | 'album') => {
+    if (pickerOpen.current || ocrRequest.current) return;
+    pickerOpen.current = true;
+    try {
+      if (source === 'camera' && !(await requestCameraPermission())) {
+        Alert.alert('권한 필요', '진단서를 촬영하려면 카메라 권한을 허용해 주세요.');
+        return;
+      }
+      const response = source === 'camera'
+        ? await launchCamera(IMAGE_PICKER_OPTIONS)
+        : await launchImageLibrary({ ...IMAGE_PICKER_OPTIONS, selectionLimit: 1 });
+      if (navigation.isFocused()) handleImageResponse(response);
+    } catch {
+      if (navigation.isFocused()) Alert.alert('오류', '이미지를 불러올 수 없습니다.');
+    } finally {
+      pickerOpen.current = false;
     }
-    launchCamera(IMAGE_PICKER_OPTIONS, handleImageResponse);
-  };
-
-  const handlePickFromAlbum = () => {
-    launchImageLibrary({ ...IMAGE_PICKER_OPTIONS, selectionLimit: 1 }, handleImageResponse);
   };
 
   const handleSubmit = () => {
+    if (ocrRequest.current || pickerOpen.current) return;
     const trimmedCertificate = { ...certificate };
     CERTIFICATE_FIELDS.forEach(({ key }) => {
       trimmedCertificate[key] = certificate[key].trim();
@@ -278,6 +425,7 @@ const HealthCheckInputScreen = () => {
 
   const handleSelectPet = (pet: PetListItem) => {
     if (pet.id !== selectedPetId) {
+      clearCertificateImage();
       setCertificateOverrides(prev => {
         const next = { ...prev };
         delete next.animalName;
@@ -385,21 +533,33 @@ const HealthCheckInputScreen = () => {
               />
               <TouchableOpacity
                 style={styles.certRemoveBtn}
-                onPress={() => setCertificateImageUri(null)}
+                onPress={clearCertificateImage}
               >
                 <Text style={styles.certRemoveBtnText}>삭제</Text>
               </TouchableOpacity>
             </View>
           )}
           <View style={styles.certBtnRow}>
-            <TouchableOpacity style={styles.certBtn} onPress={handleTakePhoto}>
+            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy} accessibilityState={{ disabled: ocrBusy }} onPress={() => openCertificatePicker('camera')}>
               <Text style={styles.certBtnText}>촬영하기</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.certBtn} onPress={handlePickFromAlbum}>
+            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy} accessibilityState={{ disabled: ocrBusy }} onPress={() => openCertificatePicker('album')}>
               <Text style={styles.certBtnText}>앨범에서 선택</Text>
             </TouchableOpacity>
           </View>
         </View>
+
+        {ocrMessage && (
+          <View style={styles.ocrStatus} accessibilityLiveRegion="polite">
+            {ocrBusy && <ActivityIndicator color="#0081D5" />}
+            <Text style={styles.ocrStatusText}>{ocrMessage}</Text>
+            {canCheckOcr && (
+              <TouchableOpacity accessibilityRole="button" onPress={() => runCertificateOcr()}>
+                <Text style={styles.ocrRetry}>결과 다시 확인</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
 
         {/* ── 진단서 정보 ── */}
         <Text style={[styles.sectionTitle, { marginTop: 28 }]}>진단서 정보</Text>
@@ -447,7 +607,7 @@ const HealthCheckInputScreen = () => {
         >
           <Text style={styles.cancelBtnText}>취소</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.submitBtn} onPress={handleSubmit}>
+        <TouchableOpacity style={[styles.submitBtn, ocrBusy && styles.ocrDisabled]} disabled={ocrBusy} onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>다음</Text>
         </TouchableOpacity>
       </View>
@@ -645,6 +805,23 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 16,
   },
+  ocrStatus: {
+    alignItems: 'flex-start',
+    gap: 6,
+    marginTop: 12,
+  },
+  ocrStatusText: {
+    fontSize: 13,
+    color: '#555',
+    lineHeight: 20,
+  },
+  ocrRetry: {
+    fontSize: 14,
+    color: '#0081D5',
+    fontWeight: '600',
+    paddingVertical: 8,
+  },
+  ocrDisabled: { opacity: 0.5 },
   certPreviewWrap: {
     marginBottom: 16,
   },
