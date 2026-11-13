@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
+  Easing,
   Image,
   ImageSourcePropType,
   StyleSheet,
@@ -22,6 +24,34 @@ const formatElapsedTime = (seconds: number) => {
   const remainingSeconds = (seconds % 60).toString().padStart(2, '0');
   return `${minutes}:${remainingSeconds}`;
 };
+
+function AnalysisRing({ imageSource }: { imageSource: ImageSourcePropType }) {
+  const rotation = useRef(new Animated.Value(0)).current;
+  const rotate = useMemo(() => rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['38deg', '398deg'],
+  }), [rotation]);
+
+  useEffect(() => {
+    const animation = Animated.loop(Animated.timing(rotation, {
+      toValue: 1,
+      duration: 1400,
+      easing: Easing.linear,
+      useNativeDriver: true,
+      isInteraction: false,
+    }));
+    animation.start();
+    return () => animation.stop();
+  }, [rotation]);
+
+  return (
+    <View style={styles.progressWrapper}>
+      <View style={styles.progressBase} />
+      <Animated.View style={[styles.progressArc, { transform: [{ rotate }] }]} />
+      <Image source={imageSource} style={styles.dogImage} />
+    </View>
+  );
+}
 
 export default function DiagnosisAnalysisProgress({
   imageSource,
@@ -53,11 +83,7 @@ export default function DiagnosisAnalysisProgress({
     <View style={styles.container}>
       <Text style={styles.title}>결과 분석중..</Text>
 
-      <View style={styles.progressWrapper}>
-        <View style={styles.progressBase} />
-        <View style={styles.progressArc} />
-        <Image source={imageSource} style={styles.dogImage} />
-      </View>
+      <AnalysisRing imageSource={imageSource} />
 
       <Text style={styles.expectedTime}>보통 10~30초 정도 소요됩니다.</Text>
       <View style={styles.elapsedRow}>
@@ -94,11 +120,7 @@ export function RespirationPendingView({ onConfirm }: { onConfirm: () => void })
   return (
     <View style={styles.container}>
       <Text style={styles.title}>영상 등록 완료</Text>
-      <View style={styles.progressWrapper}>
-        <View style={styles.progressBase} />
-        <View style={styles.progressArc} />
-        <Image source={require('../assets/eyeDog.png')} style={styles.dogImage} />
-      </View>
+      <AnalysisRing imageSource={require('../assets/eyeDog.png')} />
       <Text style={styles.expectedTime}>수면 영상이 등록되었습니다.</Text>
       <View style={styles.stageList}>
         <Text style={styles.completedStage}>1. 영상 업로드 완료</Text>
@@ -152,7 +174,6 @@ const styles = StyleSheet.create({
     borderRightColor: '#118AF5',
     borderBottomColor: 'transparent',
     borderLeftColor: 'transparent',
-    transform: [{ rotate: '38deg' }],
   },
   dogImage: {
     width: 98,
