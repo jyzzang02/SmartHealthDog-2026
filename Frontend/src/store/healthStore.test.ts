@@ -1,3 +1,4 @@
+import { clearAuthTokens } from '../storage/tokenStorage';
 import { healthStore } from './healthStore';
 import type { HealthSummary } from '../types/health';
 
@@ -35,4 +36,11 @@ describe('healthStore', () => {
     expect(healthStore.get(petId)).toBe(latest);
     expect(healthStore.getPrevious(petId)).toBe(middle);
   });
+});
+
+it('does not expose saved checkups after an account session ends', async () => {
+  healthStore.set(1, createSummary(1, '2026-03-10'));
+  await clearAuthTokens();
+  expect(healthStore.getHistory(1)).toEqual([]);
+  expect(healthStore.getAll()).toEqual({});
 });

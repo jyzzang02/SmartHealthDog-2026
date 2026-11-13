@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -104,34 +104,40 @@ const HealthDetailScreen = () => {
   );
 
   // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
-  const loadScores = useCallback(() => {
-    let mounted = true;
+  const scoresRequest = useRef<AbortController | null>(null);
+  const loadScores = useCallback(async () => {
+    scoresRequest.current?.abort();
+    const controller = new AbortController();
+    scoresRequest.current = controller;
+    const { signal } = controller;
     setScoreStatus('loading');
-    listSelfChecks(petId)
-      .then((page) =>
-        Promise.all(page.content.map((item) => getSelfCheck(petId, item.id).catch(() => null)))
-      )
-      .then((records) => {
-        if (!mounted) return;
-        setScoreRecords(
-          records
-            .filter((record): record is SelfCheckRecord => record !== null)
-            .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
-        );
-        setScoreStatus('done');
-      })
-      .catch(() => {
-        if (mounted) setScoreStatus('error');
-      });
-    return () => {
-      mounted = false;
-    };
+    try {
+      const page = await listSelfChecks(petId, 0, signal);
+      const items = page.content.slice(0, 20);
+      const records: SelfCheckRecord[] = [];
+      let next = 0;
+      const worker = async () => {
+        while (!signal.aborted && next < items.length) {
+          const record = await getSelfCheck(petId, items[next++].id, signal).catch(() => null);
+          if (record) records.push(record);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, worker));
+      if (signal.aborted) return;
+      setScoreRecords(records.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
+      setScoreStatus('done');
+    } catch {
+      if (!signal.aborted) setScoreStatus('error');
+    } finally {
+      if (scoresRequest.current === controller) scoresRequest.current = null;
+    }
   }, [petId]);
 
   useFocusEffect(
     useCallback(() => {
       if (activeTab !== '변화 추이') return;
-      return loadScores();
+      loadScores();
+      return () => scoresRequest.current?.abort();
     }, [activeTab, loadScores])
   );
 
