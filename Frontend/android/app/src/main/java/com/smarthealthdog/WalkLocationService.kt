@@ -46,29 +46,19 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
   private var wakeLock: PowerManager.WakeLock? = null
   private var loggedFirstLightEvent = false
   private var firstLightSampleQueued = false
-  private val oneMinuteTestLux = ArrayList<Float>(2)
+
   private val sampleLight = object : Runnable {
     override fun run() {
       val lux = latestLux
       if (walkId > 0L && lux != null && System.currentTimeMillis() >= startedAtMs) {
         val uploadDecision = cctDiagnostics.evaluateForUpload(lux, latestLuxTimestampNs)
         try {
-          val saved = WalkLightStore.record(applicationContext, walkId, lux.toDouble(), uploadDecision)
-          Log.i(LIGHT_LOG_TAG, "sample:stored walkId=$walkId lux=$lux saved=$saved " +
-            "uploadQueued=${saved && uploadDecision.allowed} mode=${uploadDecision.mode}")
-          if (saved) {
-            oneMinuteTestLux.add(lux)
-            if (oneMinuteTestLux.size == 2) {
-              val average = oneMinuteTestLux.average()
-              Log.i(LIGHT_LOG_TAG, "test:one-minute-average walkId=$walkId avgLux=$average reaches2000=${average >= 2_000.0}")
-              oneMinuteTestLux.clear()
-            }
-          }
+          WalkLightStore.record(applicationContext, walkId, lux.toDouble(), uploadDecision)
         } catch (error: Exception) {
-          Log.e(LIGHT_LOG_TAG, "sample:store-failed walkId=$walkId", error)
+          if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sample:store-failed walkId=$walkId", error)
         }
       } else {
-        Log.w(LIGHT_LOG_TAG, "sample:skipped walkId=$walkId freshEvent=${lux != null}")
+        if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sample:skipped walkId=$walkId freshEvent=${lux != null}")
       }
       latestLux = null
       latestLuxTimestampNs = 0L
@@ -79,11 +69,11 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
             this@WalkLocationService, sensor, SensorManager.SENSOR_DELAY_NORMAL,
           )
           if (!registered) {
-            Log.w(LIGHT_LOG_TAG, "sensor:re-register-failed walkId=$walkId")
+            if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:re-register-failed walkId=$walkId")
             stopLightTracking()
           }
         } catch (error: Exception) {
-          Log.e(LIGHT_LOG_TAG, "sensor:re-register-error walkId=$walkId", error)
+          if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sensor:re-register-error walkId=$walkId", error)
           stopLightTracking()
         }
       }
@@ -100,21 +90,21 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     stopLightTracking()
     walkId = intent?.getLongExtra(EXTRA_WALK_ID, 0L) ?: 0L
     startedAtMs = intent?.getLongExtra(EXTRA_STARTED_AT_MS, 0L) ?: 0L
-    Log.i(LIGHT_LOG_TAG, "service:start walkId=$walkId startedAtMs=$startedAtMs")
+    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "service:start walkId=$walkId startedAtMs=$startedAtMs")
     if (walkId > 0L && startedAtMs > 0L) {
       try {
         startLightTracking()
       } catch (error: Exception) {
-        Log.e(LIGHT_LOG_TAG, "sensor:start-error walkId=$walkId", error)
+        if (BuildConfig.DEBUG) Log.e(LIGHT_LOG_TAG, "sensor:start-error walkId=$walkId", error)
         stopLightTracking()
       }
     }
-    else Log.w(LIGHT_LOG_TAG, "sensor:not-started invalid-walk-session")
+    else if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:not-started invalid-walk-session")
     return START_NOT_STICKY
   }
 
   override fun onDestroy() {
-    Log.i(LIGHT_LOG_TAG, "service:stop walkId=$walkId")
+    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "service:stop walkId=$walkId")
     stopLightTracking()
     locationManager.removeUpdates(this)
     super.onDestroy()
@@ -129,7 +119,7 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
       cctDiagnostics.onLuxEvent(event.timestamp)
       if (!loggedFirstLightEvent) {
         loggedFirstLightEvent = true
-        Log.i(LIGHT_LOG_TAG, "sensor:first-event walkId=$walkId lux=$value")
+        if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "sensor:first-event walkId=$walkId lux=$value")
       }
       if (!firstLightSampleQueued) {
         firstLightSampleQueued = true
@@ -144,20 +134,19 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
   private fun startLightTracking() {
     val sensor = sensorManager.getDefaultSensor(Sensor.TYPE_LIGHT)
     if (sensor == null) {
-      Log.w(LIGHT_LOG_TAG, "sensor:unavailable walkId=$walkId")
+      if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:unavailable walkId=$walkId")
       return
     }
     lightSensor = sensor
     latestLux = null
     loggedFirstLightEvent = false
     firstLightSampleQueued = false
-    oneMinuteTestLux.clear()
     if (!sensorManager.registerListener(this, sensor, SensorManager.SENSOR_DELAY_NORMAL)) {
-      Log.w(LIGHT_LOG_TAG, "sensor:register-failed walkId=$walkId")
+      if (BuildConfig.DEBUG) Log.w(LIGHT_LOG_TAG, "sensor:register-failed walkId=$walkId")
       lightSensor = null
       return
     }
-    Log.i(LIGHT_LOG_TAG, "sensor:registered walkId=$walkId name=${sensor.name}")
+    if (BuildConfig.DEBUG) Log.i(LIGHT_LOG_TAG, "sensor:registered walkId=$walkId name=${sensor.name}")
     cctDiagnostics.start(walkId)
     val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
     wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "$packageName:WalkLight")
@@ -173,7 +162,6 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
     latestLux = null
     latestLuxTimestampNs = 0L
     firstLightSampleQueued = false
-    oneMinuteTestLux.clear()
     wakeLock?.let { if (it.isHeld) it.release() }
     wakeLock = null
   }
@@ -310,7 +298,7 @@ object WalkLightStore {
     }
     val blocked = pending.length() - eligible.length()
     if (blocked > 0) {
-      Log.i("WalkLight", "queue:cct-blocked walkId=$walkId count=$blocked reason=missing_or_invalid_cct")
+      if (BuildConfig.DEBUG) Log.i("WalkLight", "queue:cct-blocked walkId=$walkId count=$blocked reason=missing_or_invalid_cct")
     }
     return eligible
   }

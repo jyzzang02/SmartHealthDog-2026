@@ -42,12 +42,12 @@ internal class WalkCctDiagnostics(private val sensorManager: SensorManager) : Se
           "registration_failed"
         }
       }
-      Log.i(TAG, "sensor:start walkId=$walkId model=${Build.MODEL} name=${candidate?.name} " +
+      if (BuildConfig.DEBUG) Log.i(TAG, "sensor:start walkId=$walkId model=${Build.MODEL} name=${candidate?.name} " +
         "status=$status verified=false candidateIndex=$CCT_CANDIDATE_INDEX")
     } catch (error: Exception) {
       stop()
       status = "registration_failed"
-      Log.w(TAG, "sensor:start-failed walkId=$sessionId", error)
+      if (BuildConfig.DEBUG) Log.w(TAG, "sensor:start-failed walkId=$sessionId", error)
     }
   }
 
@@ -59,7 +59,7 @@ internal class WalkCctDiagnostics(private val sensorManager: SensorManager) : Se
     status = "unverified_candidate"
     if (!loggedFirstEvent) {
       loggedFirstEvent = true
-      Log.i(TAG, "sensor:first-event walkId=$walkId raw=${latestValues?.contentToString()} " +
+      if (BuildConfig.DEBUG) Log.i(TAG, "sensor:first-event walkId=$walkId raw=${latestValues?.contentToString()} " +
         "candidateIndex=$CCT_CANDIDATE_INDEX verified=false")
     }
   }
@@ -94,7 +94,7 @@ internal class WalkCctDiagnostics(private val sensorManager: SensorManager) : Se
       sensor != null, candidate, ageNs, pairGapNs,
       sampleTimestampNs > 0L && sampleTimestampNs == luxTimestampNs,
     )
-    Log.i(TAG, "sample:upload-gate walkId=$walkId lux=$lux raw=${values?.contentToString()} " +
+    if (BuildConfig.DEBUG) Log.i(TAG, "sample:upload-gate walkId=$walkId lux=$lux raw=${values?.contentToString()} " +
       "candidateKelvin=$candidate cctMin=${WalkCctUploadPolicy.MIN_CCT} " +
       "sensorStatus=$status reason=${decision.reason} mode=${decision.mode} " +
       "uploadAllowed=${decision.allowed} verified=false affectsServer=true " +
@@ -107,7 +107,7 @@ internal class WalkCctDiagnostics(private val sensorManager: SensorManager) : Se
     try {
       if (sensor != null) sensorManager.unregisterListener(this)
     } catch (error: Exception) {
-      Log.w(TAG, "sensor:unregister-failed walkId=$walkId", error)
+      if (BuildConfig.DEBUG) Log.w(TAG, "sensor:unregister-failed walkId=$walkId", error)
     }
     sensor = null
     latestValues = null
