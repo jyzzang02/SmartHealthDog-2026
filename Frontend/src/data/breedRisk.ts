@@ -38,8 +38,6 @@ export const BREED_RISK_LIST: BreedRisk[] = [
   { name: '펨브로크 웰시 코기', riskCount: 7, riskLevel: '위험', image: require('../assets/breeds/corgi.jpg') },
 ];
 
-export const PEDIGREE_INTRO_TEXT = '견종별 유전 질환 위험도를 확인해보세요';
-
 export const PEDIGREE_INFO_TITLE = '목록 안내';
 
 export const PEDIGREE_INFO_DESC =

@@ -1,6 +1,8 @@
 import React from 'react';
 import renderer, { act } from 'react-test-renderer';
 import { Text, TouchableOpacity } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { markSelfCheckPreviewSeen } from '../storage/selfCheckPreviewStorage';
 import AuthLoadingScreen from './AuthLoadingScreen';
 import { getMyProfile } from '../api/users';
 import { clearAuthTokens, getStoredAccessToken } from '../storage/tokenStorage';
@@ -18,8 +20,9 @@ jest.mock('../api/refreshSession', () => ({ MissingRefreshTokenError: class exte
 
 const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
 let tree: renderer.ReactTestRenderer;
-beforeEach(() => {
+beforeEach(async () => {
   jest.clearAllMocks();
+  await AsyncStorage.clear();
   jest.mocked(getStoredAccessToken).mockResolvedValue('stored');
 });
 afterEach(() => { if (tree) act(() => tree.unmount()); });
@@ -53,4 +56,18 @@ it('preserves credentials when local storage cannot be read', async () => {
   expect(clearAuthTokens).not.toHaveBeenCalled();
   expect(mockReset).not.toHaveBeenCalled();
   expect(tree.root.findByType(TouchableOpacity)).toBeTruthy();
+});
+
+it('shows the preview only before login on first launch', async () => {
+  jest.mocked(getStoredAccessToken).mockResolvedValue(null);
+  await act(async () => { tree = renderer.create(<AuthLoadingScreen />); await flush(); });
+  expect(mockReset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'SelfCheck', params: { preview: true } }] });
+  expect(getMyProfile).not.toHaveBeenCalled();
+});
+
+it('goes straight to login after the preview was seen', async () => {
+  await markSelfCheckPreviewSeen();
+  jest.mocked(getStoredAccessToken).mockResolvedValue(null);
+  await act(async () => { tree = renderer.create(<AuthLoadingScreen />); await flush(); });
+  expect(mockReset).toHaveBeenCalledWith({ index: 0, routes: [{ name: 'Login' }] });
 });

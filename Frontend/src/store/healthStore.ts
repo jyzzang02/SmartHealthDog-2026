@@ -1,7 +1,17 @@
+import { getAuthSession } from '../storage/tokenStorage';
 import { HealthSummary } from '../types/health';
 
 /** 앱 세션 내 인메모리 건강검진 이력 캐시 (펫당 회차별 배열, 마지막 = 최신) */
-const _store: Record<number, HealthSummary[]> = {};
+let store: Record<number, HealthSummary[]> = {};
+let session = getAuthSession();
+const currentStore = () => {
+  const current = getAuthSession();
+  if (current !== session) {
+    session = current;
+    store = {};
+  }
+  return store;
+};
 
 const getCheckupTimestamp = (summary: HealthSummary) => {
   const timestamp = Date.parse(`${summary.checkupDate}T00:00:00`);
@@ -9,7 +19,7 @@ const getCheckupTimestamp = (summary: HealthSummary) => {
 };
 
 const getSortedRecords = (petId: number): HealthSummary[] =>
-  (_store[petId] || [])
+  (currentStore()[petId] || [])
     .map((summary, index) => ({ summary, index }))
     .sort((a, b) => {
       const timestampDifference = getCheckupTimestamp(b.summary) - getCheckupTimestamp(a.summary);
@@ -19,6 +29,7 @@ const getSortedRecords = (petId: number): HealthSummary[] =>
 
 export const healthStore = {
   set(petId: number, summary: HealthSummary): void {
+    const _store = currentStore();
     if (!_store[petId]) _store[petId] = [];
     _store[petId].push(summary);
   },
@@ -33,7 +44,7 @@ export const healthStore = {
   },
   getAll(): Record<number, HealthSummary> {
     const result: Record<number, HealthSummary> = {};
-    for (const key of Object.keys(_store)) {
+    for (const key of Object.keys(currentStore())) {
       const latestRecord = getSortedRecords(Number(key))[0];
       if (latestRecord) result[Number(key)] = latestRecord;
     }

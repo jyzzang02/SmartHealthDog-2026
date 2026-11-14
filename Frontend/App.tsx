@@ -39,6 +39,9 @@ import WalkLogDetailScreen from './src/screens/WalkLogDetailScreen';
 import WalkWeeklyReportScreen from './src/screens/WalkWeeklyReportScreen';
 import WalkActiveScreen from './src/screens/WalkActiveScreen';
 import WalkPetHistoryScreen from './src/screens/WalkPetHistoryScreen';
+import SelfCheckEntryScreen from './src/screens/SelfCheckEntryScreen';
+import RespirationCaptureScreen from './src/screens/RespirationCaptureScreen';
+import RespirationResultScreen from './src/screens/RespirationResultScreen';
 import HealthCheckInputScreen from './src/screens/HealthCheckInputScreen';
 import HealthCheckResultScreen from './src/screens/HealthCheckResultScreen';
 import HealthDetailScreen from './src/screens/HealthDetailScreen';
@@ -103,6 +106,7 @@ export type RootStackParamList = {
   };
 
   AnimalDetail: {
+    isExample?: boolean;
     animalData: {
       id?: number;
       name?: string;
@@ -149,6 +153,9 @@ export type RootStackParamList = {
     petImage: any;
   };
 
+  SelfCheckEntry: { petId: number; petName: string } | undefined;
+  RespirationCapture: { petId: number; petName: string };
+  RespirationResult: { petId: number; petName: string; videoId?: string };
   HealthCheckInput: {
     petId: number;
     petName: string;
@@ -158,6 +165,9 @@ export type RootStackParamList = {
     petId: number;
     petName: string;
     summary: HealthSummary;
+    certificateSubmissionId?: string;
+    certificateOwnerId?: number;
+    viewOnly?: boolean;
   };
 
   HealthDetail: {
@@ -174,7 +184,7 @@ export type RootStackParamList = {
     species: PetSpecies;
   };
 
-  SelfCheck: { petId?: number; recordId?: number } | undefined;
+  SelfCheck: { petId?: number; recordId?: number; preview?: true } | undefined;
   SelfCheckHistory: { petId: number; petName: string };
 };
 
@@ -258,6 +268,9 @@ function AppNavigator() {
         <Stack.Screen name="WalkActive" component={WalkActiveScreen} />
 
         {/* Health Check Input */}
+        <Stack.Screen name="SelfCheckEntry" component={SelfCheckEntryScreen} />
+        <Stack.Screen name="RespirationCapture" component={RespirationCaptureScreen} />
+        <Stack.Screen name="RespirationResult" component={RespirationResultScreen} />
         <Stack.Screen name="HealthCheckInput" component={HealthCheckInputScreen} />
         <Stack.Screen name="HealthCheckResult" component={HealthCheckResultScreen} />
         <Stack.Screen name="HealthDetail" component={HealthDetailScreen} />

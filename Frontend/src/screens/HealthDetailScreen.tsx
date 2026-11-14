@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
@@ -7,12 +7,12 @@ import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
-import { CONDITION_COLORS } from '../types/health';
 import type { HealthSummary } from '../types/health';
+import { getSelfCheck, listSelfChecks, SelfCheckRecord } from '../api/selfCheck';
+import { STAGE_BAR_COLOR } from '../data/selfCheck';
 import {
   BREED_RISK_LIST,
   RISK_COLORS,
-  PEDIGREE_INTRO_TEXT,
   PEDIGREE_INFO_TITLE,
   PEDIGREE_INFO_DESC,
 } from '../data/breedRisk';
@@ -23,12 +23,6 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthDetail'>;
 const TAB_LABELS = ['검진 기록', '변화 추이', '모니터링', '혈통 위험도'];
 
 type ActiveTab = '검진 기록' | '변화 추이' | '모니터링' | '혈통 위험도';
-
-const VITAL_ITEMS: { key: 'weight' | 'heartRate' | 'temperature'; label: string; unit: string }[] = [
-  { key: 'weight', label: '체중', unit: 'kg' },
-  { key: 'heartRate', label: '심박수', unit: 'bpm' },
-  { key: 'temperature', label: '체온', unit: '°C' },
-];
 
 const MONITORING_MEMO = '일상 생활에서 건강 상태를 지속적으로 관찰하고 있습니다.';
 
@@ -41,7 +35,15 @@ const MONITORING_ITEMS = [
 
 const MONITORING_WARNING = '정기적인 건강검진을 통해 지속적으로 모니터링하고 있습니다.';
 
-const calcAgeYears = (birthDate?: string): number | null => {
+const formatScoreDate = (createdAt: string) => {
+  const d = new Date(createdAt);
+  if (Number.isNaN(d.getTime())) return createdAt;
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${day}`;
+};
+
+const calcAgeYears =(birthDate?: string): number | null => {
   if (!birthDate) return null;
   const parsed = new Date(birthDate.split('T')[0]);
   if (Number.isNaN(parsed.getTime())) return null;
@@ -78,16 +80,15 @@ const HealthDetailScreen = () => {
 
   const [pet, setPet] = useState<PetListItem | null>(null);
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
-  const [previous, setPrevious] = useState<HealthSummary | undefined>(undefined);
   const [history, setHistory] = useState<HealthSummary[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('검진 기록');
-
+  const [scoreRecords, setScoreRecords] = useState<SelfCheckRecord[]>([]);
+  const [scoreStatus, setScoreStatus] = useState<'loading' | 'error' | 'done'>('loading');
   useFocusEffect(
     useCallback(() => {
       const records = healthStore.getHistory(petId);
       setHistory(records);
       setSummary(records[0]);
-      setPrevious(records[1]);
       let mounted = true;
       getMyPets()
         .then((pets) => {
@@ -102,24 +103,57 @@ const HealthDetailScreen = () => {
     }, [petId])
   );
 
+  // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
+  const scoresRequest = useRef<AbortController | null>(null);
+  const loadScores = useCallback(async () => {
+    scoresRequest.current?.abort();
+    const controller = new AbortController();
+    scoresRequest.current = controller;
+    const { signal } = controller;
+    setScoreStatus('loading');
+    try {
+      const page = await listSelfChecks(petId, 0, signal);
+      const items = page.content.slice(0, 20);
+      const records: SelfCheckRecord[] = [];
+      let next = 0;
+      const worker = async () => {
+        while (!signal.aborted && next < items.length) {
+          const record = await getSelfCheck(petId, items[next++].id, signal).catch(() => null);
+          if (record) records.push(record);
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, items.length) }, worker));
+      if (signal.aborted) return;
+      setScoreRecords(records.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt)));
+      setScoreStatus('done');
+    } catch {
+      if (!signal.aborted) setScoreStatus('error');
+    } finally {
+      if (scoresRequest.current === controller) scoresRequest.current = null;
+    }
+  }, [petId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab !== '변화 추이') return;
+      loadScores();
+      return () => scoresRequest.current?.abort();
+    }, [activeTab, loadScores])
+  );
+
   const displayName = pet?.name || petName;
   const breedLabel = pet?.breed || mapSpeciesLabel(pet?.species) || '';
   const ageYears = calcAgeYears(pet?.birthDate || pet?.birthday);
   const ageLabel = ageYears !== null ? `${ageYears}세` : '';
   const genderLabel = mapGenderSuffix(pet?.sex || pet?.gender);
-  const subInfoText = [breedLabel, ageLabel, genderLabel].filter(Boolean).join(' · ');
+  const weightKg = pet?.weightKg;
+  const weightLabel = typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg}kg` : '';
+  const subInfoText = [breedLabel, ageLabel, genderLabel, weightLabel].filter(Boolean).join(' · ');
 
   const recentStatusText = summary
-    ? summary.healthTags.length > 0
-      ? summary.healthTags.join(', ')
-      : '특이사항 없음'
-    : '등록된 건강검진 정보가 없습니다.';
-  const recentStatusColor = summary ? CONDITION_COLORS[summary.overallCondition].text : '#7B7C7D';
-
-  const getNoteLine = (record: HealthSummary) =>
-    [record.hospitalName, record.notes].filter(Boolean).join(' · ') || '추가 메모 없음';
-  const getResultValue = (record: HealthSummary) =>
-    record.healthTags.length > 0 ? record.healthTags.join(', ') : '특이사항 없음';
+    ? summary.hospitalName || '병원명 미입력'
+    : '등록된 검진 기록이 없습니다.';
+  const recentStatusColor = summary ? '#040505' : '#7B7C7D';
 
   return (
     <View style={styles.screen}>
@@ -139,7 +173,7 @@ const HealthDetailScreen = () => {
         {/* 펫 정보 카드 */}
         <View style={styles.petCard}>
           <View style={styles.petCardHeaderRow}>
-            <View>
+            <View style={weightLabel ? styles.petHeaderInfo : undefined}>
               <Text style={styles.petName}>{displayName}</Text>
               <Text style={styles.petSubInfo}>{subInfoText}</Text>
             </View>
@@ -199,28 +233,15 @@ const HealthDetailScreen = () => {
           {activeTab === '검진 기록' && (
             history.length > 0 ? (
               history.map((record, index) => (
-                <View key={`${record.checkupDate}-${index}`} style={styles.examCard}>
+                <TouchableOpacity key={`${record.checkupDate}-${index}`} style={styles.examCard} accessibilityRole="button"
+                  onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, summary: record, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
-                    <View style={styles.examTagList}>
-                      {record.examTypes.map((examType, examTypeIndex) => (
-                        <View key={`${examType}-${examTypeIndex}`} style={styles.examTagChip}>
-                          <Text style={styles.examTagChipText}>{examType}</Text>
-                        </View>
-                      ))}
-                    </View>
+                    <Text style={styles.examHospitalName}>
+                      {record.hospitalName || '병원명 미입력'}
+                    </Text>
                     <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
-                  <Text style={styles.examNoteLine}>{getNoteLine(record)}</Text>
-                  <View style={styles.examResultBox}>
-                    <Text style={styles.examResultLabel}>검진 결과</Text>
-                    <Text style={[styles.examResultValue, { color: CONDITION_COLORS[record.overallCondition].text }]}>
-                      {getResultValue(record)}
-                    </Text>
-                  </View>
-                  <View style={styles.examBottomNoteWrap}>
-                    <Text style={styles.examBottomNoteText}>{record.recommendation}</Text>
-                  </View>
-                </View>
+                </TouchableOpacity>
               ))
             ) : (
               <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
@@ -228,39 +249,35 @@ const HealthDetailScreen = () => {
           )}
 
           {activeTab === '변화 추이' && (
-            summary ? (
-              <View style={styles.trendCard}>
-                <Text style={styles.trendCardTitle}>주요 수치 비교</Text>
-                <View style={styles.vitalsList}>
-                  {VITAL_ITEMS.map(({ key, label, unit }) => {
-                    const currentValue = summary[key];
-                    const previousValue = previous?.[key];
-                    return (
-                      <View key={key} style={styles.vitalRow}>
-                        <Text style={styles.vitalLabel}>{label}</Text>
-                        <View style={styles.vitalValueGroup}>
-                          {currentValue === undefined ? (
-                            <Text style={styles.vitalEmptyValue}>측정값 없음</Text>
-                          ) : (
-                            <>
-                              {previousValue !== undefined && (
-                                <>
-                                  <Text style={styles.vitalPrevValue}>{previousValue}{unit}</Text>
-                                  <Text style={styles.vitalArrow}>→</Text>
-                                </>
-                              )}
-                              <Text style={styles.vitalCurrentValue}>{currentValue}{unit}</Text>
-                            </>
-                          )}
-                        </View>
+            <>
+              <Text style={styles.scoreSectionTitle}>건강 점수 추이</Text>
+              <Text style={styles.scoreSectionDesc}>
+                자가진단 항목별 이상 징후 점수입니다. 점수가 높을수록 주의가 필요합니다.
+              </Text>
+              {scoreStatus === 'error' ? (
+                <TouchableOpacity activeOpacity={0.7} onPress={loadScores}>
+                  <Text style={styles.emptyRecordText}>기록을 불러오지 못했습니다. 다시 시도</Text>
+                </TouchableOpacity>
+              ) : scoreRecords.length > 0 ? (
+                scoreRecords.map((record) => (
+                  <View key={record.id} style={styles.examCard}>
+                    <Text style={styles.scoreCardDate}>{formatScoreDate(record.createdAt)}</Text>
+                    {record.areas.map((area) => (
+                      <View key={area.areaKey} style={styles.scoreRow}>
+                        <Text style={styles.scoreLabel}>{area.areaTitle}</Text>
+                        <Text style={styles.scoreValue}>
+                          <Text style={{ color: STAGE_BAR_COLOR[area.stage] }}>{area.score}</Text>/100
+                        </Text>
                       </View>
-                    );
-                  })}
-                </View>
-              </View>
-            ) : (
-              <Text style={styles.emptyRecordText}>등록된 건강검진 정보가 없습니다.</Text>
-            )
+                    ))}
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyRecordText}>
+                  {scoreStatus === 'loading' ? '불러오는 중입니다.' : '등록된 자가진단 기록이 없습니다.'}
+                </Text>
+              )}
+            </>
           )}
 
           {activeTab === '모니터링' && (
@@ -298,7 +315,9 @@ const HealthDetailScreen = () => {
 
           {activeTab === '혈통 위험도' && (
             <>
-              <Text style={styles.pedigreeIntroText}>{PEDIGREE_INTRO_TEXT}</Text>
+              <View style={styles.pedigreeScopeNotice}>
+                <Text style={styles.pedigreeScopeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
+              </View>
 
               {/* 목록 안내 (단순 텍스트 카드) */}
               <View style={styles.pedigreeInfoCard}>
@@ -387,6 +406,7 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
   },
   petName: { fontSize: 20, fontWeight: '700', color: '#040505', marginBottom: 4 },
+  petHeaderInfo: { flexShrink: 1, marginEnd: 8 },
   petSubInfo: { fontSize: 14, color: '#7B7C7D' },
   addExamBtn: { backgroundColor: '#0081D5', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 8 },
   addExamBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
@@ -441,47 +461,15 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   examCardTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  examTagList: { flex: 1, flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginRight: 12 },
-  examTagChip: { backgroundColor: '#EEF7FD', borderRadius: 24, paddingHorizontal: 12, paddingVertical: 6 },
-  examTagChipText: { fontSize: 14, color: '#0081D5', fontWeight: '600' },
+  examHospitalName: { flex: 1, fontSize: 16, fontWeight: '700', color: '#040505', marginRight: 12 },
   examDate: { fontSize: 14, color: '#7B7C7D' },
-  examNoteLine: { fontSize: 14, color: '#7B7C7D', lineHeight: 20 },
-  examResultBox: { backgroundColor: '#F8F9FA', borderRadius: 8, padding: 12, gap: 4 },
-  examResultLabel: { fontSize: 13, color: '#7B7C7D' },
-  examResultValue: { fontSize: 16, fontWeight: '700' },
-  examBottomNoteWrap: { borderTopWidth: 1, borderTopColor: '#F3F4F5', paddingTop: 8, marginTop: 4 },
-  examBottomNoteText: { fontSize: 14, color: '#3C4144' },
 
-  trendCard: {
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#EAECEE',
-    borderRadius: 12,
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.04,
-    shadowRadius: 4,
-    elevation: 1,
-    gap: 16,
-  },
-  trendCardTitle: { fontSize: 16, color: '#2F3036' },
-  vitalsList: { gap: 12 },
-  vitalRow: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  vitalLabel: { fontSize: 14, color: '#3C4144' },
-  vitalValueGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  vitalPrevValue: { fontSize: 13, color: '#B3B6B8' },
-  vitalArrow: { fontSize: 14, color: '#B3B6B8' },
-  vitalCurrentValue: { fontSize: 14, color: '#0081D5' },
-  vitalEmptyValue: { fontSize: 14, color: '#B3B6B8' },
+  scoreSectionTitle: { fontSize: 16, fontWeight: '700', color: '#040505' },
+  scoreSectionDesc: { fontSize: 13, color: '#7B7C7D', lineHeight: 19.5 },
+  scoreCardDate: { fontSize: 15, fontWeight: '700', color: '#040505', marginBottom: 4 },
+  scoreRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  scoreLabel: { fontSize: 14, color: '#3C4144' },
+  scoreValue: { fontSize: 14, fontWeight: '700', color: '#3C4144' },
 
   monitoringMemoCard: {
     backgroundColor: '#EEF7FD',
@@ -545,7 +533,8 @@ const styles = StyleSheet.create({
   monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
 
   // 혈통 위험도 탭
-  pedigreeIntroText: { fontSize: 14, color: '#7B7C7D', lineHeight: 21, marginBottom: 4 },
+  pedigreeScopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
+  pedigreeScopeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
 
   pedigreeInfoCard: {
     backgroundColor: '#EAF4FB',

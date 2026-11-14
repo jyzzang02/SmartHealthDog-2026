@@ -1,6 +1,11 @@
 import { getMyPets, updatePetPartial, requestUrineDiagnosis } from './pets';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+}));
+
 const originalFetch = globalThis.fetch;
 const formDataGlobal = globalThis as typeof globalThis & { FormData: typeof FormData };
 const originalFormData = formDataGlobal.FormData;
@@ -47,11 +52,10 @@ it('retains different image URLs for two pets after another list fetch', async (
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
-it('performs missing-photo enrichment once in the API layer', async () => {
-  fetchMock.mockResolvedValueOnce(response([{ ...existing, profilePicture: undefined }]))
-    .mockResolvedValueOnce(response(existing));
-  expect((await getMyPets())[0].profilePicture).toBe(existing.profilePicture);
-  expect(fetchMock).toHaveBeenCalledTimes(2);
+it('does not fetch details for pets without a photo', async () => {
+  fetchMock.mockResolvedValueOnce(response([{ ...existing, profilePicture: null }]));
+  expect((await getMyPets())[0].profilePicture).toBeFalsy();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
 it('keeps urine upload behavior without logging image paths or error contents', async () => {

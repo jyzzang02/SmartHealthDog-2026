@@ -25,6 +25,7 @@ import {
   isCompletedWalkRecord,
   WalkRecordDto,
 } from '../api/walks';
+import { getAuthSession } from '../storage/tokenStorage';
 import { retryPendingWalkLightSamples } from '../utils/walkLightSync';
 import type { WalkLightSampleSource } from '../utils/walkLightSync';
 import { resolveImageUri } from '../utils/imageUri';
@@ -243,14 +244,16 @@ export default function WalkScreen() {
       };
     }
 
+    const session = getAuthSession();
     let refreshVersion = 0;
     const refreshSunlight = () => {
+      if (session !== getAuthSession()) return;
       const version = ++refreshVersion;
       const retry = Platform.OS === 'android' && walkLightSampleSource
         ? retryPendingWalkLightSamples(pets.map(pet => pet.id), walkLightSampleSource)
         : Promise.resolve();
       retry.catch(() => undefined).then(() => {
-        if (!isCurrent || version !== refreshVersion) return [];
+        if (!isCurrent || session !== getAuthSession() || version !== refreshVersion) return [];
         return Promise.allSettled(
           pets.map(async (pet) => {
             const sunlight = await getPetTodaySunlight(pet.id);
@@ -263,7 +266,7 @@ export default function WalkScreen() {
           })
         );
       }).then((results) => {
-        if (!isCurrent || version !== refreshVersion) return;
+        if (!isCurrent || session !== getAuthSession() || version !== refreshVersion) return;
         setTodaySunlightPercentByPet(
           Object.fromEntries(
             results.map((result, index) => [

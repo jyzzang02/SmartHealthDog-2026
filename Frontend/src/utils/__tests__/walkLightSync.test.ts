@@ -61,7 +61,9 @@ it('ends the walk without waiting for a pending light upload and retains failed 
 
 it('restores a failed retry after module restart and acknowledges server duplicates', async () => {
   await sync.finishWalkWithPendingLight(19, 81, payload, source);
-  upload.mockRejectedValueOnce(new Error('HTTP 404'));
+  let now = Date.now();
+  jest.spyOn(Date, 'now').mockImplementation(() => now);
+  upload.mockRejectedValueOnce(Object.assign(new Error('HTTP 503'), { status: 503 }));
   await sync.retryPendingWalkLightSamples([19], source);
   expect(await AsyncStorage.getItem(key)).not.toBeNull();
   expect(pending).toHaveLength(1);
@@ -69,6 +71,9 @@ it('restores a failed retry after module restart and acknowledges server duplica
   sync = require('../walkLightSync');
   auth = require('../../storage/tokenStorage');
   await auth.storeAuthTokens({ accessToken: 'test', refreshToken: 'test', expiration: 'later' });
+  await sync.retryPendingWalkLightSamples([19], source);
+  expect(upload).toHaveBeenCalledTimes(1);
+  now += 30_000;
   upload.mockResolvedValueOnce(accepted(1, true));
   await sync.retryPendingWalkLightSamples([19], source);
   expect(pending).toHaveLength(0);
@@ -81,6 +86,7 @@ it('keeps only unacknowledged batches when an upload fails midway', async () => 
   upload.mockResolvedValueOnce(accepted(100)).mockRejectedValueOnce(new Error('Network failed'));
   await sync.retryPendingWalkLightSamples([19], source);
   expect(pending).toHaveLength(101);
+  jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 30_000);
   expect(pending[0].client_sample_id).toBe('sample-100');
   expect(await AsyncStorage.getItem(key)).not.toBeNull();
   await sync.retryPendingWalkLightSamples([19], source);
@@ -141,6 +147,7 @@ it('preserves pending records after timeout and retries them successfully later'
   await flush();
   await jest.advanceTimersByTimeAsync(15000);
   await retry;
+  await jest.advanceTimersByTimeAsync(30_000);
   expect(pending).toHaveLength(1);
   expect(await AsyncStorage.getItem(key)).not.toBeNull();
   await sync.retryPendingWalkLightSamples([19], source);
@@ -152,5 +159,16 @@ it('does not treat a failed end request as a completed walk', async () => {
   end.mockRejectedValueOnce(new Error('End failed'));
   await expect(sync.finishWalkWithPendingLight(19, 81, payload, source)).rejects.toThrow('End failed');
   expect(pending).toHaveLength(1);
+  expect(await AsyncStorage.getItem(key)).not.toBeNull();
+});
+
+it('stops permanent retries without deleting unconfirmed samples', async () => {
+  await sync.finishWalkWithPendingLight(19, 81, payload, source);
+  upload.mockRejectedValueOnce(Object.assign(new Error('HTTP 404'), { status: 404 }));
+  await sync.retryPendingWalkLightSamples([19], source);
+  jest.spyOn(Date, 'now').mockReturnValue(Date.now() + 600_000);
+  await sync.retryPendingWalkLightSamples([19], source);
+  expect(upload).toHaveBeenCalledTimes(1);
+  expect(source.acknowledgeLightSamples).not.toHaveBeenCalled();
   expect(await AsyncStorage.getItem(key)).not.toBeNull();
 });

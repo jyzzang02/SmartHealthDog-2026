@@ -4,13 +4,13 @@ import { Alert, Text, TextInput, TouchableOpacity } from 'react-native';
 import PetEditScreen from './PetEditScreen';
 import { launchImageLibrary } from 'react-native-image-picker';
 const mockGoBack = jest.fn();
-import { getPetDetail, updatePetFull, updatePetPartial } from '../api/pets';
+import { getPetDetail, updatePetPartial } from '../api/pets';
 
 jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ goBack: mockGoBack }),
   useRoute: () => ({ params: { petId: 2 } }) }));
 jest.mock('@react-native-community/datetimepicker', () => 'DateTimePicker');
 jest.mock('react-native-image-picker', () => ({ launchImageLibrary: jest.fn() }));
-jest.mock('../api/pets', () => ({ getPetDetail: jest.fn(), updatePetFull: jest.fn(), updatePetPartial: jest.fn(), deletePet: jest.fn() }));
+jest.mock('../api/pets', () => ({ getPetDetail: jest.fn(), updatePetPartial: jest.fn(), deletePet: jest.fn() }));
 
 it('saves name and breed edits with PATCH without resending or clearing the existing image', async () => {
   const pet = { id: 2, name: '고양', species: 'CAT', breed: '미상', gender: 'MALE', birthDate: '2019-09-15',
@@ -29,7 +29,6 @@ it('saves name and breed edits with PATCH without resending or clearing the exis
       node.findAllByType(Text).some(text => text.props.children === '저장하기'))!;
     await act(async () => { await save.props.onPress(); });
     expect(updatePetPartial).toHaveBeenCalledWith({ id: 2, request: expect.objectContaining({ name: '하나', breed: '페르시안 친칠라' }), profilePicture: null });
-    expect(updatePetFull).not.toHaveBeenCalled();
     expect(alert).toHaveBeenCalledWith('성공', '반려동물 정보가 수정되었습니다.');
   } finally { act(() => tree.unmount()); alert.mockRestore(); }
 });

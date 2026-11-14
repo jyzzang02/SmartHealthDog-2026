@@ -20,6 +20,7 @@ class MainApplication : Application(), ReactApplication {
               add(DiagnosisImageCropperPackage())
               add(WalkLocationTrackingPackage())
               add(KakaoLoginWebViewPackage())
+              add(RespirationFilePackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

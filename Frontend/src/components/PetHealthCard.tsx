@@ -7,10 +7,12 @@ import {
   ActivityIndicator,
   ScrollView,
   Dimensions,
+  TouchableOpacity,
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { getMyPets, PetListItem } from '../api/pets';
 import { resolveImageUri } from '../utils/imageUri';
+import type { HealthSummary } from '../types/health';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const CARD_WIDTH = SCREEN_WIDTH - 40;
@@ -19,11 +21,15 @@ const CARD_SPACING = 12;
 type PetHealthCardProps = {
   pets?: PetListItem[];
   loading?: boolean;
+  healthData?: Record<number, HealthSummary>;
+  onPressPet?: (pet: PetListItem) => void;
 };
 
 const PetHealthCard: React.FC<PetHealthCardProps> = ({
   pets: petsProp,
   loading: loadingProp,
+  healthData = {},
+  onPressPet,
 }) => {
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,7 +85,9 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
     id: pet.id,
     name: pet.name,
     subtitle: pet.breed || pet.species,
-    weight: pet.weightKg || 0,
+    weight: typeof pet.weightKg === 'number' && Number.isFinite(pet.weightKg) && pet.weightKg > 0 ? pet.weightKg : null,
+    checkupDate: healthData[pet.id]?.checkupDate,
+    source: pet,
     profilePicture: resolveImageUri(pet.profilePicture) || null,
   }));
 
@@ -101,7 +109,8 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
         scrollEventThrottle={16}
       >
         {petCards.map((pet) => (
-          <View key={pet.id} style={[styles.card, { width: CARD_WIDTH }]}>
+          <TouchableOpacity key={pet.id} style={[styles.card, { width: CARD_WIDTH }]} accessibilityRole="button"
+            onPress={() => onPressPet?.(pet.source)} disabled={!onPressPet} activeOpacity={0.8}>
             {pet.profilePicture ? (
               <Image
                 source={{ uri: pet.profilePicture }}
@@ -120,11 +129,14 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
 
               <View style={styles.tagRow}>
                 <View style={styles.tagBlue}>
-                  <Text style={styles.tagTextBlue}>체중 {pet.weight}kg</Text>
+                  <Text style={styles.tagTextBlue}>{pet.weight === null ? '체중 정보 없음' : '체중 ' + pet.weight + 'kg'}</Text>
+                </View>
+                <View style={styles.tagYellow}>
+                  <Text style={styles.tagTextYellow}>{pet.checkupDate ? '최근 검진 ' + pet.checkupDate.slice(5).replace('-', '.') : '검진 정보 없음'}</Text>
                 </View>
               </View>
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
 
@@ -176,6 +188,7 @@ const styles = StyleSheet.create({
   },
   contentBox: {
     marginLeft: 14,
+    flex: 1,
     flexDirection: 'column',
     justifyContent: 'center',
   },
@@ -213,6 +226,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 18,
     color: '#0081D5',
+  },
+  tagYellow: {
+    paddingVertical: 4,
+    paddingHorizontal: 10,
+    backgroundColor: '#FFF6D8',
+    borderRadius: 14,
+    transform: [{ translateX: -4 }],
+  },
+  tagTextYellow: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
+    color: '#9A6500',
   },
   dotContainer: {
     flexDirection: 'row',

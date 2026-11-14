@@ -77,3 +77,10 @@ yarn-error.log
 !.yarn/releases
 !.yarn/sdks
 !.yarn/versions
+
+# Generated local artifacts and production signing files
+.expo/
+*.jks
+/android/app/src/main/assets/index.android.bundle
+
+.npm-cache/

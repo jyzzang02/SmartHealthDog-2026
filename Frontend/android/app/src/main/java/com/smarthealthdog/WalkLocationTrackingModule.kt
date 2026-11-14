@@ -10,7 +10,6 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import android.net.Uri
-import android.util.Log
 
 class WalkLocationTrackingModule(
   private val reactContext: ReactApplicationContext,
@@ -29,10 +28,8 @@ class WalkLocationTrackingModule(
       } else {
         reactContext.startService(intent)
       }
-      Log.i(LIGHT_LOG_TAG, "module:start-request walkId=${walkId.toLong()}")
       promise.resolve(null)
     } catch (error: Exception) {
-      Log.e(LIGHT_LOG_TAG, "module:start-failed walkId=${walkId.toLong()}", error)
       promise.reject("TRACKING_START_FAILED", "산책 위치 기록을 시작하지 못했습니다.", error)
     }
   }
@@ -40,7 +37,6 @@ class WalkLocationTrackingModule(
   @ReactMethod
   fun stop(promise: Promise) {
     reactContext.stopService(Intent(reactContext, WalkLocationService::class.java))
-    Log.i(LIGHT_LOG_TAG, "module:stop-request")
     promise.resolve(null)
   }
 
@@ -70,7 +66,6 @@ class WalkLocationTrackingModule(
   @ReactMethod
   fun getLightSamples(walkId: Double, promise: Promise) {
     val samples = WalkLightStore.getForUpload(reactContext, walkId.toLong())
-    Log.i(LIGHT_LOG_TAG, "module:pending walkId=${walkId.toLong()} count=${samples.length()}")
     val result = Arguments.createArray()
     for (index in 0 until samples.length()) {
       val sample = samples.optJSONObject(index) ?: continue
@@ -102,12 +97,10 @@ class WalkLocationTrackingModule(
   fun acknowledgeLightSamples(walkId: Double, ids: com.facebook.react.bridge.ReadableArray, promise: Promise) {
     val acknowledged = (0 until ids.size()).mapNotNull { ids.getString(it) }.toSet()
     WalkLightStore.acknowledge(reactContext, walkId.toLong(), acknowledged)
-    Log.i(LIGHT_LOG_TAG, "module:ack walkId=${walkId.toLong()} count=${acknowledged.size}")
     promise.resolve(null)
   }
 
   companion object {
-    private const val LIGHT_LOG_TAG = "WalkLight"
   }
 
   @ReactMethod

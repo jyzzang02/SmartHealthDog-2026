@@ -1,3 +1,4 @@
+import { allowInlineMapNavigation, KAKAO_MAP_SDK_URL } from '../utils/kakaoMapSdk';
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
@@ -8,6 +9,7 @@ import {
   Animated,
   Easing,
   ActivityIndicator,
+  ScrollView,
   Alert,
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
@@ -223,7 +225,7 @@ export default function WalkLogDetailScreen() {
           <style>
             html, body, #map { margin: 0; padding: 0; width: 100%; height: 100%; background: #E9ECEF; }
           </style>
-          <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=e65e93f752b1590bf9b8be83566dd5b6&autoload=false"></script>
+          <script src="${KAKAO_MAP_SDK_URL}"></script>
         </head>
         <body>
           <div id="map"></div>
@@ -345,11 +347,11 @@ export default function WalkLogDetailScreen() {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.contentContainer}>
         <View style={styles.mapContainer}>
           <WebView
             key={`walk-detail-map-${record.id}-${pathPoints.length}`}
-            originWhitelist={['*']}
+            originWhitelist={['*']} onShouldStartLoadWithRequest={allowInlineMapNavigation} setSupportMultipleWindows={false}
             source={{ html: kakaoMapHtml }}
             style={styles.mapWebView}
             javaScriptEnabled
@@ -414,7 +416,7 @@ export default function WalkLogDetailScreen() {
             )}
           </View>
         )}
-      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -466,9 +468,12 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
   },
+  contentContainer: {
+    paddingBottom: 32,
+  },
   mapContainer: {
     width: '100%',
-    height: 250,
+    height: 200,
     backgroundColor: '#E9ECEF',
   },
   mapWebView: {

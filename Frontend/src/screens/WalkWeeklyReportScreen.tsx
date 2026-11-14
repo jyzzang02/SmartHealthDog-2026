@@ -1,4 +1,4 @@
-﻿import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Image, TouchableOpacity, ScrollView, ActivityIndicator } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -39,6 +39,8 @@ export default function WalkWeeklyReportScreen() {
   const [weeklySummaryByPetId, setWeeklySummaryByPetId] = useState<Record<number, any>>({});
   const [dailyDistanceByPetId, setDailyDistanceByPetId] = useState<Record<number, Record<string, number>>>({});
   const [isLoading, setIsLoading] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState(0);
+  const [contentHeight, setContentHeight] = useState(0);
 
   const loadReportData = useCallback(async () => {
     setIsLoading(true);
@@ -166,7 +168,11 @@ export default function WalkWeeklyReportScreen() {
         <Text style={styles.headerTitle}>이번주 산책 리포트</Text>
       </View>
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}
+        scrollEnabled={viewportHeight > 0 && contentHeight > viewportHeight + 1}
+        bounces={false} overScrollMode="never"
+        onLayout={(event) => setViewportHeight(event.nativeEvent.layout.height)}
+        onContentSizeChange={(_, height) => setContentHeight(height)}>
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -219,7 +225,7 @@ export default function WalkWeeklyReportScreen() {
         <View style={[styles.card, styles.cardGraph]}>
           <Text style={styles.cardTitle}>
             지난주 대비 산책 거리 {' '}
-            {selectedSummary?.previousWeekSummary?.totalWalks === 0 ? '기록 없음' : (
+            {selectedSummary?.previousWeekSummary?.totalWalks === 0 ? '- 기록 없음' : (
               <>
                 <Text style={styles.highlightText}>{distancePct === null || distancePct === undefined ? '-' : `${Math.round(Math.abs(distancePct))}%`}</Text>{' '}
                 {distancePct === null || distancePct === undefined ? '비교 불가' : distancePct >= 0 ? '증가' : '감소'}
@@ -253,7 +259,7 @@ const styles = StyleSheet.create({
   backIcon: { width: 20, height: 20 },
   headerTitle: { color: '#1F2024', fontSize: 20, fontWeight: '700' },
   scroll: { flex: 1 },
-  scrollContent: { paddingBottom: 60 },
+  scrollContent: { paddingBottom: 16 },
   petSelector: { flexDirection: 'row', alignItems: 'center', marginTop: 30, paddingLeft: 20, paddingRight: 24 },
   petCircleWrapper: { borderRadius: 34 },
   petCircleGap: { marginRight: 12 },

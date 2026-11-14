@@ -2,7 +2,8 @@ import { useCallback, useRef, useState } from 'react';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import Geolocation from 'react-native-geolocation-service';
-import { isHospitalCoordinates, logHospitalSearch, searchHospitals } from '../api/hospitals';
+import { isHospitalCoordinates, searchHospitals } from '../api/hospitals';
+import { getAuthSession } from '../storage/tokenStorage';
 import type { HospitalCoordinates, HospitalSearchParams, HospitalSearchResponse } from '../api/hospitals';
 
 const cancelled = () => Object.assign(new Error('위치 조회가 취소되었습니다.'), { name: 'AbortError' });
@@ -28,7 +29,6 @@ export const getHospitalSearchLocation = async (signal: AbortSignal): Promise<Ho
     }
   }
   if (signal.aborted) throw cancelled();
-  logHospitalSearch('location:permission', { granted: true, precise });
   return new Promise((resolve, reject) => {
     const onAbort = () => { signal.removeEventListener('abort', onAbort); reject(cancelled()); };
     signal.addEventListener('abort', onAbort);
@@ -39,13 +39,11 @@ export const getHospitalSearchLocation = async (signal: AbortSignal): Promise<Ho
       if (signal.aborted) return;
       const point = { lat: position.coords.latitude, lng: position.coords.longitude };
       if (!isHospitalCoordinates(point)) { reject(new Error('현재 위치 좌표가 올바르지 않습니다.')); return; }
-      logHospitalSearch('location:ready', { accuracyM: Math.round(position.coords.accuracy), precise });
       resolve(point);
     };
     const onError: NonNullable<Parameters<typeof Geolocation.getCurrentPosition>[1]> = (error) => {
       finish();
       if (signal.aborted) return;
-      logHospitalSearch('location:error', { code: error.code });
       reject(new Error(error.code === 1 ? '위치 권한이 없습니다. 설정에서 허용해 주세요.' :
         error.code === 3 ? '현재 위치 확인이 지연되고 있습니다. 다시 시도해 주세요.' :
           '현재 위치를 확인할 수 없습니다. GPS 설정을 확인해 주세요.'));
@@ -77,6 +75,7 @@ export const useHospitalSearch = () => {
   const [request, setRequest] = useState<SearchRequest>({
     filters: { radius_km: 10 }, offset: 0, searchId: 0, attempt: 0,
   });
+  const lastResult = useRef<{ request: SearchRequest; session: symbol; expires: number; result: HospitalSearchResponse } | null>(null);
   const requestRef = useRef(request);
   const loadingRef = useRef(true);
   const controllerRef = useRef<AbortController | null>(null);
@@ -117,12 +116,18 @@ export const useHospitalSearch = () => {
   }, [result, schedule]);
 
   useFocusEffect(useCallback(() => {
+    const session = getAuthSession();
+    const cachedResult = lastResult.current;
+    if (cachedResult?.request === request && cachedResult.session === session && cachedResult.expires > Date.now()) {
+      setResult(cachedResult.result); setError(null); setLoading(false);
+      loadingRef.current = false;
+      return;
+    }
     const controller = new AbortController();
     controllerRef.current = controller;
     let active = true;
-    const valid = () => active && !controller.signal.aborted;
+    const valid = () => active && !controller.signal.aborted && getAuthSession() === session;
     loadingRef.current = true;
-    logHospitalSearch('search:start', { attempt: request.attempt, offset: request.offset, hasLocation: !!request.filters.location });
     setLoading(true); setError(null); setResult(null);
     const load = async () => {
       try {
@@ -142,6 +147,7 @@ export const useHospitalSearch = () => {
         if (response.page.limit !== PAGE_SIZE || response.page.offset !== request.offset) {
           throw new Error('병원검색 응답 형식이 명세서와 다릅니다.');
         }
+        lastResult.current = { request, session, expires: Date.now() + 30_000, result: response };
         setResult(response);
       } catch (failure) {
         if (valid()) {

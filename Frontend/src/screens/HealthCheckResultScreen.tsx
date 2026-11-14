@@ -1,12 +1,14 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import React, { useCallback, useRef, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { updateCertificate } from '../api/diagnosis';
+import { clearPendingCertificate } from '../storage/certificateRecovery';
+import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
-import { CONDITION_COLORS } from '../types/health';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckResult'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckResult'>;
@@ -15,15 +17,53 @@ const HealthCheckResultScreen = () => {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
-  const { petId, petName, summary } = route.params;
+  const { petId, petName, summary, certificateSubmissionId, certificateOwnerId, viewOnly } = route.params;
+  const [saving, setSaving] = useState(false);
+  const saveRequest = useRef<AbortController | null>(null);
+  const session = useRef(getAuthSession()).current;
+  useFocusEffect(useCallback(() => () => {
+    saveRequest.current?.abort();
+    saveRequest.current = null;
+  }, []));
+  const fields = [
+    ['동물명', summary.certificate.animalName], ['종류', summary.certificate.species],
+    ['품종', summary.certificate.breed], ['성별', summary.certificate.sex],
+    ['모색', summary.certificate.coatColor], ['연령', summary.certificate.age],
+    ['특징', summary.certificate.features], ['병명', summary.certificate.diseaseName],
+    ['발병 연월일', summary.certificate.onsetDate], ['진단 연월일', summary.certificate.diagnosisDate],
+    ['예후 소견', summary.certificate.prognosis], ['그 외의 사항(비고)', summary.certificate.remarks],
+  ];
 
-  const conditionColor = CONDITION_COLORS[summary.overallCondition].text;
-  const summaryText =
-    summary.healthTags.length > 0 ? summary.healthTags.join(', ') : '특이사항 없음';
+  const handleSave = async () => {
+    if (viewOnly || saveRequest.current || getAuthSession() !== session) return;
+    if (!certificateSubmissionId) {
+      healthStore.set(petId, summary);
+      navigation.pop(2);
+      return;
+    }
 
-  const handleSave = () => {
-    healthStore.set(petId, summary);
-    navigation.pop(2);
+    const controller = new AbortController();
+    saveRequest.current = controller;
+    setSaving(true);
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    try {
+      await updateCertificate(certificateSubmissionId, summary.certificate, controller.signal);
+      if (certificateOwnerId !== undefined) {
+        await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
+      }
+      if (controller.signal.aborted || getAuthSession() !== session) return;
+      healthStore.set(petId, summary);
+      navigation.pop(2);
+    } catch (error) {
+      if (saveRequest.current !== controller || getAuthSession() !== session) return;
+      Alert.alert('오류', error instanceof Error ? error.message : '요청을 처리하지 못했습니다.');
+    } finally {
+      clearTimeout(timeout);
+      if (saveRequest.current === controller) {
+        saveRequest.current = null;
+        setSaving(false);
+      }
+    }
   };
 
   return (
@@ -41,13 +81,9 @@ const HealthCheckResultScreen = () => {
 
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={[styles.content, viewOnly && { paddingBottom: 24 + Math.max(insets.bottom, 24) }]}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.description}>
-          불러오거나 입력한 검진결과를 확인해주세요
-        </Text>
-
         <View style={styles.card}>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>반려동물</Text>
@@ -57,29 +93,35 @@ const HealthCheckResultScreen = () => {
             <Text style={styles.infoLabel}>검진일</Text>
             <Text style={styles.infoValue}>{summary.checkupDate}</Text>
           </View>
-
-          <View style={styles.summaryBox}>
-            <Text style={styles.summaryLabel}>건강 상태 요약</Text>
-            <Text style={[styles.summaryValue, { color: conditionColor }]}>
-              {summaryText}
-            </Text>
-          </View>
-
-          <View style={styles.trackBox}>
-            <Text style={styles.trackText}>{`✓ ${summary.recommendation}`}</Text>
+          <View style={styles.infoRow}>
+            <Text style={styles.infoLabel}>병원명</Text>
+            <Text style={styles.infoValue}>{summary.hospitalName || '미입력'}</Text>
           </View>
         </View>
+        {viewOnly && (
+          <View style={[styles.card, { marginTop: 16 }]}>
+            {summary.certificateImageUri && (
+              <Image source={{ uri: summary.certificateImageUri }} resizeMode="contain" style={{ width: '100%', height: 200, marginBottom: 16 }} />
+            )}
+            {fields.map(([label, value]) => (
+              <View key={label} style={styles.infoRow}>
+                <Text style={styles.infoLabel}>{label}</Text>
+                <Text style={[styles.infoValue, { flex: 1, textAlign: 'right', marginLeft: 12 }]}>{value || '미입력'}</Text>
+              </View>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {/* 하단 버튼 */}
-      <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
-        <TouchableOpacity style={styles.editBtn} onPress={() => navigation.goBack()}>
+      {!viewOnly && <View style={[styles.bottomBtns, { paddingBottom: 16 + insets.bottom }]}>
+        <TouchableOpacity style={styles.editBtn} disabled={saving} onPress={() => navigation.goBack()}>
           <Text style={styles.editBtnText}>수정하기</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+        <TouchableOpacity style={styles.saveBtn} disabled={saving} onPress={handleSave}>
           <Text style={styles.saveBtnText}>저장하기</Text>
         </TouchableOpacity>
-      </View>
+      </View>}
     </View>
   );
 };
@@ -122,14 +164,8 @@ const styles = StyleSheet.create({
   scroll: { flex: 1 },
   content: {
     paddingHorizontal: 20,
-    paddingTop: 24,
+    paddingTop: 16,
     paddingBottom: 24,
-  },
-  description: {
-    fontSize: 14,
-    color: '#7B7C7D',
-    lineHeight: 22,
-    marginBottom: 16,
   },
 
   /* 카드 */
@@ -158,34 +194,6 @@ const styles = StyleSheet.create({
   infoValue: {
     fontSize: 16,
     color: '#040505',
-    fontWeight: '500',
-  },
-
-  /* 건강 상태 요약 */
-  summaryBox: {
-    backgroundColor: '#F3F4F5',
-    borderRadius: 12,
-    padding: 16,
-    gap: 8,
-  },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#7B7C7D',
-  },
-  summaryValue: {
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  /* 추적관찰 */
-  trackBox: {
-    backgroundColor: '#EEF7FD',
-    borderRadius: 8,
-    padding: 12,
-  },
-  trackText: {
-    fontSize: 14,
-    color: '#0081D5',
     fontWeight: '500',
   },
 

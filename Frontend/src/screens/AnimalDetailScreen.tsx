@@ -23,7 +23,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
 export default function AnimalDetailScreen() {
   const navigation = useNavigation<NavigationProp>();
   const route = useRoute<AnimalDetailRouteProp>();
-  const { animalData } = route.params;
+  const { animalData, isExample } = route.params;
   const callInFlight = useRef(false);
   const [petDetail, setPetDetail] = useState<PetDetail | null>(null);
   const [petError, setPetError] = useState<string | null>(null);
@@ -43,8 +43,7 @@ export default function AnimalDetailScreen() {
       setIsPetLoading(true);
       setPetError(null);
       try {
-        const mock = getAdoptionMock();
-        const detail = mock ? mock.getPetDetail(shelterId, petId)
+        const detail = isExample ? getAdoptionMock().getPetDetail(shelterId, petId)
           : await getShelterPetDetail(shelterId, petId, controller.signal);
         if (!isActive) return;
         setPetDetail(detail);
@@ -66,7 +65,7 @@ export default function AnimalDetailScreen() {
       isActive = false;
       controller.abort();
     };
-  }, [animalData.id, animalData.shelterId, detailRefreshVersion]);
+  }, [animalData.id, animalData.shelterId, detailRefreshVersion, isExample]);
 
   const imageSource = useMemo(() => {
     if (petDetail?.images?.[0]) {
@@ -98,7 +97,7 @@ export default function AnimalDetailScreen() {
 
   const dialNumber = /^[+\d\s()-]+$/.test(shelterPhone)
     ? shelterPhone.replace(/[\s()-]/g, '') : '';
-  const canCall = /^\+?\d{3,15}$/.test(dialNumber);
+  const canCall = !isExample && /^\+?\d{3,15}$/.test(dialNumber);
   const handleCall = async () => {
     if (!canCall || callInFlight.current) return;
     callInFlight.current = true;
@@ -133,9 +132,6 @@ export default function AnimalDetailScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* 보호소 제목 */}
-        <Text style={styles.shelterTitle}>{shelterName}</Text>
-
         {/* 동물 이미지 */}
         <View style={styles.imageContainer}>
           <Image
@@ -248,20 +244,13 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingBottom: 40,
   },
-  shelterTitle: {
-    color: '#000',
-    fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 20,
-    marginBottom: 16,
-  },
   imageContainer: {
     alignItems: 'center',
     marginBottom: 20,
   },
   animalImage: {
-    width: 380,
-    height: 250,
+    width: 320,
+    height: 210,
     borderRadius: 12,
   },
   animalName: {
@@ -346,7 +335,7 @@ const styles = StyleSheet.create({
     marginLeft: 16,
   },
   buttonContainer: {
-    marginTop: 50,
+    marginTop: 16,
     alignItems: 'center',
   },
 });

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert, Modal, Pressable, BackHandler } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import type { RouteProp } from '@react-navigation/native';
@@ -8,7 +8,8 @@ import { createSelfCheck, getSelfCheck, SelfCheckRecord } from '../api/selfCheck
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import type { RootStackParamList } from '../../App';
 import { SPECIES_META, PetSpecies } from '../data/petQna';
-import { SELF_CHECK, SCALE, STAGES, STAGE_BAR_COLOR } from '../data/selfCheck';
+import { SELF_CHECK, SCALE, STAGES, STAGE_BAR_COLOR, judgeArea, type CheckStage } from '../data/selfCheck';
+import { markSelfCheckPreviewSeen } from '../storage/selfCheckPreviewStorage';
 
 type NavProp = NativeStackNavigationProp<RootStackParamList, 'SelfCheck'>;
 
@@ -26,6 +27,7 @@ const SelfCheckScreen = () => {
   const navigation = useNavigation<NavProp>();
   const scrollRef = useRef<ScrollView>(null);
   const route = useRoute<RouteProp<RootStackParamList, 'SelfCheck'>>();
+  const preview = route.params?.preview === true;
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [petId, setPetId] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
@@ -40,12 +42,19 @@ const SelfCheckScreen = () => {
   const [step, setStep] = useState(0);
   const [answers, setAnswers] = useState<Record<string, number[]>>({});
   const [showResult, setShowResult] = useState(false);
+  const [previewStarted, setPreviewStarted] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerTop, setPickerTop] = useState(0);
 
   useEffect(() => {
     let active = true;
     mounted.current = true;
-    setLoading(true);
     setLoadError(false);
+    if (preview) {
+      setLoading(false);
+      return () => { mounted.current = false; };
+    }
+    setLoading(true);
     (async () => {
       try {
         const all = await getMyPets();
@@ -66,7 +75,7 @@ const SelfCheckScreen = () => {
       } finally { if (active) setLoading(false); }
     })();
     return () => { active = false; mounted.current = false; };
-  }, [route.params?.petId, route.params?.recordId, reload]);
+  }, [preview, route.params?.petId, route.params?.recordId, reload]);
 
   const areas = SELF_CHECK[species];
   const area = areas[step];
@@ -75,16 +84,36 @@ const SelfCheckScreen = () => {
   const remaining = area.questions.length - answeredCount;
   const isLast = step === areas.length - 1;
   const name = SPECIES_META[species].label;
+  const selectedPetName = pets.find(pet => pet.id === petId)?.name ?? '';
+  const showPicker = !loading && !loadError && !showResult && !route.params?.recordId &&
+    step === 0 && (preview || petId !== null);
+
+  useEffect(() => {
+    if (!showPicker || !pickerOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      setPickerOpen(false);
+      return true;
+    });
+    return () => subscription.remove();
+  }, [showPicker, pickerOpen]);
 
   const scrollToTop = () => scrollRef.current?.scrollTo({ y: 0, animated: false });
 
   const changePet = (pet: PetListItem) => {
-    if (saving) return;
+    if (saving || pet.id === petId) return;
     setPetId(pet.id);
     setSpecies(pet.species.toLowerCase() as PetSpecies);
     setAnswers({});
     setSavedRecord(null);
   };
+  const finishPreview = async () => {
+    if (busy.current) return;
+    busy.current = true;
+    await markSelfCheckPreviewSeen();
+    if (mounted.current) navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    busy.current = false;
+  };
+
   const setAnswer = (index: number, value: number) =>
     setAnswers((prev) => {
       const next = [...(prev[area.id] ?? [])];
@@ -93,9 +122,16 @@ const SelfCheckScreen = () => {
     });
 
   const goNext = async () => {
-    if (busy.current || petId === null) return;
-    if (!isLast) { setStep(step + 1); scrollToTop(); return; }
+    if (busy.current || (!preview && petId === null) || remaining > 0) return;
+    if (!isLast) { setPickerOpen(false); setStep(step + 1); scrollToTop(); return; }
     if (!areas.every(item => item.questions.every((_, i) => Number.isInteger(answers[item.id]?.[i]) && answers[item.id][i] >= 0 && answers[item.id][i] <= 3))) return;
+    if (preview) {
+      void markSelfCheckPreviewSeen();
+      setShowResult(true);
+      scrollToTop();
+      return;
+    }
+    if (petId === null) return;
     busy.current = true;
     setSaving(true);
     try {
@@ -111,8 +147,9 @@ const SelfCheckScreen = () => {
   const handleBack = () => {
     if (saving) return;
     if (route.params?.recordId) { navigation.goBack(); return; }
-    if (showResult) { setShowResult(false); setSavedRecord(null); }
-    else if (step > 0) setStep(step - 1);
+    if (showResult) { navigation.navigate('Main', { screen: '건강' }); return; }
+    if (step > 0) setStep(step - 1);
+    else if (preview) { void finishPreview(); return; }
     else navigation.goBack();
     scrollToTop();
   };
@@ -126,12 +163,54 @@ const SelfCheckScreen = () => {
     scrollToTop();
   };
 
-  const results = savedRecord?.areas.map(item => ({
+  const results = preview && showResult
+    ? areas.map(item => ({ area: item, ...judgeArea(item, answers[item.id]) }))
+    : savedRecord?.areas.map(item => ({
     area: { id: item.areaKey, title: item.areaTitle }, score: item.score, stage: item.stage, urgentHit: item.urgentHit,
     flagged: item.answers.filter(answer => route.params?.recordId || answer.answerValue > 0).map(answer => ({ q: answer.questionText, value: answer.answerValue, weight: answer.questionWeight })),
   })) ?? [];
-  const overallStage = savedRecord?.overallStage ?? 1;  const overall = STAGES[overallStage];
+  const overallStage = preview
+    ? results.reduce<CheckStage>((stage, result) => result.stage > stage ? result.stage : stage, 1)
+    : savedRecord?.overallStage ?? 1;
+  const overall = STAGES[overallStage];
   const attentionAreas = results.filter((result) => result.stage >= 2).map((result) => result.area.title);
+
+  if (preview && !previewStarted) {
+    return (
+      <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
+        <Modal transparent animationType="fade" onRequestClose={finishPreview}>
+          <View style={styles.previewOverlay}>
+            <View style={styles.previewDialog} accessibilityViewIsModal>
+              <ScrollView style={styles.previewScroll} bounces={false}>
+                <View style={styles.previewHero}>
+                  <View style={styles.previewHeroCircle} />
+                  <Image
+                    source={require('../assets/selfCheckDog.png')}
+                    style={styles.previewIllustration}
+                    resizeMode="contain"
+                    accessible={false}
+                  />
+                </View>
+                <View style={styles.previewContent}>
+                  <Text accessibilityRole="header" style={styles.previewTitle}>우리 아이 건강,{'\n'}간단히 체크해 볼까요?</Text>
+                  <Text style={styles.previewDescription}>
+                    회원가입 없이 자가진단을 체험할 수 있어요. 답변과 결과는 저장되지 않아요.
+                  </Text>
+                  <TouchableOpacity accessibilityRole="button" style={styles.previewStart} activeOpacity={0.8}
+                    onPress={() => setPreviewStarted(true)}>
+                    <Text style={styles.primaryBtnText}>체험 시작</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity accessibilityRole="button" style={styles.previewSkip} onPress={finishPreview}>
+                    <Text style={styles.previewSkipText}>건너뛰기</Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.screen} edges={['top', 'bottom']}>
@@ -143,10 +222,30 @@ const SelfCheckScreen = () => {
         </TouchableOpacity>
       </View>
 
-      {petId !== null && <TouchableOpacity style={styles.historyButton} onPress={() => navigation.navigate('SelfCheckHistory', { petId, petName: pets.find(pet => pet.id === petId)?.name ?? '' })} disabled={saving}>
-        <Text style={styles.historyText}>과거 자가진단 기록</Text>
-      </TouchableOpacity>}
-      {loading || loadError || petId === null ? <View style={styles.content}>
+      {!showResult && !route.params?.recordId && ((!preview && petId !== null) || showPicker) && (
+        <View style={styles.actionRow} onLayout={({ nativeEvent: { layout } }) => setPickerTop(layout.y + layout.height)}>
+          {!preview && petId !== null && (
+            <TouchableOpacity style={styles.historyButton} accessibilityRole="button" disabled={saving}
+              onPress={() => {
+                setPickerOpen(false);
+                navigation.navigate('SelfCheckHistory', { petId, petName: selectedPetName });
+              }}>
+              <Text style={styles.historyText}>과거 자가진단 기록</Text>
+            </TouchableOpacity>
+          )}
+          {showPicker && (
+            <TouchableOpacity style={styles.pickerToggle} accessibilityRole="button"
+              accessibilityLabel={'반려동물 선택: ' + (preview ? name : selectedPetName)}
+              accessibilityState={{ expanded: pickerOpen, disabled: saving }}
+              disabled={saving} onPress={() => setPickerOpen(open => !open)}>
+              <Text style={styles.speciesChipText} numberOfLines={1}>{preview ? name : selectedPetName}</Text>
+              <Image source={require('../assets/icon_arrowDown.png')}
+                style={[styles.pickerArrow, pickerOpen && styles.pickerArrowOpen]} />
+            </TouchableOpacity>
+          )}
+        </View>
+      )}
+      {loading || loadError || (!preview && petId === null) ? <View style={styles.content}>
         <Text>{loading ? '불러오는 중입니다.' : loadError ? '정보를 불러오지 못했습니다.' : '자가진단할 반려동물을 먼저 등록해주세요.'}</Text>
         {!loading && <TouchableOpacity onPress={() => setReload(value => value + 1)}><Text style={styles.historyText}>다시 시도</Text></TouchableOpacity>}
       </View> : !showResult ? (
@@ -174,20 +273,10 @@ const SelfCheckScreen = () => {
           <ScrollView
             ref={scrollRef}
             style={styles.scroll}
-            contentContainerStyle={styles.content}
+            contentContainerStyle={[styles.content, styles.questionContent]}
             showsVerticalScrollIndicator={false}
           >
-            {step === 0 && (
-              <View style={styles.speciesRow}>
-                {pets.map((item) => {
-                  const selected = petId === item.id;
-                  return <TouchableOpacity key={item.id} style={[styles.speciesChip, selected && styles.speciesChipActive]} onPress={() => changePet(item)}>
-                    <Text style={[styles.speciesChipText, selected && styles.speciesChipTextActive]}>{item.name}</Text>
-                  </TouchableOpacity>;
-                })}
-              </View>
-            )}
-
+            {preview && step === 0 && <Text style={styles.headlineDesc}>회원가입 없이 먼저 체험해 보세요. 답변과 결과는 저장되지 않아요.</Text>}
             <Text style={styles.headline}>{area.title}</Text>
             <Text style={styles.headlineDesc}>
               최근 며칠간 {name}의 모습에 가장 가까운 정도를 골라 주세요.
@@ -240,6 +329,9 @@ const SelfCheckScreen = () => {
                     : `다음 · ${areas[step + 1].title}`}
               </Text>
             </TouchableOpacity>
+            {preview && <TouchableOpacity accessibilityRole="button" style={styles.previewSkip} onPress={finishPreview}>
+              <Text style={styles.historyText}>건너뛰기</Text>
+            </TouchableOpacity>}
           </View>
         </>
       ) : (
@@ -249,7 +341,8 @@ const SelfCheckScreen = () => {
           contentContainerStyle={styles.resultContent}
           showsVerticalScrollIndicator={false}
         >
-          <Text style={styles.historyText}>{pets.find(pet => pet.id === petId)?.name} · {savedRecord ? new Date(savedRecord.createdAt).toLocaleString('ko-KR') : ''}</Text>
+          {preview ? <Text style={styles.historyText}>체험 결과는 저장되지 않아요.</Text> :
+            <Text style={styles.historyText}>{pets.find(pet => pet.id === petId)?.name} · {savedRecord ? new Date(savedRecord.createdAt).toLocaleString('ko-KR') : ''}</Text>}
           {/* 종합 결과 */}
           <View style={[styles.heroCard, { backgroundColor: overall.bg }]}>
             <View style={[styles.heroBadge, { backgroundColor: STAGE_BAR_COLOR[overallStage] }]}>
@@ -326,14 +419,42 @@ const SelfCheckScreen = () => {
             <TouchableOpacity
               style={[styles.primaryBtn, styles.resultPrimaryBtn]}
               activeOpacity={0.8}
-              onPress={() => overallStage >= 3 ? navigation.navigate('Main', { screen: '건강', params: { openHospitalSearch: true } }) : navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: '건강' } }] })}
+              onPress={preview ? finishPreview : () => overallStage >= 3 ? navigation.navigate('Main', { screen: '건강', params: { openHospitalSearch: true } }) : navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: '건강' } }] })}
             >
               <Text style={styles.primaryBtnText}>
-                {overallStage >= 3 ? '주변 동물병원 찾기' : '건강탭으로'}
+                {preview ? '로그인·회원가입' : overallStage >= 3 ? '주변 동물병원 찾기' : '건강탭으로'}
               </Text>
             </TouchableOpacity>
           </View>
         </ScrollView>
+      )}
+      {showPicker && pickerOpen && (
+        <View style={styles.pickerLayer} pointerEvents="box-none">
+          <Pressable style={StyleSheet.absoluteFill} onPress={() => setPickerOpen(false)}
+            accessible={false} importantForAccessibility="no" />
+          <View style={[styles.pickerMenu, { top: pickerTop + 6 }]}>
+            <ScrollView style={styles.pickerScroll} keyboardShouldPersistTaps="handled">
+              {(preview ? (['dog', 'cat'] as const).map(item => ({
+                key: item, label: SPECIES_META[item].label, selected: species === item,
+                select: () => {
+                  if (species === item) return;
+                  setSpecies(item);
+                  setAnswers({});
+                  scrollToTop();
+                },
+              })) : pets.map(pet => ({
+                key: pet.id, label: pet.name, selected: petId === pet.id,
+                select: () => { changePet(pet); scrollToTop(); },
+              }))).map(item => (
+                <TouchableOpacity key={item.key} style={[styles.pickerOption, item.selected && styles.pickerOptionSelected]}
+                  accessibilityRole="button" accessibilityState={{ selected: item.selected }}
+                  onPress={() => { setPickerOpen(false); item.select(); }}>
+                  <Text style={styles.pickerOptionText}>{item.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
       )}
     </SafeAreaView>
   );
@@ -342,7 +463,20 @@ const SelfCheckScreen = () => {
 export default SelfCheckScreen;
 
 const styles = StyleSheet.create({
-  historyButton: { alignSelf: 'flex-start', marginHorizontal: 20, marginVertical: 8, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#EEF7FD' },
+  previewOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24, backgroundColor: 'rgba(17,37,56,0.46)' },
+  previewDialog: { width: '100%', maxWidth: 360, maxHeight: '100%', borderRadius: 24, overflow: 'hidden', backgroundColor: '#fff' },
+  previewScroll: { flexGrow: 0 },
+  previewHero: { height: 144, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFF3D0' },
+  previewHeroCircle: { position: 'absolute', width: 110, height: 110, borderRadius: 55, backgroundColor: '#D9EEFA' },
+  previewIllustration: { width: 126, height: 126 },
+  previewContent: { paddingTop: 22, paddingHorizontal: 24, paddingBottom: 10 },
+  previewTitle: { fontSize: 22, fontWeight: '700', color: '#17324A', lineHeight: 30, textAlign: 'center' },
+  previewDescription: { fontSize: 15, color: '#50545A', lineHeight: 22, marginTop: 10, marginBottom: 20, textAlign: 'center' },
+  previewStart: { minHeight: 52, padding: 12, borderRadius: 14, backgroundColor: '#3F73C5', alignItems: 'center', justifyContent: 'center' },
+  previewSkipText: { fontSize: 14, fontWeight: '600', color: '#4F6475' },
+  previewSkip: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  actionRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginHorizontal: 20, marginTop: 8 },
+  historyButton: { flexShrink: 1, paddingHorizontal: 16, paddingVertical: 10, borderRadius: 12, backgroundColor: '#EEF7FD' },
   historyText: { color: '#0081D5', fontWeight: '600' },
   screen: { flex: 1, backgroundColor: '#fff' },
 
@@ -370,22 +504,17 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 24 },
   resultContent: { paddingHorizontal: 20, paddingTop: 28, paddingBottom: 40 },
 
-  speciesRow: { flexWrap: 'wrap', flexDirection: 'row', gap: 8, marginBottom: 20 },
-  speciesChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    height: 40,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(0,0,0,0.08)',
-    backgroundColor: '#fff',
-  },
-  speciesChipActive: { backgroundColor: '#0081D5', borderColor: '#0081D5' },
-  speciesChipImage: { width: 22, height: 22, borderRadius: 11 },
-  speciesChipText: { fontSize: 14, fontWeight: '600', color: '#3C4144' },
-  speciesChipTextActive: { color: '#fff' },
+  questionContent: { paddingTop: 16 },
+  pickerToggle: { marginLeft: 'auto', maxWidth: '48%', minHeight: 40, flexShrink: 1, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, borderRadius: 12, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#F6FAFE' },
+  pickerArrow: { width: 12, height: 12, tintColor: '#0081D5' },
+  pickerArrowOpen: { transform: [{ rotate: '180deg' }] },
+  pickerLayer: { ...StyleSheet.absoluteFillObject, zIndex: 10 },
+  pickerMenu: { position: 'absolute', right: 20, minWidth: 120, maxWidth: '75%', borderRadius: 12, borderWidth: 1, borderColor: '#DFEAF3', backgroundColor: '#fff', overflow: 'hidden', elevation: 4 },
+  pickerScroll: { maxHeight: 176, flexGrow: 0 },
+  pickerOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8 },
+  pickerOptionSelected: { backgroundColor: '#EEF7FD' },
+  speciesChipText: { flexShrink: 1, fontSize: 14, fontWeight: '600', color: '#3C4144' },
+  pickerOptionText: { fontSize: 14, color: '#3C4144' },
 
   headline: { fontSize: 24, fontWeight: '700', color: '#000', lineHeight: 34, marginBottom: 6 },
   headlineDesc: { fontSize: 14, fontWeight: '500', color: '#7B7C7D', lineHeight: 22, marginBottom: 20 },

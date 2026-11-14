@@ -116,14 +116,15 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
     paramPetName,
   );
 
-  const loadHistory = useCallback(async () => {
+  const loadHistory = useCallback(async (signal: AbortSignal) => {
     const petToLoad = selectedPetId;
     if (!petToLoad) return;
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const submissions = await getPetSubmissions(petToLoad);
+      const submissions = await getPetSubmissions(petToLoad, signal, true);
+      if (signal.aborted) return;
       const normalized = submissions
         .map(normalizeSubmission)
         .filter((item): item is NormalizedSubmission => !!item)
@@ -131,21 +132,23 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
 
       setItems(normalized);
     } catch (error) {
+      if (signal.aborted) return;
       const message =
         error instanceof Error
           ? error.message
           : '진단 이력을 불러오지 못했습니다.';
       setErrorMessage(message);
     } finally {
-      setIsLoading(false);
+      if (!signal.aborted) setIsLoading(false);
     }
   }, [selectedPetId]);
 
   useEffect(() => {
     // If a pet was already provided, load directly
     if (selectedPetId) {
-      loadHistory();
-      return;
+      const controller = new AbortController();
+      loadHistory(controller.signal);
+      return () => controller.abort();
     }
 
     // Otherwise fetch pet list for selection

@@ -41,24 +41,29 @@ const getStorage = () => (isAsyncStorageAvailable() ? AsyncStorage : null);
 
 const persistAuthTokens = async (tokens: AuthTokens) => {
   const storage = getStorage();
-  if (storage) {
-    try {
-      await storage.multiSet([
-        [ACCESS_TOKEN_KEY, tokens.accessToken],
-        [REFRESH_TOKEN_KEY, tokens.refreshToken],
-        [EXPIRATION_KEY, tokens.expiration],
-      ]);
-      return;
-    } catch {
-    }
-  }
+  if (!storage) throw new Error('Token storage unavailable');
+  await storage.multiSet([
+    [ACCESS_TOKEN_KEY, tokens.accessToken],
+    [REFRESH_TOKEN_KEY, tokens.refreshToken],
+    [EXPIRATION_KEY, tokens.expiration],
+  ]);
 };
 
 export const storeAuthTokens = (tokens: AuthTokens) => {
   authSession = Symbol('auth-session');
   hasMemorySession = true;
   memoryStore = { ...tokens };
-  return enqueueStorageWrite(() => persistAuthTokens(tokens));
+  const session = authSession;
+  return enqueueStorageWrite(async () => {
+    try {
+      await persistAuthTokens(tokens);
+    } catch (error) {
+      if (authSession === session) memoryStore = {};
+      await removePersistedTokens();
+      throw error;
+    }
+    assertAuthSession(session);
+  });
 };
 
 export const storeRefreshedAuthTokens = (
@@ -110,21 +115,20 @@ export const getStoredAccessToken = async (strict = false) => {
   return memoryStore.accessToken ?? null;
 };
 
+const removePersistedTokens = async () => {
+  const storage = getStorage();
+  if (!storage) throw new Error('Token storage unavailable');
+  const keys = [ACCESS_TOKEN_KEY, REFRESH_TOKEN_KEY, EXPIRATION_KEY];
+  try {
+    await storage.multiRemove(keys);
+  } catch {
+    await storage.multiRemove(keys);
+  }
+};
+
 export const clearAuthTokens = () => {
   authSession = Symbol('auth-session');
   hasMemorySession = true;
   memoryStore = {};
-  return enqueueStorageWrite(async () => {
-    const storage = getStorage();
-    if (storage) {
-      try {
-        await storage.multiRemove([
-          ACCESS_TOKEN_KEY,
-          REFRESH_TOKEN_KEY,
-          EXPIRATION_KEY,
-        ]);
-      } catch {
-      }
-    }
-  });
+  return enqueueStorageWrite(removePersistedTokens);
 };

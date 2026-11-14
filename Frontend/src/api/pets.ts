@@ -61,13 +61,6 @@ export interface PetImageUpload {
   fileName?: string;
 }
 
-export interface UpdatePetPayloadFull {
-  id: number;
-  request: UpdatePetRequestFull;
-  profilePictureUri?: string | null;
-  profilePicture?: PetImageUpload | null;
-}
-
 export interface UpdatePetPayloadPartial {
   id: number;
   request: UpdatePetRequestPartial;
@@ -170,7 +163,7 @@ const authorizedFetch = async (
 };
 
 const buildPetFormData = (
-  payload: UpdatePetPayloadFull | UpdatePetPayloadPartial | CreatePetPayload
+  payload: UpdatePetPayloadPartial | CreatePetPayload
 ) => {
   const formData = new FormData();
 
@@ -256,44 +249,7 @@ export const getMyPets = async (): Promise<PetListItem[]> => {
 
   const data = await parseJsonSafe(response);
   const items = (Array.isArray(data) ? data : []) as PetListItem[];
-  const normalizedPets = items.map((item) => normalizePet(item));
-  const needsImageEnrichment = normalizedPets.some(
-    (pet) => !extractPetImage(pet) && Number.isFinite(pet.id)
-  );
-
-  if (!needsImageEnrichment) {
-    return normalizedPets;
-  }
-
-  const enriched = await Promise.all(
-    normalizedPets.map(async (pet) => {
-      if (extractPetImage(pet) || !Number.isFinite(pet.id)) {
-        return pet;
-      }
-
-      try {
-        const detailResponse = await authorizedFetch(`${API_BASE_URL}/api/pets/${pet.id}`, {
-          method: 'GET',
-        });
-
-        if (!detailResponse.ok) {
-          return pet;
-        }
-
-        const detailData = await parseJsonSafe(detailResponse);
-        const detail = normalizePet(detailData as PetListItem);
-        return {
-          ...pet,
-          ...detail,
-          profilePicture: detail.profilePicture || pet.profilePicture,
-        };
-      } catch {
-        return pet;
-      }
-    })
-  );
-
-  return enriched;
+  return items.map(normalizePet);
 };
 
 export const getPetDetail = async (id: number, signal?: AbortSignal): Promise<PetListItem> => {
@@ -327,31 +283,6 @@ export const createPet = async (
     const message = await getResponseErrorMessage(
       response,
       `반려동물 등록에 실패했습니다. (HTTP ${response.status})`
-    );
-
-    throw new Error(message);
-  }
-
-  const data = await parseJsonSafe(response);
-
-  return normalizePet(data as PetListItem);
-};
-
-export const updatePetFull = async (
-  payload: UpdatePetPayloadFull
-): Promise<PetListItem> => {
-  const response = await authorizedFetch(
-    `${API_BASE_URL}/api/pets/${payload.id}`,
-    {
-      method: 'PUT',
-      body: buildPetFormData(payload),
-    }
-  );
-
-  if (!response.ok) {
-    const message = await getResponseErrorMessage(
-      response,
-      `반려동물 정보를 저장하지 못했습니다. (HTTP ${response.status})`
     );
 
     throw new Error(message);

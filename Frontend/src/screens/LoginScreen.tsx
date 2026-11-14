@@ -10,6 +10,7 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  NativeModules,
   Image,
   Animated,
   requireNativeComponent,
@@ -49,7 +50,6 @@ const kakaoNativeConfig: WebViewProps['nativeConfig'] = Platform.OS === 'android
       >['component'],
     }
   : undefined;
-// TODO: Switch to an HTTPS redirect URI and validate OAuth state before production release.
 const KAKAO_REDIRECT_URI = 'http://api.puppydoc.ovh:8080/api/auth/kakao/callback';
 
 const getQueryParameter = (url: string, name: string) => {
@@ -60,7 +60,8 @@ const getQueryParameter = (url: string, name: string) => {
   if (!parameter) return null;
 
   const value = parameter.slice(parameter.indexOf('=') + 1).replace(/\+/g, ' ');
-  return value ? decodeURIComponent(value) : null;
+  try { return value ? decodeURIComponent(value) : null; }
+  catch { return null; }
 };
 
 const isKakaoCallbackUrl = (url: string) => url.split('?')[0].split('#')[0] === KAKAO_REDIRECT_URI;
@@ -73,25 +74,41 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
   const animationLayerOpacity = useRef(new Animated.Value(1)).current;
   const buttonsOpacity = useRef(new Animated.Value(0)).current;
   const hasHandledKakaoCallback = useRef(false);
+  const pendingState = useRef<string | null>(null);
+  const openingKakao = useRef(false);
+  const [oauthState, setOAuthState] = useState<string | null>(null);
 
   const kakaoRestApiKey = Config.KAKAO_REST_API_KEY?.trim();
   const kakaoAuthorizeUrl = kakaoRestApiKey
-    ? `${KAKAO_AUTHORIZE_URL}?client_id=${encodeURIComponent(kakaoRestApiKey)}&redirect_uri=${encodeURIComponent(KAKAO_REDIRECT_URI)}&response_type=code`
+    ? `${KAKAO_AUTHORIZE_URL}?client_id=${encodeURIComponent(kakaoRestApiKey)}&redirect_uri=${encodeURIComponent(KAKAO_REDIRECT_URI)}&response_type=code${oauthState ? "&state=" + encodeURIComponent(oauthState) : ""}`
     : null;
 
   const closeKakaoLogin = useCallback(() => {
     if (isKakaoSubmitting) return;
+    pendingState.current = null;
     setIsKakaoLoginVisible(false);
   }, [isKakaoSubmitting]);
 
-  const handleKakaoLogin = () => {
+  const handleKakaoLogin = async () => {
+    if (openingKakao.current || isKakaoLoginVisible) return;
     if (!kakaoAuthorizeUrl) {
       Alert.alert('카카오 로그인 설정 필요', 'REST API Key를 설정한 뒤 다시 시도해 주세요.');
       return;
     }
 
-    hasHandledKakaoCallback.current = false;
-    setIsKakaoLoginVisible(true);
+    openingKakao.current = true;
+    try {
+      const state: unknown = await NativeModules.KakaoOAuth?.createState();
+      if (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error('OAuth state unavailable');
+      pendingState.current = state;
+      setOAuthState(state);
+      hasHandledKakaoCallback.current = false;
+      setIsKakaoLoginVisible(true);
+    } catch {
+      Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+    } finally {
+      openingKakao.current = false;
+    }
   };
 
   const handleKakaoNavigation = useCallback(
@@ -99,6 +116,13 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       if (!isKakaoCallbackUrl(url) || hasHandledKakaoCallback.current) return;
 
       hasHandledKakaoCallback.current = true;
+      const expectedState = pendingState.current;
+      pendingState.current = null;
+      if (!expectedState || getQueryParameter(url, 'state') !== expectedState) {
+        setIsKakaoLoginVisible(false);
+        Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
+        return;
+      }
       const kakaoError = getQueryParameter(url, 'error');
       const code = getQueryParameter(url, 'code');
 
@@ -274,7 +298,9 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
                   source={{ uri: kakaoAuthorizeUrl }}
                   nestedScrollEnabled
                   onShouldStartLoadWithRequest={({ url }) => {
-                    if (!isKakaoCallbackUrl(url)) return true;
+                    if (!isKakaoCallbackUrl(url)) {
+                      return /^https:\/\/(?:kauth|accounts)\.kakao\.com(?:[/?#]|$)/i.test(url);
+                    }
 
                     handleKakaoNavigation(url).catch(() => {
                       setIsKakaoLoginVisible(false);

@@ -102,8 +102,9 @@ it('invalidates the session immediately, even before logout persistence finishes
 it('does not expose old stored credentials when a new login write fails', async () => {
   await storage.storeAuthTokens(tokens('old'));
   jest.spyOn(AsyncStorage, 'multiSet').mockRejectedValueOnce(new Error('Storage unavailable'));
-  await storage.storeAuthTokens(tokens('new'));
-  expect(await storage.getStoredAccessToken()).toBe('new-access');
+  await expect(storage.storeAuthTokens(tokens('new'))).rejects.toThrow('Storage unavailable');
+  expect(await storage.getStoredAccessToken()).toBeNull();
+  expect(await AsyncStorage.getItem('auth.accessToken')).toBeNull();
   await storage.clearAuthTokens();
   expect(await storage.getStoredAccessToken()).toBeNull();
 });
@@ -119,4 +120,19 @@ it.each(['login', 'logout'])('ignores a stale native token read after %s', async
   else await storage.clearAuthTokens();
   release('old-access');
   expect(await pendingRead).toBe(operation === 'login' ? 'new-access' : null);
+});
+
+it('retries a transient token deletion failure', async () => {
+  await storage.storeAuthTokens(tokens('old'));
+  const remove = jest.spyOn(AsyncStorage, 'multiRemove').mockRejectedValueOnce(new Error('Storage unavailable'));
+  await storage.clearAuthTokens();
+  expect(remove).toHaveBeenCalledTimes(2);
+  expect(await AsyncStorage.getItem('auth.accessToken')).toBeNull();
+});
+
+it('reports persistent token deletion failure without exposing credentials in memory', async () => {
+  await storage.storeAuthTokens(tokens('old'));
+  jest.spyOn(AsyncStorage, 'multiRemove').mockRejectedValue(new Error('Storage unavailable'));
+  await expect(storage.clearAuthTokens()).rejects.toThrow('Storage unavailable');
+  expect(await storage.getStoredAccessToken()).toBeNull();
 });

@@ -137,7 +137,7 @@ it('ignores invalid, repeated and older samples', async () => {
     .mockResolvedValueOnce({ lux: 2000, measured_at: 'invalid' });
   await mount();
   for (let i = 0; i < 4; i += 1) { await advance(); expect(visibleLux).toBe(1000); }
-  expect(console.info).toHaveBeenCalledTimes(1);
+  expect(console.info).not.toHaveBeenCalled();
 });
 
 it('removes its timer and app-state listener on unmount', async () => {

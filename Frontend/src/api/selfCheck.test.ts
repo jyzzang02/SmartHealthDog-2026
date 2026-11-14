@@ -41,3 +41,15 @@ it('aborts a stalled request after 30 seconds without resubmitting', async () =>
     expect(jest.getTimerCount()).toBe(0);
   } finally { jest.useRealTimers(); }
 });
+
+it('cancels a trend detail request when its caller leaves the screen', async () => {
+  globalThis.fetch = jest.fn().mockImplementation((_url, init: RequestInit) => new Promise((_resolve, reject) => {
+    init.signal?.addEventListener('abort', () => reject(new Error('Aborted')));
+  }));
+  const controller = new AbortController();
+  const result = getSelfCheck(7, 2, controller.signal);
+  await Promise.resolve();
+  controller.abort();
+  await expect(result).rejects.toThrow('Aborted');
+  expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+});

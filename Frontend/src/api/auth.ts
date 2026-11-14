@@ -145,25 +145,38 @@ export const registerUser = async ({
   }
 };
 
+const withAuthTimeout = async <T>(request: (signal: AbortSignal) => Promise<T>): Promise<T> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  try {
+    return await request(controller.signal);
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 export const login = async (
   email: string,
   password: string
 ): Promise<AuthTokens> => {
-  const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ email, password }),
+  return withAuthTimeout(async signal => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ email, password }),
+    });
+
+    if (!response.ok) {
+      const { message, codes } = await parseErrorResponse(response);
+      throw new ApiError(message, response.status, codes);
+    }
+
+    return response.json();
   });
-
-  if (!response.ok) {
-    const { message, codes } = await parseErrorResponse(response);
-    throw new ApiError(message, response.status, codes);
-  }
-
-  return response.json();
 };
 
 export const refreshAuthToken = async (
@@ -194,36 +207,42 @@ export const refreshAuthToken = async (
 };
 
 export const loginWithKakaoCode = async (code: string): Promise<AuthTokens> => {
-  const response = await fetch(`${API_BASE_URL}/api/auth/login/social/kakao/code`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
-    body: JSON.stringify({ code }),
+  return withAuthTimeout(async signal => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/login/social/kakao/code`, {
+      signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+      body: JSON.stringify({ code }),
+    });
+
+    if (!response.ok) {
+      const { message, codes } = await parseErrorResponse(response);
+      throw new ApiError(message, response.status, codes);
+    }
+
+    return (await response.json()) as AuthTokens;
   });
-
-  if (!response.ok) {
-    const { message, codes } = await parseErrorResponse(response);
-    throw new ApiError(message, response.status, codes);
-  }
-
-  return (await response.json()) as AuthTokens;
 };
 
 export const logout = async (refreshToken: string): Promise<void> => {
-  const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ refreshToken }),
-  });
+  return withAuthTimeout(async signal => {
+    const response = await fetch(`${API_BASE_URL}/api/auth/logout`, {
+      signal,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refreshToken }),
+    });
 
-  if (!response.ok) {
-    const { message, codes } = await parseErrorResponse(response);
-    throw new ApiError(message, response.status, codes);
-  }
+    if (!response.ok) {
+      const { message, codes } = await parseErrorResponse(response);
+      throw new ApiError(message, response.status, codes);
+    }
+  });
 };
 
 export const isApiError = (error: unknown): error is ApiError => {

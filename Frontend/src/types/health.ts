@@ -1,23 +1,23 @@
-export type PhysicalResult = '정상' | '소견 있음' | '미실시';
-export type OverallCondition = '양호' | '주의' | '위험';
+/** 병원 진단서 항목 (추후 OCR 결과로 자동 입력 예정) */
+export interface DiagnosisCertificate {
+  animalName: string;             // 동물명
+  species: string;                // 종류
+  breed: string;                  // 품종
+  sex: string;                    // 성별
+  coatColor: string;              // 모색
+  age: string;                    // 연령
+  features: string;               // 특징
+  diseaseName: string;            // 병명
+  onsetDate: string;              // 발병 연월일
+  diagnosisDate: string;          // 진단 연월일
+  prognosis: string;              // 예후 소견
+  remarks: string;                // 그 외의 사항(비고)
+}
 
 export interface HealthSummary {
   petId: number;
   checkupDate: string;            // YYYY-MM-DD
   hospitalName?: string;
-  examTypes: string[];
-  physicalResults: Record<string, PhysicalResult>;
-  notes?: string;
-  overallCondition: OverallCondition;
-  healthTags: string[];           // 소견 있는 항목명 목록
-  recommendation: string;         // 권고 문구
-  weight?: number;                // 체중 (kg)
-  heartRate?: number;             // 심박수 (bpm)
-  temperature?: number;           // 체온 (°C)
+  certificate: DiagnosisCertificate;
+  certificateImageUri?: string;   // 진단서 이미지 (로컬 URI)
 }
-
-export const CONDITION_COLORS: Record<OverallCondition, { bg: string; text: string }> = {
-  양호: { bg: '#E8F4FD', text: '#2A7BE4' },
-  주의: { bg: '#FFF3E0', text: '#F5A623' },
-  위험: { bg: '#FFEBEE', text: '#EF5F5F' },
-};

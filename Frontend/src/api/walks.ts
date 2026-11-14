@@ -147,22 +147,9 @@ const buildAuthHeaders = (accessToken: string) => ({
   Accept: 'application/json',
 });
 
-let walkListRequestSequence = 0;
-
-const logWalkListDiagnostic = (event: string, data: Record<string, unknown>) => {
-  if (__DEV__) console.info('[walk-debug] walk-list:' + event + ' ' + JSON.stringify(data));
-};
-
-const sanitizeWalkErrorBody = (body: string) => body
-  .replace(/Bearer\s+[^\s"'<>,]+/gi, 'Bearer [redacted]')
-  .replace(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+/g, '[redacted-jwt]')
-  .replace(/("[^"\n]*(?:token|password|secret|authorization|cookie)[^"\n]*"\s*:\s*")[^"\n]*"/gi, '$1[redacted]"')
-  .slice(0, 3000);
-
 const authorizedFetch = async (
   input: string,
   init?: RequestInit,
-  diagnosticId?: string,
 ): Promise<Response> => {
   const session = getAuthSession();
   let accessToken = await getStoredAccessToken();
@@ -172,7 +159,7 @@ const authorizedFetch = async (
     throw new Error('로그인이 필요합니다. 다시 로그인해 주세요.');
   }
 
-  const doFetch = async (token: string, attempt = 1) => {
+  const doFetch = async (token: string) => {
     const response = await fetch(input, {
       ...(init || {}),
       headers: {
@@ -180,7 +167,6 @@ const authorizedFetch = async (
         ...buildAuthHeaders(token),
       },
     });
-    if (diagnosticId) logWalkListDiagnostic('http', { requestId: diagnosticId, attempt, status: response.status });
     return response;
   };
 
@@ -192,7 +178,7 @@ const authorizedFetch = async (
   try {
     accessToken = await refreshSessionAccessToken(session, accessToken);
     assertAuthSession(session);
-    response = await doFetch(accessToken, 2);
+    response = await doFetch(accessToken);
   } catch {
     throw new Error('세션이 만료되었습니다. 다시 로그인해 주세요.');
   }
@@ -218,7 +204,7 @@ const throwHttpError = async (response: Response, fallback: string) => {
   const data = await parseJsonSafe(response);
   const text = await readErrorBody(response);
   const message = data?.error || data?.message || text || `${fallback} (HTTP ${response.status})`;
-  throw new Error(message);
+  throw Object.assign(new Error(message), { status: response.status });
 };
 
 const extractWalkId = (data: any, location: string | null): number | null => {
@@ -348,7 +334,7 @@ export const uploadPetLightSamples = async (
     !Number.isFinite(sample.lux) ||
     sample.lux < 0
   )) {
-    throw new Error('조도 기록의 UUID, 측정 시각 또는 lux 값이 올바르지 않습니다.');
+    throw Object.assign(new Error('조도 기록의 UUID, 측정 시각 또는 lux 값이 올바르지 않습니다.'), { status: 400 });
   }
 
   const response = await authorizedFetch(
@@ -386,7 +372,7 @@ export const getPetTodaySunlight = async (
   );
 
   if (!response.ok) {
-    console.warn('[walk-debug] sunlight:today-error', { petId, status: response.status });
+
     await throwHttpError(response, '오늘의 일광 노출 정보를 불러오지 못했습니다.');
   }
 
@@ -395,18 +381,6 @@ export const getPetTodaySunlight = async (
   if (date !== undefined && sunlight.date !== date) {
     throw new Error('요청한 날짜의 조도 결과를 확인하지 못했습니다.');
   }
-  console.log('[walk-debug] sunlight:today-response', {
-    petId,
-    date: sunlight.date,
-    targetLuxMinutes: sunlight.target_lux_minutes,
-    achievedLuxMinutes: sunlight.achieved_lux_minutes,
-    qualifyingMinutes: sunlight.qualifying_minutes,
-    qualifiedWindows: sunlight.qualified_windows,
-    sampleCount: sunlight.sample_count,
-    progressPercent: sunlight.progress_percent,
-    completed: sunlight.completed,
-    responseKeys: data && typeof data === 'object' ? Object.keys(data) : [],
-  });
   return sunlight;
 };
 
@@ -430,56 +404,16 @@ export const getPetWalks = async (
     offset: params?.offset,
   });
 
-  const requestId = Date.now().toString(36) + '-' + (++walkListRequestSequence);
   const url = API_BASE_URL + '/api/pets/' + petId + '/walks' + query;
-  const startedAt = Date.now();
-  logWalkListDiagnostic('request', {
-    requestId, method: 'GET', url, petId,
-    timezone: params?.timezone ?? null, startDate: params?.startDate ?? null,
-    endDate: params?.endDate ?? null, sortBy: params?.sortBy ?? null,
-    limit: params?.limit ?? null, offset: params?.offset ?? null,
-  });
-  let response: Response;
-  try {
-    response = await authorizedFetch(url, { method: 'GET' }, requestId);
-  } catch (error) {
-    logWalkListDiagnostic('request-failed', {
-      requestId, elapsedMs: Date.now() - startedAt,
-      errorName: error instanceof Error ? error.name : 'UnknownError',
-    });
-    throw error;
-  }
+  const response = await authorizedFetch(url, { method: 'GET' });
 
   if (!response.ok) {
-    if (__DEV__) {
-      let responseBody = '[unreadable]';
-      try { responseBody = sanitizeWalkErrorBody(await response.clone().text()); } catch { /* Logging must not consume or replace the error response. */ }
-      logWalkListDiagnostic('http-error', {
-        requestId, status: response.status, elapsedMs: Date.now() - startedAt,
-        contentType: response.headers?.get('content-type') ?? null,
-        serverRequestId: response.headers?.get('x-request-id') ?? response.headers?.get('x-correlation-id') ?? null,
-        responseBody,
-      });
-    }
     await throwHttpError(response, '산책 목록을 불러오지 못했습니다.');
   }
-  logWalkListDiagnostic('http-success', { requestId, status: response.status, elapsedMs: Date.now() - startedAt });
 
   const data = await parseJsonSafe(response);
   const result = (data || {}) as PetWalkListResponse;
   if (Array.isArray(result.items)) result.items = result.items.map(normalizeWalkRecord);
-  console.log('[walk-debug] walk-list:response', {
-    petId,
-    count: result.items?.length ?? 0,
-    walks: (result.items ?? []).map((walk) => ({
-      walkId: walk.walk_id ?? walk.walkId ?? walk.id,
-      petId: walk.pet_id ?? walk.petId,
-      startTime: walk.start_time ?? walk.startTime,
-      endTime: walk.end_time ?? walk.endTime,
-      sunlight: walk.sunlight ?? null,
-    })),
-    responseKeys: Object.keys(result),
-  });
   return result;
 };
 
@@ -503,21 +437,12 @@ export const getWalkDetail = async (walkId: number): Promise<WalkRecordDto> => {
   });
 
   if (!response.ok) {
-    console.warn('[walk-debug] walk-detail:error', { walkId, status: response.status });
+
     await throwHttpError(response, '산책 상세를 불러오지 못했습니다.');
   }
 
   const data = await parseJsonSafe(response);
   const walk = normalizeWalkRecord((data?.walk || data) as WalkRecordDto);
-  console.log('[walk-debug] walk-detail:response', {
-    requestedWalkId: walkId,
-    responseWalkId: walk.walk_id ?? walk.walkId ?? walk.id,
-    petId: walk.pet_id ?? walk.petId,
-    startTime: walk.start_time ?? walk.startTime,
-    endTime: walk.end_time ?? walk.endTime,
-    sunlight: walk.sunlight ?? null,
-    responseKeys: walk && typeof walk === 'object' ? Object.keys(walk) : [],
-  });
   return walk;
 };
 
