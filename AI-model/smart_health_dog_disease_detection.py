@@ -8,6 +8,16 @@ import logging
 import os
 import hashlib
 import numpy as np
+import plum._resolver
+
+
+# 모델(.pkl)이 저장된 환경과 plum-dispatch 버전이 달라 Resolver 복원이 실패하므로 보정
+def _resolver_setstate(self, state):
+    for key, value in state.items():
+        setattr(self, key, value)
+
+
+plum._resolver.Resolver.__setstate__ = _resolver_setstate
 
 
 def calculate_file_md5(file_path: str, chunk_size: int = 4096) -> str | None:
@@ -36,19 +46,19 @@ DOG_MODELS_NAMES = {
     "./dog_models/dog_cataract.pkl":                "Cataract",
     "./dog_models/dog_conjunctivitis.pkl":           "Conjunctivitis",
     "./dog_models/dog_entropion.pkl":               "Entropion",
-    "./dog_models/dog_eyelid_tumor.pkl":            "Eyelid_Tumor",
+    "./dog_models/dog_eyelid_tumor.pkl":            "Eyelid Tumor",
     "./dog_models/dog_epiphora.pkl":                "Epiphora",
-    "./dog_models/dog_non_ulcerative_keratitis.pkl": "Non_ulcerative_Keratitis",
-    "./dog_models/dog_nuclear_sclerosis.pkl":       "Nuclear_Sclerosis",
-    "./dog_models/dog_pigmentary_keratitis.pkl":    "Pigmentary_Keratitis",
-    "./dog_models/dog_ulcerative_keratitis.pkl":    "Ulcerative_Keratitis",
+    "./dog_models/dog_non_ulcerative_keratitis.pkl": "Non-ulcerative Keratitis",
+    "./dog_models/dog_nuclear_sclerosis.pkl":       "Nuclear Sclerosis",
+    "./dog_models/dog_pigmentary_keratitis.pkl":    "Pigmentary Keratitis",
+    "./dog_models/dog_ulcerative_keratitis.pkl":    "Ulcerative Keratitis",
 }
 
 # 고양이: 단일 모델 3종 (B4, FocalLoss)
 CAT_SINGLE_MODELS_NAMES = {
     "./cat_models/cat_conjunctivitis.pkl":  "Conjunctivitis",
     "./cat_models/cat_corneal_scapula.pkl": "Corneal_Scapula",
-    "./cat_models/cat_corneal_ulcer.pkl":   "Corneal_Ulcer",
+    "./cat_models/cat_corneal_ulcer.pkl":   "Corneal Ulcer",
 }
 
 # 고양이: KFold 앙상블 2종 (B4, FocalLoss, 5-Fold)
@@ -57,7 +67,7 @@ CAT_KFOLD_MODELS_NAMES = {
     "Blepharitis": [
         f"./cat_models/cat_blepharitis_fold{i}.pkl" for i in range(1, 6)
     ],
-    "Non_ulcerative_Keratitis": [
+    "Non-ulcerative Keratitis": [
         f"./cat_models/cat_non_ulcerative_keratitis_fold{i}.pkl" for i in range(1, 6)
     ],
 }
@@ -311,7 +321,7 @@ def _run_dog_inference(image_url: str, submission_id: str) -> dict:
 
     except Exception as e:
         logging.error(f"Dog prediction failed: {e}")
-        submit_status_update(submission_id, token, "FAILED", "INVALID_INPUT")
+        submit_status_update(submission_id, token, "FAILED", "INFERENCE_ERROR")
         return {"error": str(e)}
 
 
@@ -362,7 +372,7 @@ def _run_cat_inference(image_url: str, submission_id: str) -> dict:
 
     except Exception as e:
         logging.error(f"Cat prediction failed: {e}")
-        submit_status_update(submission_id, token, "FAILED", "INVALID_INPUT")
+        submit_status_update(submission_id, token, "FAILED", "INFERENCE_ERROR")
         return {"error": str(e)}
 
 
