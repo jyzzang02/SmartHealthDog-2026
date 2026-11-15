@@ -1,23 +1,30 @@
-import React, { useCallback, useRef, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
-import { useFocusEffect, useNavigation, useRoute } from '@react-navigation/native';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { View, Text, ActivityIndicator, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
+import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { updateCertificate } from '../api/diagnosis';
+import { getCertificateImageUrl, getCertificateOcrResult, updateCertificate } from '../api/diagnosis';
 import { clearPendingCertificate } from '../storage/certificateRecovery';
 import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
+import type { HealthSummary } from '../types/health';
 
 type NavProp = StackNavigationProp<RootStackParamList, 'HealthCheckResult'>;
 type RoutePropType = RouteProp<RootStackParamList, 'HealthCheckResult'>;
 
 const HealthCheckResultScreen = () => {
   const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
-  const { petId, petName, summary, certificateSubmissionId, certificateOwnerId, viewOnly } = route.params;
+  const { petId, petName, certificateSubmissionId, certificateOwnerId, certificateChanges, historySubmissionId, viewOnly } = route.params;
+  const [remoteSummary, setRemoteSummary] = useState<HealthSummary>();
+  const [historyFailed, setHistoryFailed] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const [imageFailed, setImageFailed] = useState(false);
+  const summary = historySubmissionId ? remoteSummary : route.params.summary;
   const [saving, setSaving] = useState(false);
   const saveRequest = useRef<AbortController | null>(null);
   const session = useRef(getAuthSession()).current;
@@ -25,17 +32,54 @@ const HealthCheckResultScreen = () => {
     saveRequest.current?.abort();
     saveRequest.current = null;
   }, []));
-  const fields = [
+  useEffect(() => {
+    if (!focused || !historySubmissionId) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let active = true;
+    setRemoteSummary(undefined);
+    setHistoryFailed(false);
+    setImageFailed(false);
+    const load = async () => {
+      try {
+        const result = await getCertificateOcrResult(petId, historySubmissionId, signal);
+        if (result.status !== 'COMPLETED' || signal.aborted) throw new Error();
+        const certificate = {
+          animalName: '', species: '', breed: '', sex: '', coatColor: '', age: '', features: '',
+          diseaseName: '', onsetDate: '', diagnosisDate: '', prognosis: '', remarks: '', ...result.fields,
+        };
+        if (!active || getAuthSession() !== session) return;
+        const saved = healthStore.getHistory(petId).find(item => item.certificateSubmissionId === historySubmissionId);
+        setRemoteSummary({ petId, checkupDate: certificate.diagnosisDate, hospitalName: saved?.hospitalName, certificate });
+        try {
+          const uri = await getCertificateImageUrl(historySubmissionId, signal);
+          if (active && !signal.aborted && getAuthSession() === session) {
+            setRemoteSummary(current => current && { ...current, certificateImageUri: uri });
+          }
+        } catch {
+          if (active && getAuthSession() === session) setImageFailed(true);
+        }
+      } catch {
+        if (active && getAuthSession() === session) setHistoryFailed(true);
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    load();
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [focused, historySubmissionId, petId, revision, session]);
+  const fields = summary ? [
     ['동물명', summary.certificate.animalName], ['종류', summary.certificate.species],
     ['품종', summary.certificate.breed], ['성별', summary.certificate.sex],
     ['모색', summary.certificate.coatColor], ['연령', summary.certificate.age],
     ['특징', summary.certificate.features], ['병명', summary.certificate.diseaseName],
     ['발병 연월일', summary.certificate.onsetDate], ['진단 연월일', summary.certificate.diagnosisDate],
     ['예후 소견', summary.certificate.prognosis], ['그 외의 사항(비고)', summary.certificate.remarks],
-  ];
+  ] : [];
 
   const handleSave = async () => {
-    if (viewOnly || saveRequest.current || getAuthSession() !== session) return;
+    if (!summary || viewOnly || saveRequest.current || getAuthSession() !== session) return;
     if (!certificateSubmissionId) {
       healthStore.set(petId, summary);
       navigation.pop(2);
@@ -47,12 +91,12 @@ const HealthCheckResultScreen = () => {
     setSaving(true);
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      await updateCertificate(certificateSubmissionId, summary.certificate, controller.signal);
+      await updateCertificate(certificateSubmissionId, certificateChanges ?? {}, controller.signal);
       if (certificateOwnerId !== undefined) {
         await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
       }
       if (controller.signal.aborted || getAuthSession() !== session) return;
-      healthStore.set(petId, summary);
+      healthStore.set(petId, { ...summary, certificateSubmissionId });
       navigation.pop(2);
     } catch (error) {
       if (saveRequest.current !== controller || getAuthSession() !== session) return;
@@ -84,24 +128,31 @@ const HealthCheckResultScreen = () => {
         contentContainerStyle={[styles.content, viewOnly && { paddingBottom: 24 + Math.max(insets.bottom, 24) }]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.card}>
+        {!summary ? (historyFailed ? (
+          <TouchableOpacity accessibilityRole="button" onPress={() => setRevision(value => value + 1)}>
+            <Text style={styles.infoValue}>검진 기록을 불러오지 못했어요. 다시 시도</Text>
+          </TouchableOpacity>
+        ) : <ActivityIndicator />) : <View style={styles.card}>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>반려동물</Text>
             <Text style={styles.infoValue}>{petName}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>검진일</Text>
-            <Text style={styles.infoValue}>{summary.checkupDate}</Text>
+            <Text style={styles.infoValue}>{summary.checkupDate || '미입력'}</Text>
           </View>
           <View style={styles.infoRow}>
             <Text style={styles.infoLabel}>병원명</Text>
             <Text style={styles.infoValue}>{summary.hospitalName || '미입력'}</Text>
           </View>
-        </View>
-        {viewOnly && (
+        </View>}
+        {viewOnly && summary && (
           <View style={[styles.card, { marginTop: 16 }]}>
-            {summary.certificateImageUri && (
-              <Image source={{ uri: summary.certificateImageUri }} resizeMode="contain" style={{ width: '100%', height: 200, marginBottom: 16 }} />
+            {imageFailed && <TouchableOpacity accessibilityRole="button" onPress={() => setRevision(value => value + 1)}>
+              <Text style={styles.infoLabel}>이미지 다시 불러오기</Text>
+            </TouchableOpacity>}
+            {!imageFailed && summary.certificateImageUri && (
+              <Image source={{ uri: summary.certificateImageUri }} resizeMode="contain" onError={historySubmissionId ? () => setImageFailed(true) : undefined} style={{ width: '100%', height: 200, marginBottom: 16 }} />
             )}
             {fields.map(([label, value]) => (
               <View key={label} style={styles.infoRow}>

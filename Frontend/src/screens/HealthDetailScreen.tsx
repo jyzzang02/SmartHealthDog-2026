@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getPetSubmissions, type SubmissionSummary } from '../api/diagnosis';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import type { HealthSummary } from '../types/health';
@@ -74,12 +75,16 @@ const mapGenderSuffix = (sex?: string) => {
 
 const HealthDetailScreen = () => {
   const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { petId, petName } = route.params;
 
   const [pet, setPet] = useState<PetListItem | null>(null);
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
+  const [serverHistory, setServerHistory] = useState<SubmissionSummary[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<'loading' | 'error' | 'done'>('loading');
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [history, setHistory] = useState<HealthSummary[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('검진 기록');
   const [scoreRecords, setScoreRecords] = useState<SelfCheckRecord[]>([]);
@@ -102,6 +107,31 @@ const HealthDetailScreen = () => {
       };
     }, [petId])
   );
+
+  useEffect(() => {
+    if (!focused || activeTab !== '검진 기록') return;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 30_000);
+    let active = true;
+    setServerHistory([]);
+    setHistoryStatus('loading');
+    getPetSubmissions(petId, controller.signal, true, 'HEALTH_CERTIFICATE').then(records => {
+      if (controller.signal.aborted) throw new Error();
+      setServerHistory(records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED'));
+      setHistoryStatus('done');
+    }).catch(() => {
+      if (active) setHistoryStatus('error');
+    }).finally(() => clearTimeout(timeout));
+    return () => { active = false; clearTimeout(timeout); controller.abort(); };
+  }, [focused, petId, activeTab, historyRevision]);
+  const serverIds = new Set(serverHistory.map(item => item.id));
+  const savedBySubmission = new Map<string, HealthSummary>();
+  for (const record of history) {
+    if (record.certificateSubmissionId && !savedBySubmission.has(record.certificateSubmissionId)) {
+      savedBySubmission.set(record.certificateSubmissionId, record);
+    }
+  }
+  const localHistory = history.filter(record => !serverIds.has(record.certificateSubmissionId));
 
   // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
   const scoresRequest = useRef<AbortController | null>(null);
@@ -231,8 +261,19 @@ const HealthDetailScreen = () => {
         {/* 탭별 콘텐츠 */}
         <View style={styles.recordListContainer}>
           {activeTab === '검진 기록' && (
-            history.length > 0 ? (
-              history.map((record, index) => (
+            <>
+              {serverHistory.map(record => (
+                <TouchableOpacity key={record.id} style={styles.examCard} accessibilityRole="button"
+                  disabled={record.status !== 'COMPLETED'}
+                  onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, historySubmissionId: record.id, viewOnly: true })}>
+                  <View style={styles.examCardTopRow}>
+                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? (record.id && savedBySubmission.get(record.id)?.hospitalName) || '진단서' :
+                      record.status === 'FAILED' ? '분석 실패' : '분석 중'}</Text>
+                    <Text style={styles.examDate}>{record.submittedAt ? formatScoreDate(record.submittedAt) : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              {localHistory.map((record, index) => (
                 <TouchableOpacity key={`${record.checkupDate}-${index}`} style={styles.examCard} accessibilityRole="button"
                   onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, summary: record, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
@@ -242,10 +283,14 @@ const HealthDetailScreen = () => {
                     <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
                 </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
-            )
+              ))}
+              {historyStatus === 'loading' && <Text style={styles.emptyRecordText}>불러오는 중...</Text>}
+              {historyStatus === 'error' && <TouchableOpacity accessibilityRole="button" onPress={() => setHistoryRevision(value => value + 1)}>
+                <Text style={styles.emptyRecordText}>검진 기록을 불러오지 못했어요. 다시 시도</Text>
+              </TouchableOpacity>}
+              {historyStatus === 'done' && !localHistory.length && !serverHistory.length &&
+                <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>}
+            </>
           )}
 
           {activeTab === '변화 추이' && (

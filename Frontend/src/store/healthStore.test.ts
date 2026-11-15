@@ -1,4 +1,9 @@
 import { clearAuthTokens } from '../storage/tokenStorage';
+
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: require('@react-native-async-storage/async-storage/jest/async-storage-mock'),
+}));
 import { healthStore } from './healthStore';
 import type { HealthSummary } from '../types/health';
 

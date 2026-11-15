@@ -16,6 +16,7 @@ export interface DiagnosisCertificate {
 
 export interface HealthSummary {
   petId: number;
+  certificateSubmissionId?: string;
   checkupDate: string;            // YYYY-MM-DD
   hospitalName?: string;
   certificate: DiagnosisCertificate;

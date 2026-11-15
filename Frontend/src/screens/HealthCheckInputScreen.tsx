@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getCertificateOcrResult, requestCertificateOcr } from '../api/diagnosis';
+import { getCertificateOcrResult, logCertificateOcr, requestCertificateOcr } from '../api/diagnosis';
 import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
 import { getMyProfile } from '../api/users';
 import { clearPendingCertificate, readPendingCertificate, storePendingCertificate } from '../storage/certificateRecovery';
@@ -127,7 +127,7 @@ const HealthCheckInputScreen = () => {
   const [hospitalName, setHospitalName] = useState('');
   const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
   const [certificateOverrides, setCertificateOverrides] = useState<Partial<DiagnosisCertificate>>({});
-  const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate>>({});
+  const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate> | null>(null);
   const [ocrMessage, setOcrMessage] = useState<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [canCheckOcr, setCanCheckOcr] = useState(false);
@@ -156,7 +156,7 @@ const HealthCheckInputScreen = () => {
       clearPendingCertificate(submission.ownerId, submission.petId, submission.id, submission.session).catch(() => undefined);
     }
   }, []);
-  const checkupDate = certificateOverrides.diagnosisDate ?? ocrFields.diagnosisDate ?? defaultCheckupDate;
+  const checkupDate = certificateOverrides.diagnosisDate ?? (ocrFields ? ocrFields.diagnosisDate ?? '' : defaultCheckupDate);
   const selectedPet = pets.find(pet => pet.id === selectedPetId);
   const species = selectedPet?.species?.trim() ?? '';
   const sex = selectedPet?.gender?.trim() || selectedPet?.sex?.trim() || '';
@@ -276,7 +276,7 @@ const HealthCheckInputScreen = () => {
     if (discard && ocrSubmission.current) removeRecovery(ocrSubmission.current);
     ocrSubmission.current = null;
     setCertificateImageUri(null);
-    setOcrFields({});
+    setOcrFields(null);
     setOcrMessage(null);
     setOcrBusy(false);
     setCanCheckOcr(false);
@@ -303,6 +303,7 @@ const HealthCheckInputScreen = () => {
     ocrDeadlineTimer.current = setTimeout(() => {
       if (!isCurrent()) return;
       const registered = ocrSubmission.current !== null;
+      logCertificateOcr('analysis:timeout', registered ? 'after-acceptance' : 'before-acceptance');
       finish(registered
         ? '아직 분석 결과가 준비되지 않았어요. 잠시 후 다시 확인하거나 직접 입력해 주세요.'
         : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.', registered);
@@ -310,14 +311,16 @@ const HealthCheckInputScreen = () => {
 
     try {
       if (image) {
+        logCertificateOcr('owner:checking');
         const ownerId = await resolveOwner(session);
         if (!isCurrent()) return;
+        logCertificateOcr('owner:resolved', ownerId !== undefined);
         if (ownerId === undefined) throw new TypeError();
         const id = await requestCertificateOcr(selectedPetId, image, controller.signal);
         if (!isCurrent()) return;
         ocrSubmission.current = { id, petId: selectedPetId, session, ownerId };
         const persist = () => storePendingCertificate(ownerId, selectedPetId, id, session);
-        await persist().catch(() => persist()).catch(() => undefined);
+        await persist().catch(() => persist()).catch(() => { logCertificateOcr('recovery:storage-failed'); });
         if (!isCurrent()) return;
         setOcrMessage('진단서를 분석 중이에요.');
       }
@@ -328,6 +331,7 @@ const HealthCheckInputScreen = () => {
         try {
           const result = await getCertificateOcrResult(submission.petId, submission.id, controller.signal);
           if (!isCurrent()) return;
+          logCertificateOcr('analysis:status', result.status);
           if (result.status === 'COMPLETED') {
             submission.completed = true;
             setOcrFields(result.fields);
@@ -343,6 +347,7 @@ const HealthCheckInputScreen = () => {
           }
         } catch {
           if (!isCurrent()) return;
+          logCertificateOcr('analysis:lookup-failed');
           finish('분석 결과를 확인하지 못했어요. 잠시 후 다시 확인해 주세요.', true);
         }
       };
@@ -354,6 +359,7 @@ const HealthCheckInputScreen = () => {
       }
     } catch (error) {
       if (!isCurrent()) return;
+      logCertificateOcr('upload:failed', error instanceof TypeError ? 'network-or-owner' : 'request-rejected');
       const message = error instanceof Error && !(error instanceof TypeError)
         ? error.message
         : '진단서 접수를 확인하지 못했어요. 직접 입력할 수 있어요.';
@@ -394,6 +400,7 @@ const HealthCheckInputScreen = () => {
     if (response.didCancel) return;
     const asset = response.assets?.[0];
     if (response.errorCode || !asset?.uri) {
+      logCertificateOcr('picker:no-image');
       Alert.alert('오류', '이미지를 불러올 수 없습니다.');
       return;
     }
@@ -421,8 +428,10 @@ const HealthCheckInputScreen = () => {
   const openCertificatePicker = async (source: 'camera' | 'album') => {
     if (pickerOpen.current || ocrRequest.current) return;
     pickerOpen.current = true;
+    logCertificateOcr('picker:open', source);
     try {
       if (source === 'camera' && !(await requestCameraPermission())) {
+        logCertificateOcr('picker:camera-permission-denied');
         Alert.alert('권한 필요', '진단서를 촬영하려면 카메라 권한을 허용해 주세요.');
         return;
       }
@@ -439,6 +448,7 @@ const HealthCheckInputScreen = () => {
 
   const handleSubmit = () => {
     if (ocrRequest.current || pickerOpen.current) return;
+    if (ocrSubmission.current && !ocrSubmission.current.completed) return;
     const trimmedCertificate = { ...certificate };
     CERTIFICATE_FIELDS.forEach(({ key }) => {
       trimmedCertificate[key] = certificate[key].trim();
@@ -455,10 +465,25 @@ const HealthCheckInputScreen = () => {
     const submission = ocrSubmission.current;
     if (submission && (submission.session !== getAuthSession() || submission.petId !== selectedPetId)) return;
 
+    const certificateChanges: Partial<DiagnosisCertificate> = {};
+    if (submission?.completed) {
+      for (const { key } of CERTIFICATE_FIELDS) {
+        if (certificateOverrides[key] === undefined) continue;
+        const value = trimmedCertificate[key];
+        if (value === (ocrFields?.[key] ?? '')) continue;
+        if (!value && (key === 'diseaseName' || key === 'diagnosisDate')) {
+          setOcrMessage('병명과 진단 연월일은 빈 값으로 수정할 수 없어요.');
+          return;
+        }
+        certificateChanges[key] = value;
+      }
+    }
+
     navigation.navigate('HealthCheckResult', {
       petId: selectedPetId,
       petName: selectedPetName,
       summary,
+      certificateChanges,
       certificateSubmissionId: submission?.completed ? submission.id : undefined,
       certificateOwnerId: submission?.completed ? submission.ownerId : undefined,
     });
@@ -650,7 +675,7 @@ const HealthCheckInputScreen = () => {
         >
           <Text style={styles.cancelBtnText}>취소</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.submitBtn, ocrBusy && styles.ocrDisabled]} disabled={ocrBusy} onPress={handleSubmit}>
+        <TouchableOpacity style={[styles.submitBtn, (ocrBusy || canCheckOcr) && styles.ocrDisabled]} disabled={ocrBusy || canCheckOcr} onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>다음</Text>
         </TouchableOpacity>
       </View>

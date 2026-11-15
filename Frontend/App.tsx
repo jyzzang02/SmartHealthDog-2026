@@ -164,7 +164,9 @@ export type RootStackParamList = {
   HealthCheckResult: {
     petId: number;
     petName: string;
-    summary: HealthSummary;
+    summary?: HealthSummary;
+    historySubmissionId?: string;
+    certificateChanges?: Partial<HealthSummary['certificate']>;
     certificateSubmissionId?: string;
     certificateOwnerId?: number;
     viewOnly?: boolean;
