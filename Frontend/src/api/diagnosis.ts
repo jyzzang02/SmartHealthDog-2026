@@ -341,7 +341,8 @@ export const mapCertificateOcrFields = (result: Record<string, unknown>): Partia
     age: result.age_text,
     features: result.features,
     diseaseName: result.disease_name,
-    onsetDate: result.onset_date,
+    onsetDate: normalizeCertificateDiagnosisDate(result.onset_date) ??
+      normalizeCertificateDiagnosisDate(result.onset_date_text),
     diagnosisDate: normalizeCertificateDiagnosisDate(result.diagnosed_date) ??
       normalizeCertificateDiagnosisDate(result.diagnosed_date_text),
     prognosis: result.prognosis,
@@ -356,10 +357,11 @@ export const mapCertificateOcrFields = (result: Record<string, unknown>): Partia
 
 export const updateCertificate = async (
   submissionId: string,
-  certificate: DiagnosisCertificate,
+  certificate: Partial<DiagnosisCertificate>,
   signal?: AbortSignal,
 ): Promise<void> => {
   if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  if (Object.keys(certificate).length === 0) return;
   const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate', {
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
@@ -382,21 +384,28 @@ export const updateCertificate = async (
   if (!response.ok) throw new Error(await parseErrorResponse(response));
 };
 
+export const logCertificateOcr = (stage: string, detail?: string | number | boolean) => {
+  if (__DEV__) console.info('[certificate-ocr]', stage, detail ?? '');
+};
+
 export const requestCertificateOcr = async (
   petId: number,
   image: EyeDiagnosisImage,
   signal: AbortSignal,
 ): Promise<string> => {
   if (!Number.isSafeInteger(petId) || petId <= 0) {
+    logCertificateOcr('validation:invalid-pet');
     throw new Error('반려동물을 먼저 선택해 주세요.');
   }
   if (image.fileSize !== undefined && (image.fileSize <= 0 || image.fileSize > CERTIFICATE_MAX_IMAGE_BYTES)) {
+    logCertificateOcr('validation:file-size', image.fileSize);
     throw new Error('비어 있거나 7MB를 초과하는 사진은 등록할 수 없어요.');
   }
 
   const name = image.fileName || image.uri.split(/[?#]/)[0];
   const type = image.type?.toLowerCase() || (/\.png$/i.test(name) ? 'image/png' : /\.jpe?g$/i.test(name) ? 'image/jpeg' : '');
   if (type !== 'image/png' && type !== 'image/jpeg') {
+    logCertificateOcr('validation:unsupported-image-type');
     throw new Error('JPG 또는 PNG 사진을 선택해 주세요.');
   }
 
@@ -406,11 +415,13 @@ export const requestCertificateOcr = async (
     type,
     name: type === 'image/png' ? 'certificate.png' : 'certificate.jpg',
   } as unknown as Blob);
+  logCertificateOcr('upload:request', type);
   const response = await authorizedFetch(`${API_BASE_URL}/api/pets/${petId}/submissions/certificate`, {
     method: 'POST',
     body: formData,
     signal,
   });
+  logCertificateOcr('upload:http', response.status);
   if (!response.ok) {
     const error = await parseJsonSafe(response);
     if (response.status === 429 || error?.code?.includes?.('REQUEST_TOO_FREQUENT')) {
@@ -422,13 +433,15 @@ export const requestCertificateOcr = async (
 
   const data = await parseJsonSafe(response);
   if (typeof data?.submission_id !== 'string' || !SUBMISSION_UUID.test(data.submission_id)) {
+    logCertificateOcr('upload:invalid-submission-id');
     throw new Error('진단서 접수를 확인하지 못했어요. 사진은 다시 올리지 않고 직접 입력할 수 있어요.');
   }
+  logCertificateOcr('upload:accepted', response.status);
   return data.submission_id;
 };
 
 type CertificateOcrResult =
-  | { status: 'PENDING' | 'PROCESSING' | 'FAILED' }
+  | { status: 'PENDING' | 'PROCESSING' | 'FAILED' | 'RESULT_UNAVAILABLE' }
   | { status: 'COMPLETED'; fields: Partial<DiagnosisCertificate> };
 
 export const getCertificateOcrResult = async (
@@ -437,6 +450,7 @@ export const getCertificateOcrResult = async (
   signal: AbortSignal,
 ): Promise<CertificateOcrResult> => {
   const detail = await authorizedFetch(`${API_BASE_URL}/api/submissions/${submissionId}/certificate`, { signal });
+  logCertificateOcr('detail:http', detail.status);
   if (detail.ok) {
     const data = await parseJsonSafe(detail);
     const result = data?.results?.[0];
@@ -446,25 +460,30 @@ export const getCertificateOcrResult = async (
     if (data?.status === 'PENDING' || data?.status === 'PROCESSING' || data?.status === 'FAILED') {
       return { status: data.status };
     }
+    logCertificateOcr('detail:unexpected-response');
     throw new Error('진단서 결과를 읽을 수 없어요.');
   }
   if (detail.status === 404) {
     // The detail endpoint needs an OCR result row. Check the same submission's status before treating a 404 as terminal.
-    const list = await authorizedFetch(
-      `${API_BASE_URL}/api/submissions/pets/${petId}?type=HEALTH_CERTIFICATE`,
-      { signal },
-    );
-    if (list.ok) {
-      const page = await parseJsonSafe(list);
-      const item = Array.isArray(page?.submissions)
-        ? page.submissions.find((entry: SubmissionSummary) => entry?.submissionId === submissionId)
-        : undefined;
-      const status = item?.status;
-      if (status === 'PENDING' || status === 'PROCESSING' || status === 'FAILED') return { status };
-      // The worker may have finished between the two requests.
-      if (status === 'COMPLETED') return { status: 'PROCESSING' };
-      throw new Error('접수한 진단서를 찾을 수 없어요.');
+    const submissions = await getPetSubmissions(petId, signal, true, 'HEALTH_CERTIFICATE', submissionId);
+    const entry = submissions.find(item => item.id === submissionId);
+    const status = entry?.status;
+    logCertificateOcr('status-list:match', !!entry);
+    if (status === 'PENDING' || status === 'PROCESSING' || status === 'FAILED' || status === 'COMPLETED') {
+      logCertificateOcr('status-list:status', status);
     }
+    if (status === 'FAILED') {
+      const reason = entry?.failureReason ?? entry?.failure_reason;
+      const known = [
+        'TIMEOUT', 'SERVICE_ERROR', 'INFERENCE_ERROR', 'IMAGE_UNREADABLE',
+        'NO_TEXT_DETECTED', 'NOT_A_CERTIFICATE', 'LOW_CONFIDENCE', 'REQUIRED_FIELD_MISSING',
+      ];
+      logCertificateOcr('analysis:failure-reason', reason && known.includes(reason) ? reason : 'unknown');
+    }
+    if (status === 'PENDING' || status === 'PROCESSING' || status === 'FAILED') return { status };
+    // Completion may have happened between the requests. Retry without reporting it as processing.
+    if (status === 'COMPLETED') return { status: 'RESULT_UNAVAILABLE' };
+    throw new Error('접수한 진단서를 찾을 수 없어요.');
   }
   throw new Error('진단서 분석 결과를 확인하지 못했어요.');
 };
@@ -473,20 +492,27 @@ export const getPetSubmissions = async (
   petId: number,
   signal?: AbortSignal,
   allPages = false,
+  type?: 'HEALTH_CERTIFICATE',
+  stopAtSubmissionId?: string,
 ): Promise<SubmissionSummary[]> => {
   const items = new Map<string, SubmissionSummary>();
   for (let page = 0; ; page += 1) {
     if (signal?.aborted) throw new Error('Request aborted');
     const base = `${API_BASE_URL}/api/submissions/pets/${petId}`;
-    const response = await authorizedFetch(page === 0 ? base : base + '?page=' + page, { method: 'GET', signal });
+    const query = [type && 'type=' + type, page > 0 && 'page=' + page].filter(Boolean).join('&');
+    const response = await authorizedFetch(query ? base + '?' + query : base, { method: 'GET', signal });
+    if (type === 'HEALTH_CERTIFICATE') logCertificateOcr('status-list:http', response.status);
     if (!response.ok) throw new Error(await parseErrorResponse(response));
     const data = await parseJsonSafe(response);
+    if (type === 'HEALTH_CERTIFICATE' && !Array.isArray(data?.submissions)) {
+      throw new Error('진단 이력을 불러오지 못했습니다.');
+    }
     const raw = extractSubmissionList(data);
     for (const entry of raw) {
       const item = normalizeSubmissionItem(entry);
       if (item?.id && !items.has(item.id)) items.set(item.id, item);
     }
-    if (!allPages || data?.hasNext !== true) return [...items.values()];
+    if ((stopAtSubmissionId && items.has(stopAtSubmissionId)) || !allPages || data?.hasNext !== true) return [...items.values()];
     if (data.pageNumber !== page + 1 || raw.length === 0) throw new Error('진단 이력을 불러오지 못했습니다.');
   }
 };
@@ -525,4 +551,15 @@ export const getUrineSubmissionResult = async (
 
   const data = await parseJsonSafe(response);
   return data as UrineDiagnosisResult;
+};
+
+export const getCertificateImageUrl = async (submissionId: string, signal: AbortSignal): Promise<string> => {
+  if (!SUBMISSION_UUID.test(submissionId)) throw new Error('이미지를 불러올 수 없습니다.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/image', { signal });
+  if (!response.ok) throw new Error('이미지를 불러올 수 없습니다.');
+  const data = await parseJsonSafe(response);
+  if (typeof data?.image_url !== 'string' || !/^https:\/\//i.test(data.image_url)) {
+    throw new Error('이미지를 불러올 수 없습니다.');
+  }
+  return data.image_url;
 };

@@ -1,4 +1,4 @@
-import { getCertificateOcrResult, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { getCertificateImageUrl, getCertificateOcrResult, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -59,6 +59,31 @@ it('reads the same submission from the filtered list if the OCR result row does 
   expect(fetchMock.mock.calls[1][0]).toMatch(/\/api\/submissions\/pets\/12\?type=HEALTH_CERTIFICATE$/);
 });
 
+it('distinguishes a completed list entry with a missing result and reads the same result next time', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(404, { code: ['HEALTH_CERTIFICATE_NOT_FOUND'] }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ id, status: 'COMPLETED' }] }))
+    .mockResolvedValueOnce(response(200, { status: 'COMPLETED', results: [{ animal_name: 'Hana' }] }));
+  const { signal } = new AbortController();
+
+  await expect(getCertificateOcrResult(12, id, signal)).resolves.toEqual({ status: 'RESULT_UNAVAILABLE' });
+  await expect(getCertificateOcrResult(12, id, signal)).resolves.toEqual({
+    status: 'COMPLETED',
+    fields: { animalName: 'Hana' },
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[2][0]);
+  expect(fetchMock.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
+});
+
+it('preserves a failed list status even when the detail is missing', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(404, { code: ['HEALTH_CERTIFICATE_NOT_FOUND'] }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ id, status: 'FAILED', failureReason: 'LOW_CONFIDENCE' }] }));
+
+  await expect(getCertificateOcrResult(12, id, new AbortController().signal)).resolves.toEqual({ status: 'FAILED' });
+});
+
 it('maps OCR fields without overwriting inputs with blanks or unparsed dates', async () => {
   fetchMock.mockResolvedValueOnce(response(200, {
     status: 'COMPLETED',
@@ -104,6 +129,15 @@ it('does not fall back when the server returns an empty history', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it('distinguishes an invalid certificate history payload from a valid empty page', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(200, { pageNumber: 1, hasNext: false }))
+    .mockResolvedValueOnce(response(200, { submissions: [], pageNumber: 1, hasNext: false }));
+  await expect(getPetSubmissions(12, undefined, true, 'HEALTH_CERTIFICATE')).rejects.toThrow();
+  await expect(getPetSubmissions(12, undefined, true, 'HEALTH_CERTIFICATE')).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('uses the OCR diagnosis date text only as a valid date fallback', () => {
   expect(mapCertificateOcrFields({ diagnosed_date: null, diagnosed_date_text: '2026년 2월 3일' }))
     .toEqual({ diagnosisDate: '2026-02-03' });
@@ -138,4 +172,28 @@ it('rejects a failed certificate update without resubmitting', async () => {
   };
   await expect(updateCertificate(id, certificate)).rejects.toThrow('404');
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('sends only changed fields, leaving OCR gaps and default dates untouched', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateCertificate(id, { prognosis: 'Observe' });
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ prognosis: 'Observe' });
+  await updateCertificate(id, {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('finds the exact OCR submission beyond the first page and stops there', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, {}))
+    .mockResolvedValueOnce(response(200, { submissions: [{ submissionId: 'other' }], pageNumber: 1, hasNext: true }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ submissionId: id, status: 'PROCESSING' }], pageNumber: 2, hasNext: true }));
+  await expect(getCertificateOcrResult(12, id, new AbortController().signal)).resolves.toEqual({ status: 'PROCESSING' });
+  expect(fetchMock.mock.calls[2][0]).toContain('?type=HEALTH_CERTIFICATE&page=1');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('reads the signed original image URL through the authenticated submission endpoint', async () => {
+  const imageUrl = 'https://images.example.test/certificate?signature=test';
+  fetchMock.mockResolvedValueOnce(response(200, { image_url: imageUrl, expires_in: 300 }));
+  await expect(getCertificateImageUrl(id, new AbortController().signal)).resolves.toBe(imageUrl);
+  expect(fetchMock.mock.calls[0][0]).toContain('/api/submissions/' + id + '/image');
 });
