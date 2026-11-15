@@ -47,8 +47,13 @@ export default function RespirationResultScreen({ route, navigation }: Props) {
     const { signal } = controller;
     setResult({ state: 'loading' });
     const deadline = Date.now() + MAX_POLL_WINDOW_MS;
+    const deadlineTimer = videoId ? setTimeout(() => {
+      controller.abort();
+      setResult(current => current.state === 'loading' ? { state: 'error' } : current);
+    }, MAX_POLL_WINDOW_MS) : undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const load = async () => {
+      let willPoll = false;
       try {
         if (!videoId) {
           const records = (await listRespirationRecords(petId, signal)).filter(item => item?.petId === petId && item.videoId);
@@ -64,15 +69,19 @@ export default function RespirationResultScreen({ route, navigation }: Props) {
         }
         setResult({ state: 'record', record });
         if ((record.status === 'PENDING' || record.status === 'PROCESSING') && Date.now() + POLL_INTERVAL_MS < deadline) {
+          willPoll = true;
           timer = setTimeout(() => { if (!signal.aborted && Date.now() < deadline) load(); }, POLL_INTERVAL_MS);
         }
       } catch {
         if (!signal.aborted) setResult({ state: 'error' });
+      } finally {
+        if (!willPoll && deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       }
     };
     load();
     return () => {
       if (timer !== undefined) clearTimeout(timer);
+      if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
       controller.abort();
     };
   }, [focused, petId, videoId, revision]);

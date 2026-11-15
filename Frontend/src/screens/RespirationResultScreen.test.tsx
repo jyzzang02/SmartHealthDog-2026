@@ -69,6 +69,20 @@ it('stops automatically checking a long-running analysis and allows manual refre
   expect(texts()).toContain('회/분');
 });
 
+it('cancels an in-flight poll at the deadline without losing the last known status', async () => {
+  getRecord.mockResolvedValueOnce({ ...record, status: 'PROCESSING', respiratoryRate: null });
+  getRecord.mockImplementationOnce(() => new Promise(() => {}));
+  await mount(record.videoId);
+  await tick();
+
+  const signal = getRecord.mock.calls[1][2];
+  expect(signal?.aborted).toBe(false);
+  await act(async () => { await jest.advanceTimersByTimeAsync(115_000); });
+  expect(signal?.aborted).toBe(true);
+  expect(getRecord).toHaveBeenCalledTimes(2);
+  expect(texts()).toContain('수면 영상을 분석하고 있어요.');
+});
+
 it('aborts the request scope and cancels the next poll on unmount', async () => {
   getRecord.mockResolvedValue({ ...record, status: 'PENDING', respiratoryRate: null });
   await mount(record.videoId);
