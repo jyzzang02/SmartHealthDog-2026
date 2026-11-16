@@ -1,8 +1,6 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../App';
+import { useFocusEffect } from '@react-navigation/native';
 import { getLatestServerCheckupDate } from '../api/petProfileHealth';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
@@ -14,7 +12,6 @@ import { getMyProfile, UserProfile } from '../api/users';
 import { getMyPets, PetListItem } from '../api/pets';
 
 export default function HomeScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
   const [serverDates, setServerDates] = useState<Record<number, string | null>>({});
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -73,8 +70,7 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>반려동물 보건정보</Text>
 
-        <PetHealthCard pets={pets} loading={petsLoading} healthData={healthData} serverDates={serverDates}
-          onPressPet={(pet) => navigation.navigate('HealthCheckInput', { petId: pet.id, petName: pet.name })} />
+        <PetHealthCard pets={pets} loading={petsLoading} healthData={healthData} serverDates={serverDates} />
       </View>
 
       <View style={styles.bannerSpacer} />
