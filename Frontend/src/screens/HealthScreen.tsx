@@ -184,7 +184,7 @@ const HealthScreen: React.FC = () => {
             <View style={styles.healthInfoTextBox}>
               {hasHealthData ? (
                 <Text style={styles.healthInfoDesc}>
-                  반려동물의 건강 정보를 확인해보세요.{'\n'}최근 검진 결과를 살펴보세요.
+                  최근 검진 결과를 확인해 보세요.
                 </Text>
               ) : (
                 <Text style={styles.healthInfoDesc}>

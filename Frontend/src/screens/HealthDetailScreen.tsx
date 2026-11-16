@@ -327,6 +327,9 @@ const HealthDetailScreen = () => {
 
           {activeTab === '모니터링' && (
             <>
+              <View style={styles.scopeNotice}>
+                <Text style={styles.scopeNoticeTitle}>현재 준비중인 기능입니다</Text>
+              </View>
               <View style={styles.monitoringMemoCard}>
                 <View style={styles.monitoringMemoRow}>
                   <View style={styles.monitoringMemoIconWrap}>
@@ -360,8 +363,8 @@ const HealthDetailScreen = () => {
 
           {activeTab === '혈통 위험도' && (
             <>
-              <View style={styles.pedigreeScopeNotice}>
-                <Text style={styles.pedigreeScopeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
+              <View style={styles.scopeNotice}>
+                <Text style={styles.scopeNoticeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
               </View>
 
               {/* 목록 안내 (단순 텍스트 카드) */}
@@ -457,20 +460,20 @@ const styles = StyleSheet.create({
   addExamBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 
   recentStatusBox: {
-    backgroundColor: '#F8F9FA',
-    borderLeftWidth: 3,
-    borderLeftColor: '#0081D5',
-    borderRadius: 10,
-    padding: 16,
-    gap: 8,
+    backgroundColor: '#F7F8FA',
+    borderWidth: 1,
+    borderColor: '#E8EBEF',
+    borderRadius: 12,
+    padding: 14,
+    gap: 6,
   },
   recentStatusHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  recentStatusLabel: { fontSize: 14, color: '#7B7C7D' },
-  recentStatusDate: { fontSize: 13, color: '#7B7C7D' },
+  recentStatusLabel: { fontSize: 13, fontWeight: '600', color: '#4B5563', flexShrink: 1 },
+  recentStatusDate: { fontSize: 12, color: '#5B6470', fontVariant: ['tabular-nums'], marginStart: 8 },
   recentStatusValue: { fontSize: 18, fontWeight: '700' },
 
   tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#EAECEE', marginTop: 24 },
@@ -577,9 +580,8 @@ const styles = StyleSheet.create({
   monitoringWarningTitle: { fontSize: 14, color: '#8B6914' },
   monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
 
-  // 혈통 위험도 탭
-  pedigreeScopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
-  pedigreeScopeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  scopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
+  scopeNoticeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
 
   pedigreeInfoCard: {
     backgroundColor: '#EAF4FB',
