@@ -1,4 +1,3 @@
-import { getLatestServerCheckupDate } from '../api/petProfileHealth';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -6,7 +5,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getCertificateFields, getPetSubmissions, getCertificateOcrResult, type SubmissionSummary } from '../api/diagnosis';
+import { getCertificateFields, getPetSubmissions, type SubmissionSummary } from '../api/diagnosis';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import type { HealthSummary } from '../types/health';
@@ -25,6 +24,7 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthDetail'>;
 const TAB_LABELS = ['검진 기록', '변화 추이', '모니터링', '혈통 위험도'];
 
 type ActiveTab = '검진 기록' | '변화 추이' | '모니터링' | '혈통 위험도';
+type HospitalLookup = { status: 'done'; name?: string } | { status: 'error' };
 
 const MONITORING_MEMO = '일상 생활에서 건강 상태를 지속적으로 관찰하고 있습니다.';
 
@@ -82,9 +82,7 @@ const HealthDetailScreen = () => {
   const { petId, petName } = route.params;
 
   const [pet, setPet] = useState<PetListItem | null>(null);
-  const [serverCheckup, setServerCheckup] = useState<{ petId: number; date?: string; failed?: boolean }>();
-  const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
-  const [serverHospitals, setServerHospitals] = useState<Record<string, { name?: string; date?: string; failed?: boolean }>>({});
+  const [serverHospitals, setServerHospitals] = useState<Partial<Record<string, HospitalLookup>>>({});
   const [serverHistory, setServerHistory] = useState<SubmissionSummary[]>([]);
   const [historyStatus, setHistoryStatus] = useState<'loading' | 'error' | 'done'>('loading');
   const [historyRevision, setHistoryRevision] = useState(0);
@@ -96,7 +94,6 @@ const HealthDetailScreen = () => {
     useCallback(() => {
       const records = healthStore.getHistory(petId);
       setHistory(records);
-      setSummary(records[0]);
       let mounted = true;
       getMyPets()
         .then((pets) => {
@@ -111,64 +108,75 @@ const HealthDetailScreen = () => {
     }, [petId])
   );
 
-  useFocusEffect(useCallback(() => {
-    const controller = new AbortController();
-    setServerCheckup(undefined);
-    const timeout = setTimeout(() => { controller.abort(); setServerCheckup({ petId, failed: true }); }, 20000);
-    getLatestServerCheckupDate(petId, controller.signal).then(date => {
-      if (!controller.signal.aborted) setServerCheckup({ petId, date });
-    }).catch(() => { if (!controller.signal.aborted) setServerCheckup({ petId, failed: true }); })
-      .finally(() => clearTimeout(timeout));
-    return () => { clearTimeout(timeout); controller.abort(); };
-  }, [petId]));
-
   useEffect(() => {
-    if (!focused || activeTab !== '검진 기록') return;
+    if (!focused) return;
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 30_000);
-    let active = true;
+    const { signal } = controller;
+    let completedIds: string[] | undefined;
     setServerHistory([]);
     setServerHospitals({});
     setHistoryStatus('loading');
-    getPetSubmissions(petId, controller.signal, true, 'HEALTH_CERTIFICATE').then(records => {
-      if (controller.signal.aborted) throw new Error();
-      const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED');
-      setServerHistory(visible);
-      setHistoryStatus('done');
-      let index = 0;
-      const completed = visible.filter(record => record.id && record.status === 'COMPLETED');
-      const worker = async () => {
-        while (index < completed.length && !controller.signal.aborted) {
-          const record = completed[index++];
-          const id = record.id!;
-          try {
-            const [fields, result] = await Promise.all([
-              getCertificateFields(id, controller.signal), getCertificateOcrResult(petId, id, controller.signal),
-            ]);
-            if (active && !controller.signal.aborted) setServerHospitals(current => ({ ...current,
-              [id]: { name: fields.hospitalName, date: result.status === 'COMPLETED' ? result.fields.diagnosisDate : undefined },
-            }));
-          } catch {
-            if (active && !controller.signal.aborted) setServerHospitals(current => ({ ...current, [id]: { failed: true } }));
-          }
-        }
-      };
-      Promise.all(Array.from({ length: Math.min(4, completed.length) }, worker)).catch(() => {});
-    }).catch(() => {
-      if (active) {
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+      if (!completedIds) {
         setHistoryStatus('error');
+        return;
       }
-    }).finally(() => clearTimeout(timeout));
-    return () => { active = false; clearTimeout(timeout); controller.abort(); };
-  }, [focused, petId, activeTab, historyRevision]);
+      const ids = completedIds;
+      setServerHospitals(current => {
+        const next = { ...current };
+        for (const id of ids) {
+          if (!next[id]) next[id] = { status: 'error' };
+        }
+        return next;
+      });
+    }, 30_000);
+
+    const load = async () => {
+      try {
+        const records = await getPetSubmissions(petId, signal, true, 'HEALTH_CERTIFICATE');
+        if (signal.aborted) return;
+        const registrationTime = (record: SubmissionSummary) => Date.parse(record.submittedAt ?? '') || 0;
+        const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED')
+          .sort((first, second) => registrationTime(second) - registrationTime(first));
+        const ids = visible.flatMap(record => record.status === 'COMPLETED' && record.id ? [record.id] : []);
+        completedIds = ids;
+        setServerHistory(visible);
+        setHistoryStatus('done');
+
+        let index = 0;
+        const worker = async () => {
+          while (!signal.aborted && index < ids.length) {
+            const id = ids[index++];
+            let detail: HospitalLookup;
+            try {
+              const { hospitalName } = await getCertificateFields(id, signal);
+              detail = { status: 'done', name: hospitalName };
+            } catch {
+              detail = { status: 'error' };
+            }
+            if (!signal.aborted) setServerHospitals(current => ({ ...current, [id]: detail }));
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+      } catch {
+        if (!signal.aborted) setHistoryStatus('error');
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    load();
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [focused, petId, historyRevision]);
+
   const serverIds = new Set(serverHistory.map(item => item.id));
-  const savedBySubmission = new Map<string, HealthSummary>();
-  for (const record of history) {
-    if (record.certificateSubmissionId && !savedBySubmission.has(record.certificateSubmissionId)) {
-      savedBySubmission.set(record.certificateSubmissionId, record);
-    }
-  }
   const localHistory = history.filter(record => !serverIds.has(record.certificateSubmissionId));
+  const hospitalLabel = (id: string | undefined, loadingLabel: string) => {
+    const detail = id ? serverHospitals[id] : undefined;
+    if (!detail) return loadingLabel;
+    return detail.status === 'error' ? '조회 실패' : detail.name || '병원명 미입력';
+  };
 
   // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
   const scoresRequest = useRef<AbortController | null>(null);
@@ -217,16 +225,12 @@ const HealthDetailScreen = () => {
   const weightLabel = typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg}kg` : '';
   const subInfoText = [breedLabel, ageLabel, genderLabel, weightLabel].filter(Boolean).join(' · ');
 
-  const remote = serverCheckup?.petId === petId ? serverCheckup : undefined;
-  const serverDate = remote?.date;
-  const displayDate = [summary?.checkupDate, serverDate].filter((date): date is string => !!date).sort().pop();
-  const matchedServer = Object.values(serverHospitals).find(record => record.date === displayDate);
-  const recentStatusText = displayDate
-    ? (matchedServer && !matchedServer.failed ? matchedServer.name || '병원명 미입력'
-      : summary?.checkupDate === displayDate && summary.hospitalName ? summary.hospitalName
-      : historyStatus === 'error' || Object.values(serverHospitals).some(record => record.failed) ? '조회 실패' : '불러오는 중...')
-    : !remote ? '불러오는 중...' : remote.failed ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
-  const recentStatusColor = summary ? '#040505' : '#7B7C7D';
+  const latestCompleted = serverHistory.find(record => record.status === 'COMPLETED');
+  const displayDate = latestCompleted?.submittedAt ? formatScoreDate(latestCompleted.submittedAt) : undefined;
+  const recentStatusText = latestCompleted ? hospitalLabel(latestCompleted.id, '불러오는 중...')
+    : historyStatus === 'loading' ? '불러오는 중...'
+    : historyStatus === 'error' ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
+  const recentStatusColor = latestCompleted ? '#040505' : '#7B7C7D';
 
   return (
     <View style={styles.screen}>
@@ -310,9 +314,7 @@ const HealthDetailScreen = () => {
                   disabled={record.status !== 'COMPLETED'}
                   onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, historySubmissionId: record.id, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
-                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? (record.id && serverHospitals[record.id] && !serverHospitals[record.id].failed
-                      ? serverHospitals[record.id].name || '병원명 미입력'
-                      : (record.id && savedBySubmission.get(record.id)?.hospitalName) || '진단서') :
+                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? hospitalLabel(record.id, '진단서') :
                       record.status === 'FAILED' ? '분석 실패' : '분석 중'}</Text>
                     <Text style={styles.examDate}>{record.submittedAt ? formatScoreDate(record.submittedAt) : ''}</Text>
                   </View>
@@ -325,7 +327,6 @@ const HealthDetailScreen = () => {
                     <Text style={styles.examHospitalName}>
                       {record.hospitalName || '병원명 미입력'}
                     </Text>
-                    <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
                 </TouchableOpacity>
               ))}
