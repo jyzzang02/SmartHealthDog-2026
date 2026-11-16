@@ -1,4 +1,4 @@
-import { createPetOwnershipCheck, getLatestCompletedPetSubmission } from './diagnosis';
+import { createPetOwnershipCheck, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetSubmissions } from './diagnosis';
 import { listRespirationRecords } from './respiration';
 import { listSelfChecks } from './selfCheck';
 import type { CheckStage } from '../data/selfCheck';
@@ -10,6 +10,8 @@ export type PetProfileHealth = {
   urine: RecordDate;
   selfCheck: RecordDate & { stage?: CheckStage };
   respiration: RecordDate;
+  checkupDate?: string;
+  checkupFailed?: boolean;
 };
 
 const WEEKDAYS = ['일', '월', '화', '수', '목', '금', '토'];
@@ -47,9 +49,30 @@ const settleOnAbort = <T>(request: Promise<T>, signal: AbortSignal): Promise<T> 
   }).finally(() => signal.removeEventListener('abort', onAbort));
 };
 
+export const getLatestServerCheckupDate = async (
+  petId: number, signal: AbortSignal, confirmOwnedOn404 = createPetOwnershipCheck(petId, signal),
+): Promise<string | undefined> => {
+  const submissions = await getPetSubmissions(petId, signal, true, 'HEALTH_CERTIFICATE', undefined, confirmOwnedOn404);
+  const completed = submissions.filter(item => item.id && item.status === 'COMPLETED');
+  let index = 0;
+  let latest: string | undefined;
+  const worker = async () => {
+    while (index < completed.length) {
+      if (signal.aborted) throw new Error('Request aborted');
+      const item = completed[index++];
+      const result = await getCertificateOcrResult(petId, item.id!, signal);
+      if (result.status !== 'COMPLETED') throw new Error('Certificate unavailable');
+      const date = result.fields.diagnosisDate;
+      if (date && formatLatestProfileCheckupDate([date]) && (!latest || date > latest)) latest = date;
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(4, completed.length) }, worker));
+  return latest;
+};
+
 export const getPetProfileHealth = async (petId: number, signal: AbortSignal): Promise<PetProfileHealth> => {
   const confirmOwnedOn404 = createPetOwnershipCheck(petId, signal);
-  const [eye, urine, selfCheck, respiration] = await Promise.allSettled([
+  const [eye, urine, selfCheck, respiration, checkup] = await Promise.allSettled([
     settleOnAbort(getLatestCompletedPetSubmission(petId, 'EYE', signal, confirmOwnedOn404), signal),
     settleOnAbort(getLatestCompletedPetSubmission(petId, 'URINE', signal, confirmOwnedOn404), signal),
     settleOnAbort(listSelfChecks(petId, 0, signal), signal).then(page => {
@@ -73,8 +96,11 @@ export const getPetProfileHealth = async (petId: number, signal: AbortSignal): P
       }
       return latest;
     }),
+    settleOnAbort(getLatestServerCheckupDate(petId, signal, confirmOwnedOn404), signal),
   ]);
   return {
+    checkupDate: checkup.status === 'fulfilled' ? checkup.value : undefined,
+    checkupFailed: checkup.status === 'rejected',
     eye: eye.status === 'fulfilled' ? { date: eye.value?.submittedAt } : { failed: true },
     urine: urine.status === 'fulfilled' ? { date: urine.value?.submittedAt } : { failed: true },
     respiration: respiration.status === 'fulfilled' ? { date: respiration.value } : { failed: true },

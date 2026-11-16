@@ -158,7 +158,7 @@ const MyPageScreen = () => {
           ? pet.weightKg : undefined;
         const isHealthLoading = !health && focused && !petsError && pet.id === activePetId;
         const checkupDate = formatLatestProfileCheckupDate(
-          healthStore.getHistory(pet.id).map(record => record.checkupDate),
+          [health?.checkupDate, ...healthStore.getHistory(pet.id).map(record => record.checkupDate)],
         );
         const conditionRecords = health ? [
           { label: "안구질환", date: conditionDate(health.eye) },

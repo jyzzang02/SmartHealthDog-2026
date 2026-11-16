@@ -1,3 +1,4 @@
+import { logCertificateDebug } from '../utils/certificateDebug';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet, ScrollView, TouchableOpacity, Image, Alert } from 'react-native';
 import { useFocusEffect, useIsFocused, useNavigation, useRoute } from '@react-navigation/native';
@@ -43,6 +44,7 @@ const HealthCheckResultScreen = () => {
     setImageFailed(false);
     const load = async () => {
       try {
+        logCertificateDebug('detail:request');
         const result = await getCertificateOcrResult(petId, historySubmissionId, signal);
         if (result.status !== 'COMPLETED' || signal.aborted) throw new Error();
         const certificate = {
@@ -61,7 +63,10 @@ const HealthCheckResultScreen = () => {
           if (active && getAuthSession() === session) setImageFailed(true);
         }
       } catch {
-        if (active && getAuthSession() === session) setHistoryFailed(true);
+        if (active && getAuthSession() === session) {
+          logCertificateDebug('detail:failed', { aborted: signal.aborted });
+          setHistoryFailed(true);
+        }
       } finally {
         clearTimeout(timeout);
       }
@@ -101,8 +106,10 @@ const HealthCheckResultScreen = () => {
         certificateSubmissionId: submissionId,
         certificateImageUri: certificateSubmissionId ? summary.certificateImageUri : undefined,
       });
+      if (!certificateSubmissionId) logCertificateDebug('manual:saved');
       navigation.pop(2);
     } catch (error) {
+      if (!certificateSubmissionId) logCertificateDebug('manual:failed', { aborted: controller.signal.aborted });
       if (saveRequest.current !== controller || getAuthSession() !== session) return;
       Alert.alert('오류', error instanceof Error ? error.message : '요청을 처리하지 못했습니다.');
     } finally {

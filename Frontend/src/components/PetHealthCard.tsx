@@ -22,6 +22,7 @@ type PetHealthCardProps = {
   pets?: PetListItem[];
   loading?: boolean;
   healthData?: Record<number, HealthSummary>;
+  serverDates?: Record<number, string | null>;
   onPressPet?: (pet: PetListItem) => void;
 };
 
@@ -29,6 +30,7 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
   pets: petsProp,
   loading: loadingProp,
   healthData = {},
+  serverDates = {},
   onPressPet,
 }) => {
   const [pets, setPets] = useState<PetListItem[]>([]);
@@ -86,7 +88,8 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
     name: pet.name,
     subtitle: pet.breed || pet.species,
     weight: typeof pet.weightKg === 'number' && Number.isFinite(pet.weightKg) && pet.weightKg > 0 ? pet.weightKg : null,
-    checkupDate: healthData[pet.id]?.checkupDate,
+    checkupDate: [serverDates[pet.id], healthData[pet.id]?.checkupDate].filter((value): value is string => !!value).sort().pop(),
+    lookup: serverDates[pet.id],
     source: pet,
     profilePicture: resolveImageUri(pet.profilePicture) || null,
   }));
@@ -132,7 +135,7 @@ const PetHealthCard: React.FC<PetHealthCardProps> = ({
                   <Text style={styles.tagTextBlue}>{pet.weight === null ? '체중 정보 없음' : '체중 ' + pet.weight + 'kg'}</Text>
                 </View>
                 <View style={styles.tagYellow}>
-                  <Text style={styles.tagTextYellow}>{pet.checkupDate ? '최근 검진 ' + pet.checkupDate.slice(5).replace('-', '.') : '검진 정보 없음'}</Text>
+                  <Text style={styles.tagTextYellow}>{pet.checkupDate ? '최근 검진 ' + pet.checkupDate.slice(5).replace('-', '.') : pet.lookup === undefined ? '불러오는 중...' : pet.lookup === null ? '조회 실패' : '검진 정보 없음'}</Text>
                 </View>
               </View>
             </View>

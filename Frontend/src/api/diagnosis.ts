@@ -1,3 +1,4 @@
+import { logCertificateDebug } from '../utils/certificateDebug';
 import {
   getStoredAccessToken,
   getAuthSession,
@@ -362,6 +363,7 @@ export const createManualCertificate = async (
   signal?: AbortSignal,
 ): Promise<string> => {
   if (!Number.isSafeInteger(petId) || petId <= 0) throw new Error('반려동물을 먼저 선택해 주세요.');
+  logCertificateDebug('manual:request');
   const response = await authorizedFetch(API_BASE_URL + '/api/pets/' + petId + '/submissions/certificate/manual', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -381,8 +383,14 @@ export const createManualCertificate = async (
       remarks: certificate.remarks,
     }),
   });
+  logCertificateDebug('manual:http', { status: response.status });
   if (!response.ok) throw new Error(await parseErrorResponse(response));
   const data = await parseJsonSafe(response);
+  logCertificateDebug('manual:response', {
+    completed: data?.status === 'COMPLETED',
+    petMatches: data?.petId === petId,
+    validSubmissionId: typeof data?.submissionId === 'string' && SUBMISSION_UUID.test(data.submissionId),
+  });
   if (response.status !== 201 || data?.status !== 'COMPLETED' || data.petId !== petId ||
       typeof data.submissionId !== 'string' || !SUBMISSION_UUID.test(data.submissionId)) {
     throw new Error('진단서 결과를 읽을 수 없어요.');
@@ -474,9 +482,11 @@ export const getCertificateOcrResult = async (
   signal: AbortSignal,
 ): Promise<CertificateOcrResult> => {
   const detail = await authorizedFetch(`${API_BASE_URL}/api/submissions/${submissionId}/certificate`, { signal });
+  logCertificateDebug('detail:http', { status: detail.status });
   if (detail.ok) {
     const data = await parseJsonSafe(detail);
     const result = data?.results?.[0];
+    logCertificateDebug('detail:response', { completed: data?.status === 'COMPLETED', hasResult: !!result && typeof result === 'object' });
     if (data?.status === 'COMPLETED' && result && typeof result === 'object') {
       return { status: 'COMPLETED', fields: mapCertificateOcrFields(result) };
     }
@@ -522,6 +532,7 @@ export const getPetSubmissions = async (
     const base = `${API_BASE_URL}/api/submissions/pets/${petId}`;
     const query = [type && 'type=' + type, page > 0 && 'page=' + page].filter(Boolean).join('&');
     const response = await authorizedFetch(query ? base + '?' + query : base, { method: 'GET', signal });
+    if (type === 'HEALTH_CERTIFICATE') logCertificateDebug('list:http', { page, status: response.status });
     if (!response.ok) {
       let resourceNotFound = false;
       const message = await parseErrorResponse(response, code => {
@@ -556,7 +567,7 @@ export const getPetDiagnosisHistory = (petId: number, signal?: AbortSignal) =>
 
 export const getLatestCompletedPetSubmission = async (
   petId: number,
-  type: 'EYE' | 'URINE',
+  type: 'EYE' | 'URINE' | 'HEALTH_CERTIFICATE',
   signal: AbortSignal,
   confirmOwnedOn404 = createPetOwnershipCheck(petId, signal),
 ): Promise<SubmissionSummary | undefined> => {

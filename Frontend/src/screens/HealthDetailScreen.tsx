@@ -1,3 +1,5 @@
+import { getLatestServerCheckupDate } from '../api/petProfileHealth';
+import { logCertificateDebug } from '../utils/certificateDebug';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -81,6 +83,7 @@ const HealthDetailScreen = () => {
   const { petId, petName } = route.params;
 
   const [pet, setPet] = useState<PetListItem | null>(null);
+  const [serverCheckup, setServerCheckup] = useState<{ petId: number; date?: string; failed?: boolean }>();
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
   const [serverHistory, setServerHistory] = useState<SubmissionSummary[]>([]);
   const [historyStatus, setHistoryStatus] = useState<'loading' | 'error' | 'done'>('loading');
@@ -108,6 +111,17 @@ const HealthDetailScreen = () => {
     }, [petId])
   );
 
+  useFocusEffect(useCallback(() => {
+    const controller = new AbortController();
+    setServerCheckup(undefined);
+    const timeout = setTimeout(() => { controller.abort(); setServerCheckup({ petId, failed: true }); }, 20000);
+    getLatestServerCheckupDate(petId, controller.signal).then(date => {
+      if (!controller.signal.aborted) setServerCheckup({ petId, date });
+    }).catch(() => { if (!controller.signal.aborted) setServerCheckup({ petId, failed: true }); })
+      .finally(() => clearTimeout(timeout));
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [petId]));
+
   useEffect(() => {
     if (!focused || activeTab !== '검진 기록') return;
     const controller = new AbortController();
@@ -115,12 +129,26 @@ const HealthDetailScreen = () => {
     let active = true;
     setServerHistory([]);
     setHistoryStatus('loading');
+    logCertificateDebug('list:request');
     getPetSubmissions(petId, controller.signal, true, 'HEALTH_CERTIFICATE').then(records => {
       if (controller.signal.aborted) throw new Error();
-      setServerHistory(records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED'));
+      const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED');
+      if (__DEV__) {
+        const latestLinked = healthStore.getHistory(petId).find(record => record.certificateSubmissionId)?.certificateSubmissionId;
+        logCertificateDebug('list:response', {
+          received: records.length,
+          visible: visible.length,
+          hasLocalSubmission: !!latestLinked,
+          localSubmissionFound: !!latestLinked && visible.some(record => record.id === latestLinked),
+        });
+      }
+      setServerHistory(visible);
       setHistoryStatus('done');
     }).catch(() => {
-      if (active) setHistoryStatus('error');
+      if (active) {
+        logCertificateDebug('list:failed', { aborted: controller.signal.aborted });
+        setHistoryStatus('error');
+      }
     }).finally(() => clearTimeout(timeout));
     return () => { active = false; clearTimeout(timeout); controller.abort(); };
   }, [focused, petId, activeTab, historyRevision]);
@@ -180,9 +208,12 @@ const HealthDetailScreen = () => {
   const weightLabel = typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg}kg` : '';
   const subInfoText = [breedLabel, ageLabel, genderLabel, weightLabel].filter(Boolean).join(' · ');
 
-  const recentStatusText = summary
-    ? summary.hospitalName || '병원명 미입력'
-    : '등록된 검진 기록이 없습니다.';
+  const remote = serverCheckup?.petId === petId ? serverCheckup : undefined;
+  const serverDate = remote?.date;
+  const displayDate = [summary?.checkupDate, serverDate].filter((date): date is string => !!date).sort().pop();
+  const recentStatusText = displayDate
+    ? (summary?.checkupDate === displayDate ? summary.hospitalName : undefined) || '병원명 미입력'
+    : !remote ? '불러오는 중...' : remote.failed ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
   const recentStatusColor = summary ? '#040505' : '#7B7C7D';
 
   return (
@@ -220,7 +251,7 @@ const HealthDetailScreen = () => {
           <View style={styles.recentStatusBox}>
             <View style={styles.recentStatusHeaderRow}>
               <Text style={styles.recentStatusLabel}>최근 건강 상태</Text>
-              {summary && <Text style={styles.recentStatusDate}>{summary.checkupDate}</Text>}
+              {displayDate && <Text style={styles.recentStatusDate}>{displayDate}</Text>}
             </View>
             <Text style={[styles.recentStatusValue, { color: recentStatusColor }]}>
               {recentStatusText}

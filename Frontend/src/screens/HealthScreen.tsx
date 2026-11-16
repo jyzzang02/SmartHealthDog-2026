@@ -23,6 +23,8 @@ import HospitalSearchControls from '../components/HospitalSearchControls';
 import HospitalSearchResults from '../components/HospitalSearchResults';
 import { useHospitalSearch } from '../hooks/useHospitalSearch';
 import { useTabScrollToTop } from '../hooks/useTabScrollToTop';
+import { getLatestCompletedPetSubmission } from '../api/diagnosis';
+import { getAuthSession } from '../storage/tokenStorage';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
@@ -30,6 +32,8 @@ import type { HealthSummary } from '../types/health';
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
 const selfCheckDog = require('../assets/selfCheckDog.png');
+
+type CheckupLookup = { petId: number; session: symbol; status: 'found' | 'empty' | 'failed' };
 
 const emptyHospitalCenter = { lat: 37.5665, lng: 126.9780 };
 
@@ -64,6 +68,7 @@ const HealthScreen: React.FC = () => {
   const [petList, setPetList] = useState<PetListItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+  const [checkupLookup, setCheckupLookup] = useState<CheckupLookup>();
   const hospitalSearch = useHospitalSearch();
 
   useFocusEffect(
@@ -91,8 +96,34 @@ const HealthScreen: React.FC = () => {
   );
 
   const currentPet = petList.find((pet) => pet.id === selectedPetId);
-  const currentSummary = currentPet ? healthData[currentPet.id] : undefined;
-  const hasHealthData = Boolean(currentSummary);
+  const currentPetId = currentPet?.id;
+  const session = getAuthSession();
+  useFocusEffect(useCallback(() => {
+    if (currentPetId === undefined) return;
+    const controller = new AbortController();
+    let active = true;
+    const commit = (status: CheckupLookup['status']) => {
+      if (active && getAuthSession() === session) setCheckupLookup({ petId: currentPetId, session, status });
+    };
+    const timeout = setTimeout(() => {
+      controller.abort();
+      commit('failed');
+    }, 20_000);
+    getLatestCompletedPetSubmission(currentPetId, 'HEALTH_CERTIFICATE', controller.signal)
+      .then(record => { if (!controller.signal.aborted) commit(record ? 'found' : 'empty'); })
+      .catch(() => { if (!controller.signal.aborted) commit('failed'); })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [currentPetId, session]));
+
+  const lookupStatus = checkupLookup?.session === session && checkupLookup.petId === currentPetId
+    ? checkupLookup.status : undefined;
+  const hasHealthData = Boolean(currentPet && healthData[currentPet.id]) || lookupStatus === 'found';
+  const showDetails = hasHealthData || lookupStatus !== 'empty';
 
   return (
     <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -186,9 +217,13 @@ const HealthScreen: React.FC = () => {
                 <Text style={styles.healthInfoDesc}>
                   최근 검진 결과를 확인해 보세요.
                 </Text>
-              ) : (
+              ) : lookupStatus === 'empty' ? (
                 <Text style={styles.healthInfoDesc}>
                   등록된 검진 기록이 없습니다.{'\n'}검진 정보를 등록해보세요.
+                </Text>
+              ) : (
+                <Text style={styles.healthInfoDesc}>
+                  {lookupStatus === 'failed' ? '검진 기록을 불러오지 못했어요.' : '불러오는 중...'}
                 </Text>
               )}
             </View>
@@ -196,7 +231,7 @@ const HealthScreen: React.FC = () => {
               style={styles.healthInfoBtn}
               activeOpacity={0.8}
               onPress={() => {
-                if (hasHealthData) {
+                if (showDetails) {
                   navigation.navigate('HealthDetail', { petId: currentPet.id, petName: currentPet.name });
                 } else {
                   navigation.navigate('HealthCheckInput', { petId: currentPet.id, petName: currentPet.name });
@@ -204,7 +239,7 @@ const HealthScreen: React.FC = () => {
               }}
             >
               <Text style={styles.healthInfoBtnText}>
-                {hasHealthData ? '건강 상세' : '등록하기'}
+                {showDetails ? '건강 상세' : '등록하기'}
               </Text>
             </TouchableOpacity>
           </View>
