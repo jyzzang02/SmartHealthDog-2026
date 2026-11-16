@@ -6,7 +6,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getPetSubmissions, type SubmissionSummary } from '../api/diagnosis';
+import { getCertificateFields, getPetSubmissions, getCertificateOcrResult, type SubmissionSummary } from '../api/diagnosis';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import type { HealthSummary } from '../types/health';
@@ -84,6 +84,7 @@ const HealthDetailScreen = () => {
   const [pet, setPet] = useState<PetListItem | null>(null);
   const [serverCheckup, setServerCheckup] = useState<{ petId: number; date?: string; failed?: boolean }>();
   const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
+  const [serverHospitals, setServerHospitals] = useState<Record<string, { name?: string; date?: string; failed?: boolean }>>({});
   const [serverHistory, setServerHistory] = useState<SubmissionSummary[]>([]);
   const [historyStatus, setHistoryStatus] = useState<'loading' | 'error' | 'done'>('loading');
   const [historyRevision, setHistoryRevision] = useState(0);
@@ -127,12 +128,32 @@ const HealthDetailScreen = () => {
     const timeout = setTimeout(() => controller.abort(), 30_000);
     let active = true;
     setServerHistory([]);
+    setServerHospitals({});
     setHistoryStatus('loading');
     getPetSubmissions(petId, controller.signal, true, 'HEALTH_CERTIFICATE').then(records => {
       if (controller.signal.aborted) throw new Error();
       const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED');
       setServerHistory(visible);
       setHistoryStatus('done');
+      let index = 0;
+      const completed = visible.filter(record => record.id && record.status === 'COMPLETED');
+      const worker = async () => {
+        while (index < completed.length && !controller.signal.aborted) {
+          const record = completed[index++];
+          const id = record.id!;
+          try {
+            const [fields, result] = await Promise.all([
+              getCertificateFields(id, controller.signal), getCertificateOcrResult(petId, id, controller.signal),
+            ]);
+            if (active && !controller.signal.aborted) setServerHospitals(current => ({ ...current,
+              [id]: { name: fields.hospitalName, date: result.status === 'COMPLETED' ? result.fields.diagnosisDate : undefined },
+            }));
+          } catch {
+            if (active && !controller.signal.aborted) setServerHospitals(current => ({ ...current, [id]: { failed: true } }));
+          }
+        }
+      };
+      Promise.all(Array.from({ length: Math.min(4, completed.length) }, worker)).catch(() => {});
     }).catch(() => {
       if (active) {
         setHistoryStatus('error');
@@ -199,8 +220,11 @@ const HealthDetailScreen = () => {
   const remote = serverCheckup?.petId === petId ? serverCheckup : undefined;
   const serverDate = remote?.date;
   const displayDate = [summary?.checkupDate, serverDate].filter((date): date is string => !!date).sort().pop();
+  const matchedServer = Object.values(serverHospitals).find(record => record.date === displayDate);
   const recentStatusText = displayDate
-    ? (summary?.checkupDate === displayDate ? summary.hospitalName : undefined) || '병원명 미입력'
+    ? (matchedServer && !matchedServer.failed ? matchedServer.name || '병원명 미입력'
+      : summary?.checkupDate === displayDate && summary.hospitalName ? summary.hospitalName
+      : historyStatus === 'error' || Object.values(serverHospitals).some(record => record.failed) ? '조회 실패' : '불러오는 중...')
     : !remote ? '불러오는 중...' : remote.failed ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
   const recentStatusColor = summary ? '#040505' : '#7B7C7D';
 
@@ -286,7 +310,9 @@ const HealthDetailScreen = () => {
                   disabled={record.status !== 'COMPLETED'}
                   onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, historySubmissionId: record.id, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
-                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? (record.id && savedBySubmission.get(record.id)?.hospitalName) || '진단서' :
+                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? (record.id && serverHospitals[record.id] && !serverHospitals[record.id].failed
+                      ? serverHospitals[record.id].name || '병원명 미입력'
+                      : (record.id && savedBySubmission.get(record.id)?.hospitalName) || '진단서') :
                       record.status === 'FAILED' ? '분석 실패' : '분석 중'}</Text>
                     <Text style={styles.examDate}>{record.submittedAt ? formatScoreDate(record.submittedAt) : ''}</Text>
                   </View>

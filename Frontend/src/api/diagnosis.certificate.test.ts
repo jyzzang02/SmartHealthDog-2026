@@ -1,4 +1,4 @@
-import { createManualCertificate, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { createManualCertificate, getCertificateFields, updateCertificateHospital, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -36,12 +36,12 @@ const manualCertificate = {
 it('creates a completed manual certificate with camelCase fields and no image', async () => {
   fetchMock.mockResolvedValueOnce(response(201, { submissionId: id, petId: 12, status: 'COMPLETED' }));
   const { signal } = new AbortController();
-  await expect(createManualCertificate(12, manualCertificate, signal)).resolves.toBe(id);
+  await expect(createManualCertificate(12, manualCertificate, signal, '우리동네동물병원')).resolves.toBe(id);
   const [[url, request]] = fetchMock.mock.calls;
   expect(new URL(url).pathname).toBe('/api/pets/12/submissions/certificate/manual');
   expect(request).toMatchObject({ method: 'POST', signal, headers: { Authorization: 'Bearer test-access' } });
   expect(JSON.parse(request.body)).toEqual({
-    animalName: 'Hana', speciesText: 'CAT', breed: '', genderText: '', coatColor: '', ageText: '',
+    hospitalName: '우리동네동물병원', animalName: 'Hana', speciesText: 'CAT', breed: '', genderText: '', coatColor: '', ageText: '',
     features: '', diseaseName: 'Condition', onsetDateText: '', diagnosedDateText: '2026-11-16', prognosis: '', remarks: '',
   });
 });
@@ -288,4 +288,18 @@ it('distinguishes malformed unfiltered history from a successful empty page', as
   await expect(getPetDiagnosisHistory(12)).rejects.toThrow('진단 이력을 불러오지 못했습니다.');
   await expect(getPetDiagnosisHistory(12)).resolves.toEqual([]);
   expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('reads the optional hospital name from certificate fields', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissionId: id, hospitalName: '우리동네동물병원' }));
+  await expect(getCertificateFields(id)).resolves.toEqual({ hospitalName: '우리동네동물병원' });
+});
+
+it('updates only the hospital name on an OCR certificate', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateCertificateHospital(id, '  우리 병원  ');
+  const [[url, request]] = fetchMock.mock.calls;
+  expect(new URL(url).pathname).toBe('/api/submissions/' + id + '/certificate/fields');
+  expect(request.method).toBe('PATCH');
+  expect(JSON.parse(request.body)).toEqual({ hospitalName: '우리 병원' });
 });

@@ -360,6 +360,7 @@ export const createManualCertificate = async (
   petId: number,
   certificate: DiagnosisCertificate,
   signal?: AbortSignal,
+  hospitalName?: string,
 ): Promise<string> => {
   if (!Number.isSafeInteger(petId) || petId <= 0) throw new Error('반려동물을 먼저 선택해 주세요.');
   const response = await authorizedFetch(API_BASE_URL + '/api/pets/' + petId + '/submissions/certificate/manual', {
@@ -367,6 +368,7 @@ export const createManualCertificate = async (
     headers: { 'Content-Type': 'application/json' },
     signal,
     body: JSON.stringify({
+      hospitalName: hospitalName?.trim() || undefined,
       animalName: certificate.animalName,
       speciesText: certificate.species,
       breed: certificate.breed,
@@ -389,6 +391,25 @@ export const createManualCertificate = async (
     throw new Error('진단서 결과를 읽을 수 없어요.');
   }
   return data.submissionId;
+};
+
+export const getCertificateFields = async (submissionId: string, signal?: AbortSignal): Promise<{ hospitalName?: string }> => {
+  if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate/fields', { signal });
+  if (!response.ok) throw new Error(await parseErrorResponse(response));
+  const data = await parseJsonSafe(response);
+  if (!data || data.submissionId !== submissionId ||
+      (data.hospitalName != null && typeof data.hospitalName !== 'string')) throw new Error('진단서 결과를 읽을 수 없어요.');
+  return { hospitalName: typeof data.hospitalName === 'string' ? data.hospitalName.trim() || undefined : undefined };
+};
+
+export const updateCertificateHospital = async (submissionId: string, hospitalName: string, signal?: AbortSignal): Promise<void> => {
+  if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate/fields', {
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, signal,
+    body: JSON.stringify({ hospitalName: hospitalName.trim() }),
+  });
+  if (!response.ok) throw new Error(await parseErrorResponse(response));
 };
 
 export const updateCertificate = async (

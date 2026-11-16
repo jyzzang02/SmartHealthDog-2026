@@ -5,7 +5,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { createManualCertificate, getCertificateImageUrl, getCertificateOcrResult, updateCertificate } from '../api/diagnosis';
+import { createManualCertificate, getCertificateFields, getCertificateImageUrl, getCertificateOcrResult, updateCertificate, updateCertificateHospital } from '../api/diagnosis';
 import { clearPendingCertificate } from '../storage/certificateRecovery';
 import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
@@ -53,6 +53,14 @@ const HealthCheckResultScreen = () => {
         const saved = healthStore.getHistory(petId).find(item => item.certificateSubmissionId === historySubmissionId);
         setRemoteSummary({ petId, checkupDate: certificate.diagnosisDate, hospitalName: saved?.hospitalName, certificate });
         try {
+          const fields = await getCertificateFields(historySubmissionId, signal);
+          if (active && !signal.aborted && getAuthSession() === session) {
+            setRemoteSummary(current => current && { ...current, hospitalName: fields.hospitalName });
+          }
+        } catch {
+          // Keep the existing certificate result if optional field lookup fails.
+        }
+        try {
           const uri = await getCertificateImageUrl(historySubmissionId, signal);
           if (uri && active && !signal.aborted && getAuthSession() === session) {
             setRemoteSummary(current => current && { ...current, certificateImageUri: uri });
@@ -90,12 +98,15 @@ const HealthCheckResultScreen = () => {
       let submissionId: string;
       if (certificateSubmissionId) {
         await updateCertificate(certificateSubmissionId, certificateChanges ?? {}, controller.signal);
+        if (summary.hospitalName?.trim()) {
+          await updateCertificateHospital(certificateSubmissionId, summary.hospitalName, controller.signal);
+        }
         submissionId = certificateSubmissionId;
         if (certificateOwnerId !== undefined) {
           await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
         }
       } else {
-        submissionId = await createManualCertificate(petId, summary.certificate, controller.signal);
+        submissionId = await createManualCertificate(petId, summary.certificate, controller.signal, summary.hospitalName);
       }
       if (controller.signal.aborted || getAuthSession() !== session) return;
       healthStore.set(petId, {
