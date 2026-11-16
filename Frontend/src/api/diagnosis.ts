@@ -5,7 +5,7 @@ import {
 } from '../storage/tokenStorage';
 import { refreshSessionAccessToken } from './refreshSession';
 import { getMyPets, getPetDetail } from './pets';
-import type { DiagnosisCertificate } from '../types/health';
+import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 
 const API_BASE_URL = 'http://api.puppydoc.ovh:8080';
 
@@ -393,24 +393,66 @@ export const createManualCertificate = async (
   return data.submissionId;
 };
 
-export const getCertificateFields = async (submissionId: string, signal?: AbortSignal): Promise<{ hospitalName?: string }> => {
+const CERTIFICATE_FIELD_NAMES = {
+  animalName: 'animalName', species: 'speciesText', breed: 'breed', sex: 'genderText',
+  coatColor: 'coatColor', age: 'ageText', features: 'features', diseaseName: 'diseaseName',
+  onsetDate: 'onsetDateText', diagnosisDate: 'diagnosedDateText', prognosis: 'prognosis', remarks: 'remarks',
+} as const satisfies Record<keyof DiagnosisCertificate, string>;
+
+const readCertificateFields = async (submissionId: string, signal?: AbortSignal) => {
   if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
   const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate/fields', { signal });
   if (!response.ok) throw new Error(await parseErrorResponse(response));
   const data = await parseJsonSafe(response);
   if (!data || data.submissionId !== submissionId ||
       (data.hospitalName != null && typeof data.hospitalName !== 'string')) throw new Error('진단서 결과를 읽을 수 없어요.');
+  return data;
+};
+
+export const getCertificateFields = async (submissionId: string, signal?: AbortSignal): Promise<{ hospitalName?: string }> => {
+  const data = await readCertificateFields(submissionId, signal);
   return { hospitalName: typeof data.hospitalName === 'string' ? data.hospitalName.trim() || undefined : undefined };
 };
 
-export const updateCertificateHospital = async (submissionId: string, hospitalName: string, signal?: AbortSignal): Promise<void> => {
+export const getSavedCertificate = async (petId: number, submissionId: string, signal?: AbortSignal): Promise<HealthSummary> => {
+  const data = await readCertificateFields(submissionId, signal);
+  if (data.petId !== petId || data.status !== 'COMPLETED') throw new Error('진단서 결과를 읽을 수 없어요.');
+  const certificate = {} as DiagnosisCertificate;
+  for (const key of Object.keys(CERTIFICATE_FIELD_NAMES) as (keyof DiagnosisCertificate)[]) {
+    const value = data[CERTIFICATE_FIELD_NAMES[key]];
+    if (value != null && typeof value !== 'string') throw new Error('진단서 결과를 읽을 수 없어요.');
+    certificate[key] = value ?? '';
+  }
+  return { petId, certificateSubmissionId: submissionId, certificate,
+    checkupDate: normalizeCertificateDiagnosisDate(certificate.diagnosisDate) ?? certificate.diagnosisDate,
+    hospitalName: data.hospitalName?.trim() || undefined };
+};
+
+export const updateSavedCertificate = async (
+  submissionId: string, certificate: Partial<DiagnosisCertificate>, hospitalName?: string, signal?: AbortSignal,
+): Promise<void> => {
   if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  const body: Record<string, string> = {};
+  for (const key of Object.keys(CERTIFICATE_FIELD_NAMES) as (keyof DiagnosisCertificate)[]) {
+    const value = certificate[key];
+    if (value !== undefined) body[CERTIFICATE_FIELD_NAMES[key]] = value.trim();
+  }
+  if (hospitalName !== undefined) body.hospitalName = hospitalName.trim();
+  if (!Object.keys(body).length) return;
   const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/certificate/fields', {
-    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, signal,
-    body: JSON.stringify({ hospitalName: hospitalName.trim() }),
+    method: 'PATCH', headers: { 'Content-Type': 'application/json' }, signal, body: JSON.stringify(body),
   });
   if (!response.ok) throw new Error(await parseErrorResponse(response));
 };
+
+export const deleteCertificateSubmission = async (submissionId: string, signal?: AbortSignal): Promise<void> => {
+  if (!SUBMISSION_UUID.test(submissionId)) throw new Error('진단서 결과를 읽을 수 없어요.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId, { method: 'DELETE', signal });
+  if (!response.ok) throw new Error(await parseErrorResponse(response));
+};
+
+export const updateCertificateHospital = (submissionId: string, hospitalName: string, signal?: AbortSignal) =>
+  updateSavedCertificate(submissionId, {}, hospitalName, signal);
 
 export const updateCertificate = async (
   submissionId: string,

@@ -272,6 +272,7 @@ const HealthCheckInputScreen = () => {
   });
 
   const clearCertificateImage = (discard = true) => {
+    if (certificateImageUri || ocrSubmission.current) setHospitalName('');
     cancelOcrRequest();
     if (discard && ocrSubmission.current) removeRecovery(ocrSubmission.current);
     ocrSubmission.current = null;
@@ -462,10 +463,6 @@ const HealthCheckInputScreen = () => {
         if (certificateOverrides[key] === undefined) continue;
         const value = trimmedCertificate[key];
         if (value === (ocrFields?.[key] ?? '')) continue;
-        if (!value && (key === 'diseaseName' || key === 'diagnosisDate')) {
-          setOcrMessage('병명과 진단 연월일은 빈 값으로 수정할 수 없어요.');
-          return;
-        }
         certificateChanges[key] = value;
       }
     }
@@ -484,6 +481,7 @@ const HealthCheckInputScreen = () => {
     if (pet.id !== selectedPetId) {
       const switchingOcr = ocrSubmission.current !== null;
       clearCertificateImage(false);
+      setHospitalName('');
       setCertificateOverrides(prev => {
         if (switchingOcr) return {};
         const next = { ...prev };

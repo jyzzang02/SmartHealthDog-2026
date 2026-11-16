@@ -1,4 +1,4 @@
-import { createManualCertificate, getCertificateFields, updateCertificateHospital, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { createManualCertificate, getCertificateFields, getSavedCertificate, updateSavedCertificate, deleteCertificateSubmission, updateCertificateHospital, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -302,4 +302,35 @@ it('updates only the hospital name on an OCR certificate', async () => {
   expect(new URL(url).pathname).toBe('/api/submissions/' + id + '/certificate/fields');
   expect(request.method).toBe('PATCH');
   expect(JSON.parse(request.body)).toEqual({ hospitalName: '우리 병원' });
+});
+
+it('reads editable certificate fields only for the requested completed record and pet', async () => {
+  const body = { submissionId: id, petId: 12, status: 'COMPLETED', hospitalName: '병원',
+    speciesText: 'CAT', genderText: 'FEMALE', diagnosedDateText: '2026-11-16' };
+  fetchMock.mockResolvedValueOnce(response(200, body)).mockResolvedValueOnce(response(200, body));
+  await expect(getSavedCertificate(12, id)).resolves.toMatchObject({
+    checkupDate: '2026-11-16', hospitalName: '병원',
+    certificate: { species: 'CAT', sex: 'FEMALE', diagnosisDate: '2026-11-16', remarks: '' },
+  });
+  await expect(getSavedCertificate(13, id)).rejects.toThrow();
+});
+
+it('patches only changed fields and sends empty strings for explicitly cleared values', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateSavedCertificate(id, { diagnosisDate: '2026-11-15', remarks: '' }, '');
+  await updateSavedCertificate(id, {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock.mock.calls[0][0]).toContain('/' + id + '/certificate/fields');
+  expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    diagnosedDateText: '2026-11-15', remarks: '', hospitalName: '',
+  });
+});
+
+it('deletes a certificate submission and rejects server failures', async () => {
+  fetchMock.mockResolvedValueOnce(response(204, undefined)).mockResolvedValueOnce(response(403, {}));
+  await expect(deleteCertificateSubmission(id)).resolves.toBeUndefined();
+  expect(fetchMock.mock.calls[0][0]).toContain('/api/submissions/' + id);
+  expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  await expect(deleteCertificateSubmission(id)).rejects.toThrow();
 });
