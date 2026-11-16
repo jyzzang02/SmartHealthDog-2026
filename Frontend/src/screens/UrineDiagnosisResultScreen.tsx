@@ -21,18 +21,7 @@ import {
 import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
 import DiagnosisResultView from '../components/DiagnosisResultView';
 
-const URINE_ITEMS: Record<string, string> = {
-  leukocytes: '백혈구',
-  nitrite: '아질산염',
-  urobilinogen: '유로빌리노겐',
-  protein: '단백질',
-  ph: '산도 (pH)',
-  blood: '잠혈',
-  'specific gravity': '비중',
-  ketone: '케톤',
-  bilirubin: '빌리루빈',
-  glucose: '포도당',
-};
+import { urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
 
 const URINE_EXPLANATIONS = [
   { name: '케톤', detail: '몸이 지방을 에너지로 사용할 때 생기는 물질이에요. 검출되면 공복이나 당뇨병 등 여러 원인을 확인할 수 있어요.' },
@@ -392,9 +381,8 @@ const UrineDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
 
     return resultsArray.map(item => {
       const analyte = item.analyte?.trim() || '미확인';
-      const info = URINE_ITEMS[analyte.toLowerCase()];
       return {
-        name: info ?? analyte,
+        name: urineAnalyteLabel(analyte),
         value: formatUrineValue(item.resultValue),
       };
     });
