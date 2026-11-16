@@ -1,4 +1,4 @@
-import { urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
+import { formatUrineValue, urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
 import { EYE_EPIPHORA_NAME, isLegacyEpiphoraName } from '../utils/eyeConditionDisplay';
 import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Image, Modal, NativeModules, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -126,7 +126,7 @@ const formatRecord = (key: Exclude<HealthReportSection, 'selfChecks'>, row: Heal
     certificates: [asText(row.diagnosedDateText), asText(row.diseaseName)],
     walks: [withUnit(row.distanceKm, ' km'), withUnit(row.activeDurationSeconds, '초')],
     eyes: [eyeConditionLabel(row.conditionName)],
-    urines: [asText(row.analyteName), asText(row.value) ?? withUnit(row.value, '')],
+    urines: [asText(row.analyteName) && urineAnalyteLabel(asText(row.analyteName)!), row.value == null ? undefined : formatUrineValue(asText(row.value) ?? withUnit(row.value, ''))],
     respirations: [respirationLabel],
   }[key].filter(Boolean);
   return [date, ...(values.length ? values : ['상세 정보 없음'])].filter(Boolean).join(' · ');
@@ -145,8 +145,9 @@ const groupDiagnosisRows = (section: GroupedSection, rows: HealthReportRow[]) =>
       groups.set(key, group);
     }
     const result = section === 'eyes' ? eyeConditionLabel(row.conditionName) : [
-      asText(row.analyteName), asText(row.value) ?? withUnit(row.value, ''),
-    ].filter(Boolean).join(' · ');
+      asText(row.analyteName) && urineAnalyteLabel(asText(row.analyteName)!),
+      row.value == null ? undefined : formatUrineValue(asText(row.value) ?? withUnit(row.value, '')),
+    ].filter(Boolean).join(': ');
     if (result) group.results.add(result.trim());
   });
   return Array.from(groups, ([key, { record, results }]) => ({ key, record, results: [...results] }));
@@ -176,7 +177,7 @@ const urinePdfResult = (row: HealthReportRow): PdfUrineResult => {
   const rawValue = asText(row.value) ?? withUnit(row.value, '');
   return {
     label: urineAnalyteLabel(asText(row.analyteName) ?? '미확인'),
-    value: rawValue ?? EMPTY,
+    value: rawValue === undefined ? EMPTY : formatUrineValue(rawValue),
     isAbnormal: typeof row.isAbnormal === 'boolean' ? row.isAbnormal
       : /^(positive|moderate|small|large|trace|high|low)$/i.test(rawValue?.trim() ?? ''),
   };
@@ -553,9 +554,20 @@ export default function HealthReportScreen({ navigation, route }: Props) {
                             <Text style={styles.diagnosisDate}>{recordedDate(record.submittedAtUtcNaive) ?? '검사 기록'}</Text>
                             <Text style={styles.sectionCount}>{results.length + '개 항목'}</Text>
                           </View>
-                          <Text numberOfLines={1} style={styles.diagnosisPreview}>
-                            {results.slice(0, 2).join(', ') || '상세 정보 없음'}
-                          </Text>
+                          {section === 'urines' && results.length ? (
+                            <>
+                              {results.slice(0, 2).map(preview => (
+                                <Text key={preview} numberOfLines={1} style={styles.diagnosisPreview}>{preview}</Text>
+                              ))}
+                              {results.length > 2 && (
+                                <Text style={styles.diagnosisPreview}>{'외 ' + (results.length - 2) + '개 항목'}</Text>
+                              )}
+                            </>
+                          ) : (
+                            <Text numberOfLines={1} style={styles.diagnosisPreview}>
+                              {results.slice(0, 2).join(', ') || '상세 정보 없음'}
+                            </Text>
+                          )}
                         </View>
                       );
                       if (!openRecord) return <View key={id}>{summary}</View>;

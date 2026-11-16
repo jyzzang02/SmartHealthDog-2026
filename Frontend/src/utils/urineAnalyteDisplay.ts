@@ -15,3 +15,14 @@ export function urineAnalyteLabel(name: string): string {
   const key = name.trim().toLowerCase().replace(/[-_]+/g, ' ').replace(/\s+/g, ' ');
   return Object.prototype.hasOwnProperty.call(URINE_ITEMS, key) ? URINE_ITEMS[key] : name;
 }
+
+export const formatUrineValue = (value: string | null | undefined) => {
+  if (value == null || !value.trim()) return '-';
+  const labels: Record<string, string> = {
+    'neg.': '음성', negative: '음성', positive: '양성', normal: '정상',
+    trace: '미량', small: '소량', moderate: '중간', large: '다량',
+    'non hemolyzed': '비용혈', hemolyzed: '용혈',
+  };
+  return value.replace(/(^|[^a-z])(non hemolyzed|hemolyzed|neg\.|negative|positive|normal|trace|small|moderate|large)(?![a-z])/gi,
+    (_match, prefix: string, label: string) => prefix + (labels[label.toLowerCase()] ?? label));
+};

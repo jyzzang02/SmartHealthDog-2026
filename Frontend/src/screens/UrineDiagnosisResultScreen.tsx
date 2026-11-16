@@ -21,7 +21,7 @@ import {
 import DiagnosisAnalysisProgress from '../components/DiagnosisAnalysisProgress';
 import DiagnosisResultView from '../components/DiagnosisResultView';
 
-import { urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
+import { formatUrineValue, urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
 
 const URINE_EXPLANATIONS = [
   { name: '케톤', detail: '몸이 지방을 에너지로 사용할 때 생기는 물질이에요. 검출되면 공복이나 당뇨병 등 여러 원인을 확인할 수 있어요.' },
@@ -36,16 +36,6 @@ const URINE_EXPLANATIONS = [
   { name: '비중', detail: '소변이 얼마나 농축됐는지 나타내요. 시험지 결과는 다른 방법으로 확인이 필요할 수 있어요.' },
 ];
 
-const formatUrineValue = (value: string | null | undefined) => {
-  if (value == null || !value.trim()) return '-';
-  const labels: Record<string, string> = {
-    'neg.': '음성', negative: '음성', positive: '양성', normal: '정상',
-    trace: '미량', small: '소량', moderate: '중간', large: '다량',
-    'non hemolyzed': '비용혈', hemolyzed: '용혈',
-  };
-  return value.replace(/(^|[^a-z])(non hemolyzed|hemolyzed|neg\.|negative|positive|normal|trace|small|moderate|large)(?![a-z])/gi,
-    (_match, prefix: string, label: string) => prefix + (labels[label.toLowerCase()] ?? label));
-};
 
 const STATUS_PENDING = 'PENDING';
 const STATUS_PROCESSING = 'PROCESSING';

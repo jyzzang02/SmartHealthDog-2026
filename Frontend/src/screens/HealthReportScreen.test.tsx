@@ -217,7 +217,7 @@ it('opens each exact record and leaves rows with invalid IDs non-interactive', a
   expect(push).toHaveBeenLastCalledWith('HealthCheckResult', { petId: 1, petName: '하나', historySubmissionId: submissionId, viewOnly: true });
   open('안구 진단', '안구 결과');
   expect(push).toHaveBeenLastCalledWith('EyeDiagnosisResult', { petId: 1, submissionId });
-  open('소변키트 진단', 'pH · 7');
+  open('소변키트 진단', '산도 (pH): 7');
   expect(push).toHaveBeenLastCalledWith('UrineDiagnosisResult', { petId: 1, submissionId });
   open('수면 호흡 분석', '33회/분');
   expect(push).toHaveBeenLastCalledWith('RespirationResult', { petId: 1, petName: '하나', videoId });
@@ -256,8 +256,8 @@ it.each(['android', 'ios'] as const)('exports the loaded period and collapsed re
       { text: '2026-11-12 · AI 상위 점수', heading: false, role: 'record',
         content: { kind: 'eyes', tags: ['안검내반 91.0%', '백내장 82.0%'] } },
       { text: '2026-11-14 · AI 점수 없음', heading: false, role: 'record' },
-      expect.objectContaining({ content: { kind: 'urines', results: [{ label: '단백질', value: 'Small', isAbnormal: true }] } }),
-      expect.objectContaining({ content: { kind: 'urines', results: [{ label: '포도당', value: 'Positive', isAbnormal: false }] } }),
+      expect.objectContaining({ content: { kind: 'urines', results: [{ label: '단백질', value: '소량', isAbnormal: true }] } }),
+      expect.objectContaining({ content: { kind: 'urines', results: [{ label: '포도당', value: '양성', isAbnormal: false }] } }),
       { text: '통합 건강 리포트', heading: true, role: 'title' },
       { text: '상세 기록', heading: true, role: 'section' },
     ]));
@@ -291,4 +291,22 @@ it('groups eye results by submission ID without merging separate same-day tests'
   expect(push).toHaveBeenLastCalledWith('EyeDiagnosisResult', { petId: 1, submissionId: first });
   act(() => button('유루증').props.onPress());
   expect(push).toHaveBeenLastCalledWith('EyeDiagnosisResult', { petId: 1, submissionId: second });
+});
+
+it('shows urine item names, values and a separate count of remaining items', async () => {
+  const submissionId = '550e8400-e29b-41d4-a716-446655440000';
+  loadReport.mockResolvedValueOnce({
+    ...emptyReport, sections: { ...emptyReport.sections, urines: [
+      { submissionId, analyteName: 'Bilirubin', value: 'Neg.' },
+      { submissionId, analyteName: 'Blood', value: '80 Moderate' },
+      { submissionId, analyteName: 'Glucose', value: '110' },
+    ] },
+  });
+  await act(async () => { button('월간').props.onPress(); });
+  act(() => button('소변키트 진단').props.onPress());
+  expect(texts()).toContain('빌리루빈: 음성');
+  expect(texts()).toContain('잠혈: 80 중간');
+  expect(texts()).toContain('외 1개 항목');
+  act(() => button('잠혈: 80 중간').props.onPress());
+  expect(push).toHaveBeenLastCalledWith('UrineDiagnosisResult', { petId: 1, submissionId });
 });
