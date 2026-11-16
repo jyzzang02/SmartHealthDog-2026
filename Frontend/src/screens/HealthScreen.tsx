@@ -222,14 +222,14 @@ const HealthScreen: React.FC = () => {
             petId: currentPet.id, petName: currentPet.name, petImageUri: currentPet.profilePicture,
           })}
         >
-          <Text style={styles.healthInfoBtnText}>통합 건강 리포트</Text>
+          <Text style={[styles.healthInfoBtnText, styles.healthReportText]}>통합 건강 리포트</Text>
           <Image source={require('../assets/icon_right.png')} style={styles.healthReportChevron} accessible={false} />
         </TouchableOpacity>
       )}
 
       {/* 동물병원 검색 */}
       {/* ============================ */}
-      <View style={styles.whiteSection} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
+      <View style={[styles.whiteSection, currentPet && styles.whiteSectionAfterReport]} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
         <HospitalSearchControls onSearch={hospitalSearch.search} loading={hospitalSearch.loading} />
 
@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 14,
   },
 
   petSelectButton: {
@@ -386,11 +386,12 @@ const styles = StyleSheet.create({
   },
 
   healthReportButton: {
-    marginHorizontal: 20, marginTop: 12, paddingHorizontal: 20, paddingVertical: 14,
-    minHeight: 48, backgroundColor: '#EEF7FD', borderRadius: 12, flexDirection: 'row',
+    marginHorizontal: 20, marginTop: 20, paddingHorizontal: 20, paddingVertical: 14,
+    minHeight: 48, backgroundColor: '#E8F4FD', borderWidth: 1, borderColor: '#8FC1E7', borderRadius: 12, flexDirection: 'row',
     alignItems: 'center', justifyContent: 'space-between', gap: 8,
   },
-  healthReportChevron: { width: 14, height: 14, tintColor: '#0081D5', resizeMode: 'contain' },
+  healthReportText: { color: '#075B9D' },
+  healthReportChevron: { width: 14, height: 14, tintColor: '#075B9D', resizeMode: 'contain' },
 
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center',
@@ -408,6 +409,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', marginTop: 32, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 12,
   },
 
+  whiteSectionAfterReport: { marginTop: 24 },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: '#000', marginBottom: 16 },
 
 });
