@@ -1,4 +1,4 @@
-import { getCertificateImageUrl, getCertificateOcrResult, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -13,6 +13,7 @@ const response = (status: number, body: unknown) => ({
   status,
   ok: status >= 200 && status < 300,
   json: async () => body,
+  text: async () => JSON.stringify(body),
 });
 const image = { uri: 'file:///image.jpg', type: 'image/jpeg', fileSize: 1024 };
 
@@ -196,4 +197,66 @@ it('reads the signed original image URL through the authenticated submission end
   fetchMock.mockResolvedValueOnce(response(200, { image_url: imageUrl, expires_in: 300 }));
   await expect(getCertificateImageUrl(id, new AbortController().signal)).resolves.toBe(imageUrl);
   expect(fetchMock.mock.calls[0][0]).toContain('/api/submissions/' + id + '/image');
+});
+
+it('finds the latest completed eye submission without downloading the rest of history', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(200, { pageNumber: 1, hasNext: true, submissions: [
+      { submissionId: 'pending', type: 'EYE', status: 'PENDING' },
+    ] }))
+    .mockResolvedValueOnce(response(200, { pageNumber: 2, hasNext: true, submissions: [
+      { submissionId: 'complete', type: 'EYE', status: 'COMPLETED', submittedAt: '2026-11-16T00:00:00Z' },
+      { submissionId: 'older', type: 'EYE', status: 'COMPLETED' },
+    ] }));
+  await expect(getLatestCompletedPetSubmission(12, 'EYE', new AbortController().signal))
+    .resolves.toMatchObject({ id: 'complete' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][0]).toContain('?type=EYE&page=1');
+});
+
+const missingResource = { code: ['RESOURCE_NOT_FOUND'] };
+
+it('treats a missing history as empty only after confirming the pet', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource)).mockResolvedValueOnce(response(200, { id: 12 }));
+  await expect(getPetDiagnosisHistory(12, new AbortController().signal)).resolves.toEqual([]);
+  expect(fetchMock.mock.calls[1][0]).toMatch(/\/api\/pets\/12$/);
+});
+
+it('does not treat an inaccessible pet as empty history', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource)).mockResolvedValueOnce(response(404, missingResource));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('RESOURCE_NOT_FOUND');
+});
+
+it('does not treat a different 404 code as empty history', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, { code: ['ENDPOINT_NOT_FOUND'] }));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('ENDPOINT_NOT_FOUND');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('does not suppress a missing later page', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissions: [{ id: 'one' }], pageNumber: 1, hasNext: true }))
+    .mockResolvedValueOnce(response(404, missingResource));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('RESOURCE_NOT_FOUND');
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('shares one pet verification when eye and urine lists both return 404', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource))
+    .mockResolvedValueOnce(response(404, missingResource))
+    .mockResolvedValueOnce(response(200, { id: 12 }));
+  const { signal } = new AbortController();
+  const verify = createPetOwnershipCheck(12, signal);
+  await expect(Promise.all([
+    getLatestCompletedPetSubmission(12, 'EYE', signal, verify),
+    getLatestCompletedPetSubmission(12, 'URINE', signal, verify),
+  ])).resolves.toEqual([undefined, undefined]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('distinguishes malformed unfiltered history from a successful empty page', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissions: null, hasNext: false }))
+    .mockResolvedValueOnce(response(200, { submissions: [], hasNext: false }));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('진단 이력을 불러오지 못했습니다.');
+  await expect(getPetDiagnosisHistory(12)).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
 });

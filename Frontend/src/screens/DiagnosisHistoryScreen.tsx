@@ -12,7 +12,7 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
-import { getPetSubmissions, SubmissionSummary } from '../api/diagnosis';
+import { getPetDiagnosisHistory, SubmissionSummary } from '../api/diagnosis';
 import { getMyPets, PetListItem } from '../api/pets';
 import { resolveImageUri } from '../utils/imageUri';
 
@@ -123,7 +123,7 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
     setErrorMessage(null);
 
     try {
-      const submissions = await getPetSubmissions(petToLoad, signal, true);
+      const submissions = await getPetDiagnosisHistory(petToLoad, signal);
       if (signal.aborted) return;
       const normalized = submissions
         .map(normalizeSubmission)
