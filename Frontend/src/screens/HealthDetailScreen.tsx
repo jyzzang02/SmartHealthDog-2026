@@ -1,5 +1,4 @@
 import { getLatestServerCheckupDate } from '../api/petProfileHealth';
-import { logCertificateDebug } from '../utils/certificateDebug';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
 import { useNavigation, useRoute, useFocusEffect, useIsFocused } from '@react-navigation/native';
@@ -129,24 +128,13 @@ const HealthDetailScreen = () => {
     let active = true;
     setServerHistory([]);
     setHistoryStatus('loading');
-    logCertificateDebug('list:request');
     getPetSubmissions(petId, controller.signal, true, 'HEALTH_CERTIFICATE').then(records => {
       if (controller.signal.aborted) throw new Error();
       const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED');
-      if (__DEV__) {
-        const latestLinked = healthStore.getHistory(petId).find(record => record.certificateSubmissionId)?.certificateSubmissionId;
-        logCertificateDebug('list:response', {
-          received: records.length,
-          visible: visible.length,
-          hasLocalSubmission: !!latestLinked,
-          localSubmissionFound: !!latestLinked && visible.some(record => record.id === latestLinked),
-        });
-      }
       setServerHistory(visible);
       setHistoryStatus('done');
     }).catch(() => {
       if (active) {
-        logCertificateDebug('list:failed', { aborted: controller.signal.aborted });
         setHistoryStatus('error');
       }
     }).finally(() => clearTimeout(timeout));
