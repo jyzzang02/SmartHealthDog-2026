@@ -21,6 +21,7 @@ class MainApplication : Application(), ReactApplication {
               add(WalkLocationTrackingPackage())
               add(KakaoLoginWebViewPackage())
               add(RespirationFilePackage())
+              add(HealthReportPdfPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

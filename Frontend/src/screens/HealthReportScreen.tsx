@@ -1,10 +1,13 @@
-import React, { useEffect, useState } from 'react';
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { urineAnalyteLabel } from '../utils/urineAnalyteDisplay';
+import { EYE_EPIPHORA_NAME, isLegacyEpiphoraName } from '../utils/eyeConditionDisplay';
+import React, { useEffect, useRef, useState } from 'react';
+import { Alert, Image, Modal, NativeModules, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useIsFocused } from '@react-navigation/native';
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import { getHealthReport, type HealthReport, type HealthReportPeriod, type HealthReportRow, type HealthReportSection } from '../api/diagnosis';
+import { getMyPets, type PetListItem } from '../api/pets';
 import { STAGES, STAGE_BAR_COLOR } from '../data/selfCheck';
 import { getAuthSession } from '../storage/tokenStorage';
 import { getSeoulDateKey } from '../utils/walkWeek';
@@ -53,6 +56,28 @@ const withUnit = (value: unknown, unit: string) => {
 };
 const asText = (value: unknown) => typeof value === 'string' && value.trim() ? value : undefined;
 
+const EYE_CONDITION_LABELS = new Map([
+  ['blepharitis', '안검염'],
+  ['cataract', '백내장'],
+  ['conjunctivitis', '결막염'],
+  ['corneal dystrophy', '각막 이영양증'],
+  ['corneal ulcer', '각막 궤양'],
+  ['entropion', '안검내반'],
+  ['eyelid tumor', '안검 종양'],
+  ['epiphora', EYE_EPIPHORA_NAME],
+  ['non ulcerative keratitis', '비궤양성 각막염'],
+  ['nuclear sclerosis', '핵경화증'],
+  ['pigmentary keratitis', '색소성 각막염'],
+  ['ulcerative keratitis', '궤양성 각막염'],
+]);
+
+const eyeConditionLabel = (value: unknown) => {
+  const name = asText(value)?.trim();
+  if (!name) return undefined;
+  const key = name.toLowerCase().replace(/[-_\s]+/g, ' ');
+  return isLegacyEpiphoraName(name) ? EYE_EPIPHORA_NAME : EYE_CONDITION_LABELS.get(key) ?? name;
+};
+
 const recordedDate = (value: unknown) => {
   const text = asText(value);
   if (!text) return undefined;
@@ -100,11 +125,31 @@ const formatRecord = (key: Exclude<HealthReportSection, 'selfChecks'>, row: Heal
   const values = {
     certificates: [asText(row.diagnosedDateText), asText(row.diseaseName)],
     walks: [withUnit(row.distanceKm, ' km'), withUnit(row.activeDurationSeconds, '초')],
-    eyes: [asText(row.conditionName)],
+    eyes: [eyeConditionLabel(row.conditionName)],
     urines: [asText(row.analyteName), asText(row.value) ?? withUnit(row.value, '')],
     respirations: [respirationLabel],
   }[key].filter(Boolean);
   return [date, ...(values.length ? values : ['상세 정보 없음'])].filter(Boolean).join(' · ');
+};
+
+type GroupedSection = 'eyes' | 'urines';
+
+const groupDiagnosisRows = (section: GroupedSection, rows: HealthReportRow[]) => {
+  const groups = new Map<string, { record: HealthReportRow; results: Set<string> }>();
+  rows.forEach((row, index) => {
+    const id = uuid(row.submissionId);
+    const key = id ?? 'unlinked-' + index;
+    let group = groups.get(key);
+    if (!group) {
+      group = { record: row, results: new Set() };
+      groups.set(key, group);
+    }
+    const result = section === 'eyes' ? eyeConditionLabel(row.conditionName) : [
+      asText(row.analyteName), asText(row.value) ?? withUnit(row.value, ''),
+    ].filter(Boolean).join(' · ');
+    if (result) group.results.add(result.trim());
+  });
+  return Array.from(groups, ([key, { record, results }]) => ({ key, record, results: [...results] }));
 };
 
 const getMetrics = (summary?: HealthReportRow) => {
@@ -116,6 +161,133 @@ const getMetrics = (summary?: HealthReportRow) => {
     selfChecks !== undefined && certificates !== undefined ? (selfChecks + certificates) + '건' : undefined,
     withUnit(summary?.respirationCompletedCount, '건'),
   ];
+};
+
+type PdfRole = 'title' | 'pet' | 'period' | 'metric' | 'section' | 'record' | 'muted' | 'notice' | 'stage1' | 'stage2' | 'stage3' | 'stage4';
+type PdfUrineResult = { label: string; value: string; isAbnormal: boolean };
+type PdfContent =
+  | { kind: 'metric' | 'walk'; label: string; value: string; detail?: string }
+  | { kind: 'eyes'; tags: string[] }
+  | { kind: 'urines'; results: PdfUrineResult[] }
+  | { kind: 'legacy' | 'footer' };
+type PdfParagraph = { text: string; heading: boolean; role: PdfRole; content?: PdfContent };
+
+const urinePdfResult = (row: HealthReportRow): PdfUrineResult => {
+  const rawValue = asText(row.value) ?? withUnit(row.value, '');
+  return {
+    label: urineAnalyteLabel(asText(row.analyteName) ?? '미확인'),
+    value: rawValue ?? EMPTY,
+    isAbnormal: typeof row.isAbnormal === 'boolean' ? row.isAbnormal
+      : /^(positive|moderate|small|large|trace|high|low)$/i.test(rawValue?.trim() ?? ''),
+  };
+};
+type ReportPdfModule = { save: (fileName: string, paragraphs: PdfParagraph[]) => Promise<boolean> };
+const REPORT_TITLE = '통합 건강 리포트';
+const REPORT_DISCLAIMER = '이 리포트는 기존 기록의 요약이며, 수의사의 진단을 대신하지 않아요.';
+const URGENT_NOTE = '해당 기간의 자가진단에 즉시 확인이 필요한 증상이 기록되었어요.';
+
+const buildPdfParagraphs = (petName: string, start: string, end: string, report: HealthReport): PdfParagraph[] => {
+  const paragraphs: PdfParagraph[] = [];
+  const add = (text: string, role: PdfRole = 'record', content?: PdfContent) => {
+    paragraphs.push({ text, role, heading: role === 'title' || role === 'section', ...(content && { content }) });
+  };
+  add(REPORT_TITLE, 'title');
+  add('반려동물: ' + petName, 'pet');
+  add('조회 기간: ' + start + ' ~ ' + end + ' (한국 시간)', 'period');
+  if (report.assessmentLevel === 'URGENT_FLAG_RECORDED') add(URGENT_NOTE, 'notice');
+  add('한눈에 보기', 'section');
+  getMetrics(report.summary).forEach((value, index) => {
+    const label = METRICS[index];
+    const displayValue = value ?? EMPTY;
+    add(label + ': ' + displayValue, 'metric', { kind: 'metric', label, value: displayValue });
+  });
+  add('상세 기록', 'section');
+  for (const { key, label } of SECTIONS) {
+    const count = sectionCount(key, report.summary);
+    add(count === undefined ? label : label + ' · ' + count + '건', 'section');
+    const records = report.sections[key];
+    if (!records.length) add('해당 기간의 기록이 없어요.', 'muted');
+    if (key === 'eyes') {
+      const displayThreshold = 0.5;
+      const maxItems = 3;
+      const dates = new Map<string, Map<string, number>>();
+      for (const record of records) {
+        const date = recordedDate(record.submittedAtUtcNaive) ?? '날짜 미확인';
+        const scores = dates.get(date) ?? new Map<string, number>();
+        dates.set(date, scores);
+        const name = eyeConditionLabel(record.conditionName);
+        const raw = record.probability;
+        const score = typeof raw === 'string' && raw.trim() ? numberValue(Number(raw)) : numberValue(raw);
+        if (name && score !== undefined && score >= 0 && score <= 1) {
+          scores.set(name, Math.max(scores.get(name) ?? 0, score));
+        }
+      }
+      for (const [date, scores] of dates) {
+        const tags = [...scores].filter(([, score]) => score >= displayThreshold)
+          .sort(([, a], [, b]) => b - a).slice(0, maxItems)
+          .map(([name, score]) => name + ' ' + (score * 100).toFixed(1) + '%');
+        if (!tags.length) {
+          add(date + (scores.size ? ' · 50% 이상 항목 없음' : ' · AI 점수 없음'));
+          continue;
+        }
+        add(date + ' · AI 상위 점수', 'record', { kind: 'eyes', tags });
+        tags.forEach(tag => add(tag, 'record', { kind: 'legacy' }));
+      }
+      if (dates.size) add('AI 점수 50% 이상인 상위 3개를 표시해요. 50%는 진단 기준이 아니에요.', 'muted');
+      continue;
+    }
+    if (key === 'urines') {
+      const submissions = new Map<string, { date: string; results: PdfUrineResult[] }>();
+      records.forEach((record, index) => {
+        const id = uuid(record.submissionId) ?? 'unlinked-' + index;
+        const group = submissions.get(id) ?? {
+          date: recordedDate(record.submittedAtUtcNaive) ?? '날짜 미확인',
+          results: [],
+        };
+        group.results.push(urinePdfResult(record));
+        submissions.set(id, group);
+      });
+      for (const { date, results } of submissions.values()) {
+        add(date, 'record', { kind: 'urines', results });
+        for (const result of results) add(result.label + ' · ' + result.value, 'record', { kind: 'legacy' });
+      }
+      continue;
+    }
+    for (const record of records) {
+      if (key === 'walks') {
+        add(formatRecord(key, record), 'record', {
+          kind: 'walk',
+          label: recordedDate(record.recordedAt ?? record.submittedAtUtcNaive ?? record.startTime) ?? '산책 기록',
+          value: withUnit(record.distanceKm, ' km') ?? EMPTY,
+          detail: withUnit(record.activeDurationSeconds, '초'),
+        });
+        continue;
+      }
+      if (key === 'certificates') {
+        const date = asText(record.diagnosedDateText) ?? recordedDate(record.recordedAt ?? record.submittedAtUtcNaive);
+        add((date ?? '날짜 미확인') + ' · 검진 기록');
+        continue;
+      }
+      if (key !== 'selfChecks') {
+        add(formatRecord(key, record));
+        continue;
+      }
+      const stage = record.overallStage;
+      const status = stage === 1 || stage === 2 || stage === 3 || stage === 4
+        ? stage + '단계 · ' + STAGES[stage].label : '단계 미확인';
+      add([recordedDate(record.recordedAt), status].filter(Boolean).join(' · '),
+        stage === 1 || stage === 2 || stage === 3 || stage === 4 ? `stage${stage}` : 'record');
+    }
+  }
+  add(REPORT_DISCLAIMER, 'muted', { kind: 'footer' });
+  return paragraphs;
+};
+
+const makePdfFileName = (petName: string) => {
+  const sanitized = Array.from(petName, char => char.charCodeAt(0) < 32 || char.charCodeAt(0) === 127 ? ' ' : char).join('');
+  const name = Array.from(sanitized.replace(/[<>:"/\\|?*]/g, ' ').replace(/\s+/g, ' ').trim())
+    .slice(0, 32).join('') || '반려동물';
+  return name + ' ' + REPORT_TITLE + ' ' + getSeoulDateKey() + '.pdf';
 };
 
 const CHEVRON = require('../assets/icon_right.png');
@@ -146,15 +318,25 @@ const movePeriod = (start: string, period: Period, direction: -1 | 1) => {
 };
 
 export default function HealthReportScreen({ navigation, route }: Props) {
-  const { petId, petName, petImageUri } = route.params;
   const focused = useIsFocused();
   const session = getAuthSession();
   const today = getSeoulDateKey();
+  const [petOptions, setPetOptions] = useState<{ session: symbol; pets: PetListItem[] }>();
+  const [petSelection, setPetSelection] = useState<{ session: symbol; id: number }>();
+  const [petPickerOpen, setPetPickerOpen] = useState(false);
+  const pets = petOptions?.session === session ? petOptions.pets : [];
+  const selectedPet = petSelection?.session === session ? pets.find(pet => pet.id === petSelection.id) : undefined;
+  const petId = selectedPet?.id ?? route.params.petId;
+  const petName = selectedPet?.name ?? route.params.petName;
+  const petImageUri = selectedPet ? selectedPet.profilePicture : route.params.petImageUri;
   const [period, setPeriod] = useState<Period>('WEEK');
   const [anchor, setAnchor] = useState(today);
   const [expanded, setExpanded] = useState<HealthReportSection | null>(null);
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<LoadResult>();
+  const [isSavingPdf, setIsSavingPdf] = useState(false);
+  const savingPdf = useRef(false);
+  const pdfModule = NativeModules.HealthReportPdf as ReportPdfModule | undefined;
 
   const { start, end } = getPeriodDates(anchor, period);
   const next = movePeriod(start, period, 1);
@@ -164,6 +346,20 @@ export default function HealthReportScreen({ navigation, route }: Props) {
   const report = current?.report;
   const metrics = getMetrics(report?.summary);
   const hasRecords = report && SECTIONS.some(section => report.sections[section.key].length > 0);
+
+  useEffect(() => {
+    if (!focused) {
+      setPetPickerOpen(false);
+      return;
+    }
+    let active = true;
+    getMyPets().then(list => {
+      if (active && getAuthSession() === session) setPetOptions({ session, pets: list });
+    }).catch(() => {
+      // The report opened for the current pet remains available.
+    });
+    return () => { active = false; };
+  }, [focused, session]);
 
   useEffect(() => {
     if (!focused) return;
@@ -187,6 +383,21 @@ export default function HealthReportScreen({ navigation, route }: Props) {
       controller.abort();
     };
   }, [focused, key, session, petId, period, start, end]);
+
+  const savePdf = async () => {
+    if (!report || !pdfModule || savingPdf.current || getAuthSession() !== session) return;
+    savingPdf.current = true;
+    setIsSavingPdf(true);
+    try {
+      const saved = await pdfModule.save(makePdfFileName(petName), buildPdfParagraphs(petName, start, end, report));
+      if (saved && getAuthSession() === session) Alert.alert('PDF 저장 완료', '선택한 위치에 건강 리포트를 저장했어요.');
+    } catch {
+      if (getAuthSession() === session) Alert.alert('PDF 저장 실패', 'PDF를 저장하지 못했어요. 다시 시도해 주세요.');
+    } finally {
+      savingPdf.current = false;
+      setIsSavingPdf(false);
+    }
+  };
 
   const recordAction = (section: HealthReportSection, row: HealthReportRow) => {
     switch (section) {
@@ -230,13 +441,35 @@ export default function HealthReportScreen({ navigation, route }: Props) {
           onPress={() => navigation.goBack()}>
           <Image source={BACK} style={styles.backIcon} accessible={false} />
         </Pressable>
-        <Text accessibilityRole="header" style={styles.heading}>통합 건강 리포트</Text>
+        <Text accessibilityRole="header" style={styles.heading}>{REPORT_TITLE}</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.periodCard}>
           <View style={styles.periodIndicator} />
-          <Text style={styles.petName}>{petName}</Text>
+          <View style={styles.periodTitleRow}>
+            {pets.length > 1 ? (
+              <Pressable accessibilityRole="button" accessibilityLabel={'반려동물 선택: ' + petName}
+                accessibilityState={{ expanded: petPickerOpen, disabled: isSavingPdf }}
+                disabled={isSavingPdf} style={styles.petPickerTrigger} onPress={() => setPetPickerOpen(true)}>
+                <Text style={[styles.petName, styles.petPickerName]} numberOfLines={1}>{petName}</Text>
+                <Image source={CHEVRON} style={[styles.chevron, styles.chevronDown]} accessible={false} />
+              </Pressable>
+            ) : <Text style={styles.petName}>{petName}</Text>}
+            {pdfModule && (
+              <Pressable accessibilityRole="button" accessibilityLabel="PDF 저장"
+                accessibilityState={{ disabled: !report || isSavingPdf, busy: isSavingPdf }}
+                disabled={!report || isSavingPdf} onPress={savePdf}
+                style={[styles.pdfButton, (!report || isSavingPdf) && styles.pdfButtonDisabled]}>
+                <Text style={styles.pdfText}>PDF</Text>
+                <View style={styles.pdfIcon} accessible={false}>
+                  <View style={styles.pdfArrowStem} />
+                  <Image source={require('../assets/icon_arrowDown.png')} style={styles.pdfArrow} />
+                  <View style={styles.pdfTray} />
+                </View>
+              </Pressable>
+            )}
+          </View>
           <Text style={styles.periodCaption}>기간별 건강 기록 모아보기</Text>
           <View style={styles.segment}>
             {PERIODS.map(({ value, label }) => (
@@ -268,7 +501,7 @@ export default function HealthReportScreen({ navigation, route }: Props) {
             </View>
             <View style={styles.alertContent}>
               <Text accessibilityRole="header" style={styles.alertTitle}>확인이 필요한 기록</Text>
-              <Text style={styles.alertBody}>해당 기간의 자가진단에 즉시 확인이 필요한 증상이 기록되었어요.</Text>
+              <Text style={styles.alertBody}>{URGENT_NOTE}</Text>
             </View>
           </View>
         )}
@@ -300,6 +533,8 @@ export default function HealthReportScreen({ navigation, route }: Props) {
             const isExpanded = expanded === section;
             const rows = report?.sections[section];
             const count = sectionCount(section, report?.summary);
+            const groups = isExpanded && rows && (section === 'eyes' || section === 'urines')
+              ? groupDiagnosisRows(section, rows) : undefined;
             return (
               <View key={section} style={styles.record}>
                 <Pressable accessibilityRole="button" accessibilityState={{ expanded: isExpanded }}
@@ -310,7 +545,28 @@ export default function HealthReportScreen({ navigation, route }: Props) {
                 </Pressable>
                 {isExpanded && (rows?.length
                   ? <View style={styles.recordList}>
-                    {rows.map((row, index) => {
+                    {groups ? groups.map(({ key: id, record, results }) => {
+                      const openRecord = recordAction(section, record);
+                      const summary = (
+                        <View style={styles.diagnosisGroup}>
+                          <View style={styles.diagnosisGroupHeader}>
+                            <Text style={styles.diagnosisDate}>{recordedDate(record.submittedAtUtcNaive) ?? '검사 기록'}</Text>
+                            <Text style={styles.sectionCount}>{results.length + '개 항목'}</Text>
+                          </View>
+                          <Text numberOfLines={1} style={styles.diagnosisPreview}>
+                            {results.slice(0, 2).join(', ') || '상세 정보 없음'}
+                          </Text>
+                        </View>
+                      );
+                      if (!openRecord) return <View key={id}>{summary}</View>;
+                      return (
+                        <Pressable key={id} accessibilityRole="button" style={styles.recordLink}
+                          onPress={() => { if (getAuthSession() === session) openRecord(); }}>
+                          <View style={styles.linkContent}>{summary}</View>
+                          <Image source={CHEVRON} style={styles.chevron} accessible={false} />
+                        </Pressable>
+                      );
+                    }) : rows.map((row, index) => {
                       const openRecord = recordAction(section, row);
                       const content = section === 'selfChecks'
                         ? <SelfCheckReportRow record={row} />
@@ -332,8 +588,37 @@ export default function HealthReportScreen({ navigation, route }: Props) {
           })}
         </View>
 
-        <Text style={styles.disclaimer}>이 리포트는 기존 기록의 요약이며, 수의사의 진단을 대신하지 않아요.</Text>
+        <Text style={styles.disclaimer}>{REPORT_DISCLAIMER}</Text>
       </ScrollView>
+      {petPickerOpen && pets.length > 1 && (
+        <Modal transparent animationType="fade" onRequestClose={() => setPetPickerOpen(false)}>
+          <View style={styles.petPickerOverlay}>
+            <Pressable accessibilityRole="button" accessibilityLabel="닫기"
+              style={StyleSheet.absoluteFill} onPress={() => setPetPickerOpen(false)} />
+            <View accessibilityViewIsModal style={styles.petPickerPanel}>
+              <Text accessibilityRole="header" style={styles.petPickerTitle}>반려동물 선택</Text>
+              <ScrollView>
+                {pets.map(pet => {
+                  const selected = pet.id === petId;
+                  return (
+                    <Pressable key={pet.id} accessibilityRole="button" accessibilityState={{ selected }}
+                      style={[styles.petPickerOption, selected && styles.petPickerSelected]}
+                      onPress={() => {
+                        setPetPickerOpen(false);
+                        if (selected) return;
+                        setPetSelection({ session, id: pet.id });
+                        setExpanded(null);
+                        setRevision(value => value + 1);
+                      }}>
+                      <Text style={[styles.petPickerLabel, selected && styles.petPickerSelectedLabel]}>{pet.name}</Text>
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      )}
     </SafeAreaView>
   );
 }
@@ -347,8 +632,27 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 28, gap: 12 },
   periodCard: { backgroundColor: '#E8F4FF', borderRadius: 20, padding: 14, gap: 5 },
   periodIndicator: { backgroundColor: '#FFC94D', width: 28, height: 4, borderRadius: 2 },
-  petName: { fontSize: 24, fontWeight: '800', color: '#152F48' },
-  periodCaption: { fontSize: 14, color: '#47617A' },
+  petName: { fontSize: 24, fontWeight: '800', color: '#152F48', flex: 1 },
+  petPickerName: { flex: 0, flexShrink: 1 },
+  petPickerTrigger: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  petPickerOverlay: { flex: 1, backgroundColor: '#00000055', alignItems: 'center', justifyContent: 'center', padding: 24 },
+  petPickerPanel: { width: '100%', maxWidth: 420, maxHeight: '70%', backgroundColor: '#FFFFFF', borderRadius: 18, padding: 16 },
+  petPickerTitle: { fontSize: 18, fontWeight: '700', color: '#152F48', marginBottom: 8 },
+  petPickerOption: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10 },
+  petPickerSelected: { backgroundColor: '#E8F4FF' },
+  petPickerLabel: { fontSize: 16, color: '#152F48' },
+  petPickerSelectedLabel: { fontWeight: '700' },
+  periodTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  periodCaption: { fontSize: 14, color: '#47617A', flexShrink: 1 },
+  pdfButton: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 40, paddingHorizontal: 10,
+    borderWidth: 1, borderColor: '#E5AAB3', borderRadius: 8, backgroundColor: '#FFF0F1' },
+  pdfButtonDisabled: { opacity: 0.5 },
+  pdfText: { fontSize: 13, fontWeight: '800', color: '#A32939' },
+  pdfIcon: { width: 14, height: 15, alignItems: 'center' },
+  pdfArrowStem: { width: 1.5, height: 6, backgroundColor: '#A32939' },
+  pdfArrow: { position: 'absolute', top: 3, width: 9, height: 8, resizeMode: 'contain', tintColor: '#A32939' },
+  pdfTray: { position: 'absolute', bottom: 0, width: 13, height: 4, borderColor: '#A32939',
+    borderLeftWidth: 1, borderRightWidth: 1, borderBottomWidth: 1, borderBottomLeftRadius: 2, borderBottomRightRadius: 2 },
   segment: { flexDirection: 'row', backgroundColor: '#D7E8F8', padding: 3, borderRadius: 12, marginTop: 5 },
   segmentButton: { flex: 1, minHeight: 44, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
   segmentSelected: { backgroundColor: '#FFFFFF' },
@@ -389,6 +693,10 @@ const styles = StyleSheet.create({
   recordLink: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 6 },
   linkContent: { flex: 1 },
   recordDetail: { color: '#29435C', fontSize: 13, lineHeight: 19, padding: 9, backgroundColor: '#F5F8FB', borderRadius: 10 },
+  diagnosisGroup: { backgroundColor: '#F5F8FB', borderRadius: 10, padding: 10, gap: 4 },
+  diagnosisGroupHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
+  diagnosisDate: { color: '#152F48', fontSize: 14, fontWeight: '700' },
+  diagnosisPreview: { color: '#47617A', fontSize: 13, lineHeight: 18 },
   recordNote: { color: '#47617A', fontSize: 13, paddingBottom: 12 },
   selfCheckRow: { flexDirection: 'row', alignItems: 'center', padding: 9, borderRadius: 10, gap: 9, backgroundColor: '#F3F6F9' },
   stageRail: { width: 4, alignSelf: 'stretch', borderRadius: 3, backgroundColor: '#A3B1BF' },
