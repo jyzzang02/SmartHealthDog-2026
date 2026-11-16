@@ -14,10 +14,12 @@ import {
 import PetProfileCard from "../components/PetProfileCard";
 import Header from "../components/Header";
 import { getMyPets, PetListItem } from "../api/pets";
+import { formatLatestProfileCheckupDate, formatProfileRecordDate, getPetProfileHealth, type PetProfileHealth } from "../api/petProfileHealth";
+import { healthStore } from "../store/healthStore";
 import { getMyProfile, UserProfile } from "../api/users";
 import { resolveImageUri } from "../utils/imageUri";
-import { getStoredAccessToken } from "../storage/tokenStorage";
-import { useFocusEffect, useNavigation } from "@react-navigation/native";
+import { getAuthSession, getStoredAccessToken } from "../storage/tokenStorage";
+import { useFocusEffect, useIsFocused, useNavigation } from "@react-navigation/native";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import type { RootStackParamList } from "../../App";
 import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
@@ -25,10 +27,17 @@ import { useTabScrollToTop } from "../hooks/useTabScrollToTop";
 const SCREEN_WIDTH = Dimensions.get("window").width;
 const CARD_WIDTH = SCREEN_WIDTH * 0.85;
 const SPACING = 16;
+const UNAVAILABLE_HEALTH: PetProfileHealth = {
+  eye: { failed: true }, urine: { failed: true }, selfCheck: { failed: true }, respiration: { failed: true },
+};
+const conditionDate = (entry: PetProfileHealth["eye"]) =>
+  entry.failed ? "조회 실패" : formatProfileRecordDate(entry.date);
 
 const MyPageScreen = () => {
   type MyPageNavProp = StackNavigationProp<RootStackParamList, "MyPage">;
   const navigation = useNavigation<MyPageNavProp>();
+  const focused = useIsFocused();
+  const session = getAuthSession();
 
   const scrollRef = useRef<ScrollView>(null);
   useTabScrollToTop(scrollRef);
@@ -36,6 +45,7 @@ const MyPageScreen = () => {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [petList, setPetList] = useState<PetListItem[]>([]);
+  const [profileHealth, setProfileHealth] = useState<{ session: symbol; byPet: Record<number, PetProfileHealth> }>();
   const [isPetsLoading, setIsPetsLoading] = useState(false);
   const [petsError, setPetsError] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
@@ -80,15 +90,10 @@ const MyPageScreen = () => {
     return sex;
   };
 
-  const formatBirthDate = (birthDate?: string) => {
-    if (!birthDate) return "";
-    const [datePart] = birthDate.split("T");
-    return datePart;
-  };
-
   const loadData = useCallback(async () => {
     const generation = ++petLoadGeneration.current;
-    const isCurrent = () => isMountedRef.current && generation === petLoadGeneration.current;
+    const loadSession = getAuthSession();
+    const isCurrent = () => isMountedRef.current && generation === petLoadGeneration.current && getAuthSession() === loadSession;
     setIsPetsLoading(true);
     setPetsError(null);
 
@@ -100,6 +105,7 @@ const MyPageScreen = () => {
       if (!isCurrent()) return;
       setUser(profileData);
       setPetList(petsData);
+      setProfileHealth({ session: loadSession, byPet: {} });
 
     } catch (error) {
       if (!isCurrent()) return;
@@ -119,19 +125,61 @@ const MyPageScreen = () => {
     }, [loadData])
   );
 
+  const activePetId = petList[Math.min(Math.max(currentIndex, 0), petList.length - 1)]?.id;
+  const selectedHealth = profileHealth?.session === session && activePetId !== undefined
+    ? profileHealth.byPet[activePetId] : undefined;
+  useEffect(() => {
+    if (!focused || isPetsLoading || petsError || profileHealth?.session !== session ||
+        activePetId === undefined || selectedHealth) return;
+    const controller = new AbortController();
+    let active = true;
+    const commit = (data: PetProfileHealth) => {
+      if (!active || getAuthSession() !== session) return;
+      setProfileHealth(current => current?.session === session
+        ? { session, byPet: { ...current.byPet, [activePetId]: data } } : current);
+    };
+    const timeout = setTimeout(() => controller.abort(), 20_000);
+    getPetProfileHealth(activePetId, controller.signal)
+      .then(commit)
+      .catch(() => commit(UNAVAILABLE_HEALTH))
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [focused, isPetsLoading, petsError, profileHealth?.session, session, activePetId, selectedHealth]);
+
   const petCards = useMemo(
     () =>
-      petList.map((pet) => ({
-        id: pet.id,
-        name: pet.name || "이름 없음",
-        type: pet.breed || mapSpeciesLabel(pet.species) || "",
-        gender: mapGenderLabel(pet.sex) || "",
-        birth: formatBirthDate(pet.birthDate) || "",
-        imageUrl: resolveImageUri(pet.profilePicture) || null,
-        healthInfo: Array.isArray(pet.healthInfo) ? pet.healthInfo : [],
-        condition: "정보 없음",
-      })),
-    [petList]
+      petList.map((pet) => {
+        const health = profileHealth?.session === session ? profileHealth.byPet[pet.id] : undefined;
+        const weightKg = typeof pet.weightKg === "number" && Number.isFinite(pet.weightKg) && pet.weightKg > 0
+          ? pet.weightKg : undefined;
+        const isHealthLoading = !health && focused && !petsError && pet.id === activePetId;
+        const checkupDate = formatLatestProfileCheckupDate(
+          healthStore.getHistory(pet.id).map(record => record.checkupDate),
+        );
+        const conditionRecords = health ? [
+          { label: "안구질환", date: conditionDate(health.eye) },
+          { label: "소변키트", date: conditionDate(health.urine) },
+          { label: "수면호흡", date: conditionDate(health.respiration) },
+          { label: "자가진단", date: conditionDate(health.selfCheck), stage: health.selfCheck.stage },
+        ] : undefined;
+        return {
+          id: pet.id,
+          name: pet.name || "이름 없음",
+          type: pet.breed || mapSpeciesLabel(pet.species) || "",
+          gender: mapGenderLabel(pet.sex) || "",
+          birth: pet.birthDate || pet.birthday || "",
+          imageUrl: resolveImageUri(pet.profilePicture) || null,
+          weightKg,
+          checkupDate,
+          condition: isHealthLoading ? "불러오는 중" : undefined,
+          conditionRecords,
+        };
+      }),
+    [petList, profileHealth, session, activePetId, focused, petsError]
   );
 
   const resolvedUserImage = resolveImageUri(user?.profilePicture);
@@ -235,7 +283,7 @@ const MyPageScreen = () => {
 
       {petCards.length > 1 && (
         <>
-          <View style={styles.petCarouselWrap}>
+          <View>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -281,7 +329,7 @@ const MyPageScreen = () => {
         </>
       )}
 
-      <View style={styles.divider} />
+      <View style={[styles.divider, petCards.length > 1 && styles.carouselDivider]} />
 
       <TouchableOpacity
         style={styles.btiSection}
@@ -344,16 +392,16 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   userBox: {
-    marginTop: 16,
+    marginTop: 4,
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 20,
     paddingVertical: 8,
   },
   userImage: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 52,
+    height: 52,
+    borderRadius: 26,
     backgroundColor: "#E0E0E0",
   },
   userRightBox: {
@@ -380,7 +428,7 @@ const styles = StyleSheet.create({
     color: "#000",
   },
   sectionHeader: {
-    marginTop: 16,
+    marginTop: 6,
     paddingHorizontal: 20,
     flexDirection: "row",
     alignItems: "center",
@@ -401,11 +449,8 @@ const styles = StyleSheet.create({
   dotContainer: {
     flexDirection: "row",
     alignSelf: "center",
-    marginTop: 32,
+    marginTop: 10,
     gap: 8,
-  },
-  petCarouselWrap: {
-    minHeight: 360,
   },
   singlePetCardWrap: {
     width: CARD_WIDTH,
@@ -426,10 +471,11 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F4F5",
     marginTop: 32,
   },
+  carouselDivider: { marginTop: 16 },
    btiSection: {
+     width: CARD_WIDTH,
+     alignSelf: "center",
      marginTop: 10,
-     paddingVertical: 0,
-     paddingHorizontal: 20,
      marginBottom: 2,
    },
    btiCard: {
@@ -437,7 +483,8 @@ const styles = StyleSheet.create({
      borderRadius: 16,
      borderWidth: 1.5,
      borderColor: '#E0F0FF',
-     paddingVertical: 24,
+     paddingTop: 14,
+     paddingBottom: 24,
      paddingHorizontal: 20,
      shadowColor: '#0081D5',
      shadowOffset: { width: 0, height: 2 },
