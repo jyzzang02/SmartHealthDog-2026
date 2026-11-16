@@ -42,7 +42,9 @@ it('uses the same newest registered record in the header and list even when its 
   expect(labels()).toContain('불러오는 중...');
   expect(labels().filter(label => label === '이전 병원')).toHaveLength(1);
   await act(async () => { resolveLatest({ hospitalName: '최근 병원' }); });
-  expect(labels().filter(label => label === '최근 병원')).toHaveLength(2);
+  expect(labels()).toContain('최근 검진 기록');
+  expect(labels()).toContain('병원: 최근 병원');
+  expect(labels().filter(label => label === '최근 병원')).toHaveLength(1);
   expect(labels().filter(label => label === '2026-11-16')).toHaveLength(3);
 });
 

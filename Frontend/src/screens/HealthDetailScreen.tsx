@@ -172,10 +172,10 @@ const HealthDetailScreen = () => {
 
   const serverIds = new Set(serverHistory.map(item => item.id));
   const localHistory = history.filter(record => !serverIds.has(record.certificateSubmissionId));
-  const hospitalLabel = (id: string | undefined, loadingLabel: string) => {
+  const hospitalLabel = (id: string | undefined, loadingLabel: string, namePrefix = '') => {
     const detail = id ? serverHospitals[id] : undefined;
     if (!detail) return loadingLabel;
-    return detail.status === 'error' ? '조회 실패' : detail.name || '병원명 미입력';
+    return detail.status === 'error' ? '조회 실패' : (detail.name ? namePrefix + detail.name : '병원명 미입력');
   };
 
   // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
@@ -227,7 +227,7 @@ const HealthDetailScreen = () => {
 
   const latestCompleted = serverHistory.find(record => record.status === 'COMPLETED');
   const displayDate = latestCompleted?.submittedAt ? formatScoreDate(latestCompleted.submittedAt) : undefined;
-  const recentStatusText = latestCompleted ? hospitalLabel(latestCompleted.id, '불러오는 중...')
+  const recentStatusText = latestCompleted ? hospitalLabel(latestCompleted.id, '불러오는 중...', '병원: ')
     : historyStatus === 'loading' ? '불러오는 중...'
     : historyStatus === 'error' ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
   const recentStatusColor = latestCompleted ? '#040505' : '#7B7C7D';
@@ -263,10 +263,10 @@ const HealthDetailScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* 최근 건강 상태 */}
+          {/* 최근 검진 기록 */}
           <View style={styles.recentStatusBox}>
             <View style={styles.recentStatusHeaderRow}>
-              <Text style={styles.recentStatusLabel}>최근 건강 상태</Text>
+              <Text style={styles.recentStatusLabel}>최근 검진 기록</Text>
               {displayDate && <Text style={styles.recentStatusDate}>{displayDate}</Text>}
             </View>
             <Text style={[styles.recentStatusValue, { color: recentStatusColor }]}>
