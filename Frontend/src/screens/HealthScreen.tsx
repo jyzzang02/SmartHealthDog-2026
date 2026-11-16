@@ -213,6 +213,20 @@ const HealthScreen: React.FC = () => {
 
       {/* ============================ */}
 
+      {currentPet && (
+        <TouchableOpacity
+          style={styles.healthReportButton}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('HealthReport', {
+            petId: currentPet.id, petName: currentPet.name, petImageUri: currentPet.profilePicture,
+          })}
+        >
+          <Text style={styles.healthInfoBtnText}>통합 건강 리포트</Text>
+          <Image source={require('../assets/icon_right.png')} style={styles.healthReportChevron} accessible={false} />
+        </TouchableOpacity>
+      )}
+
       {/* 동물병원 검색 */}
       {/* ============================ */}
       <View style={styles.whiteSection} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
@@ -370,6 +384,13 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#0081D5',
   },
+
+  healthReportButton: {
+    marginHorizontal: 20, marginTop: 12, paddingHorizontal: 20, paddingVertical: 14,
+    minHeight: 48, backgroundColor: '#EEF7FD', borderRadius: 12, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  },
+  healthReportChevron: { width: 14, height: 14, tintColor: '#0081D5', resizeMode: 'contain' },
 
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center',

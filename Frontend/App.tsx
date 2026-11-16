@@ -45,6 +45,7 @@ import RespirationResultScreen from './src/screens/RespirationResultScreen';
 import HealthCheckInputScreen from './src/screens/HealthCheckInputScreen';
 import HealthCheckResultScreen from './src/screens/HealthCheckResultScreen';
 import HealthDetailScreen from './src/screens/HealthDetailScreen';
+import HealthReportScreen from './src/screens/HealthReportScreen';
 import BreedDetailScreen from './src/screens/BreedDetailScreen';
 import PetQnaSelectScreen from './src/screens/PetQnaSelectScreen';
 import PetQnaListScreen from './src/screens/PetQnaListScreen';
@@ -177,6 +178,12 @@ export type RootStackParamList = {
     petName: string;
   };
 
+  HealthReport: {
+    petId: number;
+    petName: string;
+    petImageUri?: string;
+  };
+
   BreedDetail: {
     breedName: string;
   };
@@ -276,6 +283,7 @@ function AppNavigator() {
         <Stack.Screen name="HealthCheckInput" component={HealthCheckInputScreen} />
         <Stack.Screen name="HealthCheckResult" component={HealthCheckResultScreen} />
         <Stack.Screen name="HealthDetail" component={HealthDetailScreen} />
+        <Stack.Screen name="HealthReport" component={HealthReportScreen} />
         <Stack.Screen name="BreedDetail" component={BreedDetailScreen} />
 
         {/* Pet Q&A */}
