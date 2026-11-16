@@ -129,6 +129,13 @@ export default function RespirationResultScreen({ route, navigation }: Props) {
             {record?.status === 'FAILED' && <Text style={styles.label}>영상을 다시 촬영하거나 선택해 주세요.</Text>}
           </View>
         )}
+        {rate !== null && (
+          <View style={styles.tip}>
+            <Text style={styles.tipTitle}>Tip!</Text>
+            <Text style={styles.tipText}>강아지와 고양이가 편히 쉬거나 잘 때, 분당 약 15~30회가 일반적인 참고 범위예요.</Text>
+            <Text style={styles.tipText}>이 결과만으로 정상 여부를 판단할 수 없으며, 수의사의 진단이나 상담을 대신하지 않아요.</Text>
+          </View>
+        )}
         {result.state !== 'loading' && rate === null && (
           <Pressable accessibilityRole="button" style={styles.refresh}
             onPress={() => { setResult({ state: 'loading' }); setRevision(value => value + 1); }}>
@@ -152,6 +159,9 @@ const styles = StyleSheet.create({
   label: { fontSize: 16, color: '#343A40' },
   rate: { fontSize: 36, fontWeight: '700', color: '#006DAF' },
   unit: { fontSize: 16, fontWeight: '600' },
+  tip: { padding: 16, gap: 6, backgroundColor: '#FFF9E6', borderRadius: 12 },
+  tipTitle: { fontSize: 14, fontWeight: '700', color: '#5C4210' },
+  tipText: { fontSize: 14, lineHeight: 21, color: '#5C4210' },
   refresh: { minHeight: 48, justifyContent: 'center', alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: '#EAF5FF' },
   refreshText: { color: '#006DAF', fontWeight: '700', fontSize: 16 },
 });

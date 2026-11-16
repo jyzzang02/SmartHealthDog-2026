@@ -44,6 +44,7 @@ it('automatically checks pending and processing results and stops once complete'
     .mockResolvedValueOnce(record);
   await mount(record.videoId);
   expect(texts()).toContain('영상이 등록되었어요. 아직 분석 대기 중이에요.');
+  expect(texts()).not.toContain('Tip!');
   expect(texts()).not.toContain('회/분');
   await tick();
   expect(texts()).toContain('수면 영상을 분석하고 있어요.');
@@ -51,6 +52,8 @@ it('automatically checks pending and processing results and stops once complete'
   await tick();
   expect(texts()).toContain('회/분');
   expect(texts().some(value => Array.isArray(value) && value.includes(24))).toBe(true);
+  expect(texts()).toContain('Tip!');
+  expect(texts().some(value => typeof value === 'string' && value.includes('15~30회'))).toBe(true);
   await tick();
   expect(getRecord).toHaveBeenCalledTimes(3);
 });
@@ -97,6 +100,7 @@ it('shows failed results without internal error codes or a zero rate', async () 
   await mount(record.videoId);
   expect(texts()).toContain('영상을 분석하지 못했어요.');
   expect(texts()).not.toContain('INFERENCE_ERROR');
+  expect(texts()).not.toContain('Tip!');
   expect(texts()).not.toContain('회/분');
   await tick();
   expect(getRecord).toHaveBeenCalledTimes(1);
