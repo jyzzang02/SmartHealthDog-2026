@@ -563,18 +563,6 @@ const HealthCheckInputScreen = () => {
           />
         </View>
 
-        {/* 병원명 */}
-        <View style={styles.inputBox}>
-          <TextInput
-            style={styles.inputValue}
-            onFocus={revealFocusedInput}
-            value={hospitalName}
-            onChangeText={setHospitalName}
-            placeholder="병원명 (선택)"
-            placeholderTextColor="#aaa"
-          />
-        </View>
-
         {/* ── 진단서 이미지 ── */}
         <View style={styles.certBox}>
           <Text style={styles.certTitle}>진단서 이미지</Text>
@@ -620,6 +608,18 @@ const HealthCheckInputScreen = () => {
 
         {/* ── 진단서 정보 ── */}
         <Text style={[styles.sectionTitle, { marginTop: 28 }]}>진단서 정보</Text>
+        <View>
+          <Text style={styles.fieldLabel}>병원명 (선택)</Text>
+          <View style={styles.inputBox}>
+            <TextInput
+              accessibilityLabel="병원명 (선택)"
+              style={styles.inputValue}
+              onFocus={revealFocusedInput}
+              value={hospitalName}
+              onChangeText={setHospitalName}
+            />
+          </View>
+        </View>
         {CERTIFICATE_FIELDS.map(({ key, label, placeholder, multiline }) => (
           <View key={key}>
             <Text style={styles.fieldLabel}>{label}</Text>
