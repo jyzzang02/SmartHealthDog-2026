@@ -5,7 +5,7 @@ import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { getCertificateImageUrl, getCertificateOcrResult, updateCertificate } from '../api/diagnosis';
+import { createManualCertificate, getCertificateImageUrl, getCertificateOcrResult, updateCertificate } from '../api/diagnosis';
 import { clearPendingCertificate } from '../storage/certificateRecovery';
 import { getAuthSession } from '../storage/tokenStorage';
 import { healthStore } from '../store/healthStore';
@@ -54,7 +54,7 @@ const HealthCheckResultScreen = () => {
         setRemoteSummary({ petId, checkupDate: certificate.diagnosisDate, hospitalName: saved?.hospitalName, certificate });
         try {
           const uri = await getCertificateImageUrl(historySubmissionId, signal);
-          if (active && !signal.aborted && getAuthSession() === session) {
+          if (uri && active && !signal.aborted && getAuthSession() === session) {
             setRemoteSummary(current => current && { ...current, certificateImageUri: uri });
           }
         } catch {
@@ -80,23 +80,27 @@ const HealthCheckResultScreen = () => {
 
   const handleSave = async () => {
     if (!summary || viewOnly || saveRequest.current || getAuthSession() !== session) return;
-    if (!certificateSubmissionId) {
-      healthStore.set(petId, summary);
-      navigation.pop(2);
-      return;
-    }
-
     const controller = new AbortController();
     saveRequest.current = controller;
     setSaving(true);
     const timeout = setTimeout(() => controller.abort(), 30_000);
     try {
-      await updateCertificate(certificateSubmissionId, certificateChanges ?? {}, controller.signal);
-      if (certificateOwnerId !== undefined) {
-        await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
+      let submissionId: string;
+      if (certificateSubmissionId) {
+        await updateCertificate(certificateSubmissionId, certificateChanges ?? {}, controller.signal);
+        submissionId = certificateSubmissionId;
+        if (certificateOwnerId !== undefined) {
+          await clearPendingCertificate(certificateOwnerId, petId, certificateSubmissionId, session).catch(() => undefined);
+        }
+      } else {
+        submissionId = await createManualCertificate(petId, summary.certificate, controller.signal);
       }
       if (controller.signal.aborted || getAuthSession() !== session) return;
-      healthStore.set(petId, { ...summary, certificateSubmissionId });
+      healthStore.set(petId, {
+        ...summary,
+        certificateSubmissionId: submissionId,
+        certificateImageUri: certificateSubmissionId ? summary.certificateImageUri : undefined,
+      });
       navigation.pop(2);
     } catch (error) {
       if (saveRequest.current !== controller || getAuthSession() !== session) return;

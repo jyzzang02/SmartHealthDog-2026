@@ -1,4 +1,4 @@
-import { createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { createManualCertificate, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -26,6 +26,35 @@ beforeEach(async () => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   jest.restoreAllMocks();
+});
+
+const manualCertificate = {
+  animalName: 'Hana', species: 'CAT', breed: '', sex: '', coatColor: '', age: '',
+  features: '', diseaseName: 'Condition', onsetDate: '', diagnosisDate: '2026-11-16', prognosis: '', remarks: '',
+};
+
+it('creates a completed manual certificate with camelCase fields and no image', async () => {
+  fetchMock.mockResolvedValueOnce(response(201, { submissionId: id, petId: 12, status: 'COMPLETED' }));
+  const { signal } = new AbortController();
+  await expect(createManualCertificate(12, manualCertificate, signal)).resolves.toBe(id);
+  const [[url, request]] = fetchMock.mock.calls;
+  expect(new URL(url).pathname).toBe('/api/pets/12/submissions/certificate/manual');
+  expect(request).toMatchObject({ method: 'POST', signal, headers: { Authorization: 'Bearer test-access' } });
+  expect(JSON.parse(request.body)).toEqual({
+    animalName: 'Hana', speciesText: 'CAT', breed: '', genderText: '', coatColor: '', ageText: '',
+    features: '', diseaseName: 'Condition', onsetDateText: '', diagnosedDateText: '2026-11-16', prognosis: '', remarks: '',
+  });
+});
+
+it('rejects manual save failures without retrying the POST', async () => {
+  fetchMock.mockResolvedValueOnce(response(400, { code: ['INVALID_INPUT'] }));
+  await expect(createManualCertificate(12, manualCertificate)).rejects.toThrow();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('treats a missing certificate image as optional', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, {}));
+  await expect(getCertificateImageUrl(id, new AbortController().signal)).resolves.toBeUndefined();
 });
 
 it('uploads one multipart image and reads the accepted submission ID', async () => {

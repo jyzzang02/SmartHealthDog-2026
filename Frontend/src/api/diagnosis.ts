@@ -356,6 +356,40 @@ export const mapCertificateOcrFields = (result: Record<string, unknown>): Partia
   );
 };
 
+export const createManualCertificate = async (
+  petId: number,
+  certificate: DiagnosisCertificate,
+  signal?: AbortSignal,
+): Promise<string> => {
+  if (!Number.isSafeInteger(petId) || petId <= 0) throw new Error('반려동물을 먼저 선택해 주세요.');
+  const response = await authorizedFetch(API_BASE_URL + '/api/pets/' + petId + '/submissions/certificate/manual', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal,
+    body: JSON.stringify({
+      animalName: certificate.animalName,
+      speciesText: certificate.species,
+      breed: certificate.breed,
+      genderText: certificate.sex,
+      coatColor: certificate.coatColor,
+      ageText: certificate.age,
+      features: certificate.features,
+      diseaseName: certificate.diseaseName,
+      onsetDateText: certificate.onsetDate,
+      diagnosedDateText: certificate.diagnosisDate,
+      prognosis: certificate.prognosis,
+      remarks: certificate.remarks,
+    }),
+  });
+  if (!response.ok) throw new Error(await parseErrorResponse(response));
+  const data = await parseJsonSafe(response);
+  if (response.status !== 201 || data?.status !== 'COMPLETED' || data.petId !== petId ||
+      typeof data.submissionId !== 'string' || !SUBMISSION_UUID.test(data.submissionId)) {
+    throw new Error('진단서 결과를 읽을 수 없어요.');
+  }
+  return data.submissionId;
+};
+
 export const updateCertificate = async (
   submissionId: string,
   certificate: Partial<DiagnosisCertificate>,
@@ -610,9 +644,10 @@ export const getHealthReport = async (
   return { summary: data.summary, sections, assessmentLevel: typeof level === 'string' ? level : undefined };
 };
 
-export const getCertificateImageUrl = async (submissionId: string, signal: AbortSignal): Promise<string> => {
+export const getCertificateImageUrl = async (submissionId: string, signal: AbortSignal): Promise<string | undefined> => {
   if (!SUBMISSION_UUID.test(submissionId)) throw new Error('이미지를 불러올 수 없습니다.');
   const response = await authorizedFetch(API_BASE_URL + '/api/submissions/' + submissionId + '/image', { signal });
+  if (response.status === 404) return undefined;
   if (!response.ok) throw new Error('이미지를 불러올 수 없습니다.');
   const data = await parseJsonSafe(response);
   if (typeof data?.image_url !== 'string' || !/^https:\/\//i.test(data.image_url)) {
