@@ -23,6 +23,8 @@ import HospitalSearchControls from '../components/HospitalSearchControls';
 import HospitalSearchResults from '../components/HospitalSearchResults';
 import { useHospitalSearch } from '../hooks/useHospitalSearch';
 import { useTabScrollToTop } from '../hooks/useTabScrollToTop';
+import { getLatestCompletedPetSubmission } from '../api/diagnosis';
+import { getAuthSession } from '../storage/tokenStorage';
 import { getMyPets, PetListItem } from '../api/pets';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
@@ -30,6 +32,8 @@ import type { HealthSummary } from '../types/health';
 const eyeDog = require('../assets/eyeDog.png');
 const urineDog = require('../assets/urineDog.png');
 const selfCheckDog = require('../assets/selfCheckDog.png');
+
+type CheckupLookup = { petId: number; session: symbol; status: 'found' | 'empty' | 'failed' };
 
 const emptyHospitalCenter = { lat: 37.5665, lng: 126.9780 };
 
@@ -64,6 +68,7 @@ const HealthScreen: React.FC = () => {
   const [petList, setPetList] = useState<PetListItem[]>([]);
   const [selectedPetId, setSelectedPetId] = useState<number | null>(null);
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+  const [checkupLookup, setCheckupLookup] = useState<CheckupLookup>();
   const hospitalSearch = useHospitalSearch();
 
   useFocusEffect(
@@ -91,8 +96,34 @@ const HealthScreen: React.FC = () => {
   );
 
   const currentPet = petList.find((pet) => pet.id === selectedPetId);
-  const currentSummary = currentPet ? healthData[currentPet.id] : undefined;
-  const hasHealthData = Boolean(currentSummary);
+  const currentPetId = currentPet?.id;
+  const session = getAuthSession();
+  useFocusEffect(useCallback(() => {
+    if (currentPetId === undefined) return;
+    const controller = new AbortController();
+    let active = true;
+    const commit = (status: CheckupLookup['status']) => {
+      if (active && getAuthSession() === session) setCheckupLookup({ petId: currentPetId, session, status });
+    };
+    const timeout = setTimeout(() => {
+      controller.abort();
+      commit('failed');
+    }, 20_000);
+    getLatestCompletedPetSubmission(currentPetId, 'HEALTH_CERTIFICATE', controller.signal)
+      .then(record => { if (!controller.signal.aborted) commit(record ? 'found' : 'empty'); })
+      .catch(() => { if (!controller.signal.aborted) commit('failed'); })
+      .finally(() => clearTimeout(timeout));
+    return () => {
+      active = false;
+      clearTimeout(timeout);
+      controller.abort();
+    };
+  }, [currentPetId, session]));
+
+  const lookupStatus = checkupLookup?.session === session && checkupLookup.petId === currentPetId
+    ? checkupLookup.status : undefined;
+  const hasHealthData = Boolean(currentPet && healthData[currentPet.id]) || lookupStatus === 'found';
+  const showDetails = hasHealthData || lookupStatus !== 'empty';
 
   return (
     <ScrollView ref={scrollRef} style={styles.container} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -184,11 +215,15 @@ const HealthScreen: React.FC = () => {
             <View style={styles.healthInfoTextBox}>
               {hasHealthData ? (
                 <Text style={styles.healthInfoDesc}>
-                  반려동물의 건강 정보를 확인해보세요.{'\n'}최근 검진 결과를 살펴보세요.
+                  최근 검진 결과를 확인해 보세요.
+                </Text>
+              ) : lookupStatus === 'empty' ? (
+                <Text style={styles.healthInfoDesc}>
+                  등록된 검진 기록이 없습니다.{'\n'}검진 정보를 등록해보세요.
                 </Text>
               ) : (
                 <Text style={styles.healthInfoDesc}>
-                  등록된 검진 기록이 없습니다.{'\n'}검진 정보를 등록해보세요.
+                  {lookupStatus === 'failed' ? '검진 기록을 불러오지 못했어요.' : '불러오는 중...'}
                 </Text>
               )}
             </View>
@@ -196,7 +231,7 @@ const HealthScreen: React.FC = () => {
               style={styles.healthInfoBtn}
               activeOpacity={0.8}
               onPress={() => {
-                if (hasHealthData) {
+                if (showDetails) {
                   navigation.navigate('HealthDetail', { petId: currentPet.id, petName: currentPet.name });
                 } else {
                   navigation.navigate('HealthCheckInput', { petId: currentPet.id, petName: currentPet.name });
@@ -204,7 +239,7 @@ const HealthScreen: React.FC = () => {
               }}
             >
               <Text style={styles.healthInfoBtnText}>
-                {hasHealthData ? '건강 상세' : '등록하기'}
+                {showDetails ? '건강 상세' : '등록하기'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -213,9 +248,23 @@ const HealthScreen: React.FC = () => {
 
       {/* ============================ */}
 
+      {currentPet && (
+        <TouchableOpacity
+          style={styles.healthReportButton}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          onPress={() => navigation.navigate('HealthReport', {
+            petId: currentPet.id, petName: currentPet.name, petImageUri: currentPet.profilePicture,
+          })}
+        >
+          <Text style={[styles.healthInfoBtnText, styles.healthReportText]}>통합 건강 리포트</Text>
+          <Image source={require('../assets/icon_right.png')} style={styles.healthReportChevron} accessible={false} />
+        </TouchableOpacity>
+      )}
+
       {/* 동물병원 검색 */}
       {/* ============================ */}
-      <View style={styles.whiteSection} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
+      <View style={[styles.whiteSection, currentPet && styles.whiteSectionAfterReport]} onLayout={event => { hospitalY.current = event.nativeEvent.layout.y; moveToHospital(); }}>
         <Text style={styles.sectionTitle}>동물병원 검색</Text>
         <HospitalSearchControls onSearch={hospitalSearch.search} loading={hospitalSearch.loading} />
 
@@ -309,7 +358,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 14,
   },
 
   petSelectButton: {
@@ -371,6 +420,14 @@ const styles = StyleSheet.create({
     color: '#0081D5',
   },
 
+  healthReportButton: {
+    marginHorizontal: 20, marginTop: 20, paddingHorizontal: 20, paddingVertical: 14,
+    minHeight: 48, backgroundColor: '#E8F4FD', borderWidth: 1, borderColor: '#8FC1E7', borderRadius: 12, flexDirection: 'row',
+    alignItems: 'center', justifyContent: 'space-between', gap: 8,
+  },
+  healthReportText: { color: '#075B9D' },
+  healthReportChevron: { width: 14, height: 14, tintColor: '#075B9D', resizeMode: 'contain' },
+
   modalOverlay: {
     flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center',
   },
@@ -387,6 +444,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF', marginTop: 32, paddingHorizontal: 20, paddingTop: 24, paddingBottom: 12,
   },
 
+  whiteSectionAfterReport: { marginTop: 24 },
   sectionTitle: { fontSize: 20, fontWeight: '700', color: '#000', marginBottom: 16 },
 
 });

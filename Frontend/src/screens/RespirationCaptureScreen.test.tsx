@@ -72,3 +72,20 @@ it.each([
   expect(prepareRespirationUpload).not.toHaveBeenCalled();
   expect(files.discard).toHaveBeenCalledWith(path);
 });
+
+it('converts an iOS MOV gallery clip before measuring or uploading it', async () => {
+  const mov = 'file:///cache/video.mov';
+  const prepareGallery = jest.fn().mockResolvedValue(path);
+  Object.assign(files, { prepareGallery });
+  try {
+    jest.mocked(launchImageLibrary).mockResolvedValueOnce({ assets: [{ uri: mov, type: 'video/quicktime', duration: 60 }] });
+    await act(async () => { await button('갤러리에서 영상 선택').props.onPress(); });
+    expect(prepareGallery).toHaveBeenCalledWith(mov);
+    expect(files.size).toHaveBeenCalledWith(path);
+    expect(files.discard).toHaveBeenCalledWith(mov);
+    expect(button('영상 등록')).toBeDefined();
+    expect(prepareRespirationUpload).not.toHaveBeenCalled();
+  } finally {
+    Reflect.deleteProperty(files, 'prepareGallery');
+  }
+});

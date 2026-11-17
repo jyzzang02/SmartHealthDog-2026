@@ -4,12 +4,10 @@ package com.smarthealthdog
 internal object WalkCctUploadPolicyTest {
   @JvmStatic
   fun main(args: Array<String>) {
-    var checked = 0
     fun expect(candidate: Float?, age: Long, gap: Long, paired: Boolean, reason: String?) {
       check(WalkCctUploadPolicy.rejectionReason(candidate, age, gap, paired) == reason) {
         "Unexpected gate result for CCT=$candidate age=$age gap=$gap paired=$paired"
       }
-      checked++
     }
 
     expect(null, 0, 0, true, "missing_cct")
@@ -33,13 +31,11 @@ internal object WalkCctUploadPolicyTest {
     check(!WalkCctUploadPolicy.meetsThreshold(Float.NaN))
     check(!WalkCctUploadPolicy.meetsThreshold(5_999f))
     check(WalkCctUploadPolicy.meetsThreshold(6_000f))
-    checked += 4
 
     fun expectDecision(available: Boolean, candidate: Float?, allowed: Boolean, mode: String) {
       val result = WalkCctUploadPolicy.evaluate(available, candidate, 0, 0, true)
       check(result.allowed == allowed && result.mode == mode)
       if (!available) check(result.cctCandidate == null)
-      checked++
     }
     val luxOnly = WalkCctUploadPolicy.MODE_LUX_ONLY
     val filtered = WalkCctUploadPolicy.MODE_CCT_FILTERED
@@ -54,13 +50,10 @@ internal object WalkCctUploadPolicyTest {
     expectDecision(true, 26_562f, true, filtered)
     val unavailable = WalkCctUploadPolicy.evaluate(false, null, -1, Long.MAX_VALUE, false)
     check(unavailable.allowed && unavailable.reason == "cct_unavailable_lux_fallback")
-    checked++
     check(!WalkCctUploadPolicy.evaluate(true, 6_000f, 35_000_000_001L, 0, true).allowed)
-    checked++
 
     fun expectStored(mode: String?, candidate: Float?, allowed: Boolean) {
       check(WalkCctUploadPolicy.permitsStoredSample(mode, candidate) == allowed)
-      checked++
     }
     expectStored(luxOnly, null, true)
     expectStored(luxOnly, Float.NaN, true)
@@ -74,6 +67,5 @@ internal object WalkCctUploadPolicyTest {
     expectStored(null, 5_000f, false)
     expectStored(null, null, false)
     expectStored("unknown", 26_562f, false)
-    println("CCT upload policy: $checked checks passed")
   }
 }

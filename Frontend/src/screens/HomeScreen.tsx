@@ -1,8 +1,7 @@
 import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
-import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import type { RootStackParamList } from '../../App';
+import { useFocusEffect } from '@react-navigation/native';
+import { getLatestServerCheckupDate } from '../api/petProfileHealth';
 import { healthStore } from '../store/healthStore';
 import type { HealthSummary } from '../types/health';
 import PetHealthCard from '../components/PetHealthCard';
@@ -13,8 +12,8 @@ import { getMyProfile, UserProfile } from '../api/users';
 import { getMyPets, PetListItem } from '../api/pets';
 
 export default function HomeScreen() {
-  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [healthData, setHealthData] = useState<Record<number, HealthSummary>>({});
+  const [serverDates, setServerDates] = useState<Record<number, string | null>>({});
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [pets, setPets] = useState<PetListItem[]>([]);
   const [profileLoading, setProfileLoading] = useState(true);
@@ -39,7 +38,25 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       setHealthData(healthStore.getAll());
+      setServerDates({});
+      const controller = new AbortController();
+      getMyPets().then(async list => {
+        let index = 0;
+        const worker = async () => {
+          while (index < list.length && !controller.signal.aborted) {
+            const pet = list[index++];
+            try {
+              const date = await getLatestServerCheckupDate(pet.id, controller.signal);
+              if (!controller.signal.aborted) setServerDates(current => ({ ...current, [pet.id]: date ?? '' }));
+            } catch {
+              if (!controller.signal.aborted) setServerDates(current => ({ ...current, [pet.id]: null }));
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(2, list.length) }, worker));
+      }).catch(() => {});
       loadHomeData();
+      return () => controller.abort();
     }, [loadHomeData])
   );
 
@@ -53,8 +70,7 @@ export default function HomeScreen() {
 
         <Text style={styles.sectionTitle}>반려동물 보건정보</Text>
 
-        <PetHealthCard pets={pets} loading={petsLoading} healthData={healthData}
-          onPressPet={(pet) => navigation.navigate('HealthCheckInput', { petId: pet.id, petName: pet.name })} />
+        <PetHealthCard pets={pets} loading={petsLoading} healthData={healthData} serverDates={serverDates} />
       </View>
 
       <View style={styles.bannerSpacer} />

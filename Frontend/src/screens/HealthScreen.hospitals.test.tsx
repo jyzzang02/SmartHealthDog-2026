@@ -5,6 +5,8 @@ import Geolocation from 'react-native-geolocation-service';
 import HealthScreen from './HealthScreen';
 import HospitalSearchMap from '../components/HospitalSearchMap';
 import HospitalSearchResults from '../components/HospitalSearchResults';
+import { getLatestCompletedPetSubmission } from '../api/diagnosis';
+import { getMyPets } from '../api/pets';
 import { searchHospitals } from '../api/hospitals';
 
 jest.mock('@react-navigation/native', () => ({
@@ -18,6 +20,7 @@ jest.mock('@react-navigation/native', () => ({
 jest.mock('../components/PetQnaEntryCard', () => 'PetQnaEntryCard');
 jest.mock('../components/DiagnosisCard', () => 'DiagnosisCard');
 jest.mock('../components/HospitalSearchMap', () => 'HospitalSearchMap');
+jest.mock('../api/diagnosis', () => ({ getLatestCompletedPetSubmission: jest.fn() }));
 jest.mock('../api/pets', () => ({ getMyPets: jest.fn(async () => []) }));
 jest.mock('../store/healthStore', () => ({ healthStore: { getAll: () => ({}) } }));
 jest.mock('../api/hospitals', () => ({
@@ -64,5 +67,21 @@ it('connects the health screen controls, map and server page navigation to the s
   } finally {
     if (tree) act(() => { tree.unmount(); });
     jest.restoreAllMocks();
+  }
+});
+
+it.each([
+  { record: { id: 'saved-certificate' }, expected: '건강 상세' },
+  { record: undefined, expected: '등록하기' },
+])('checks server certificates with an empty local cache: $expected', async ({ record, expected }) => {
+  jest.mocked(getMyPets).mockResolvedValueOnce([{ id: 1, name: 'Hana' }] as Awaited<ReturnType<typeof getMyPets>>);
+  jest.mocked(getLatestCompletedPetSubmission).mockResolvedValueOnce(record);
+  let tree!: renderer.ReactTestRenderer;
+  try {
+    await act(async () => { tree = renderer.create(<HealthScreen />); });
+    expect(getLatestCompletedPetSubmission).toHaveBeenLastCalledWith(1, 'HEALTH_CERTIFICATE', expect.anything());
+    expect(tree.root.findAllByType(Text).map(node => node.props.children)).toContain(expected);
+  } finally {
+    if (tree) act(() => tree.unmount());
   }
 });

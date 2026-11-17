@@ -127,7 +127,7 @@ const HealthCheckInputScreen = () => {
   const [hospitalName, setHospitalName] = useState('');
   const [certificateImageUri, setCertificateImageUri] = useState<string | null>(null);
   const [certificateOverrides, setCertificateOverrides] = useState<Partial<DiagnosisCertificate>>({});
-  const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate>>({});
+  const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate> | null>(null);
   const [ocrMessage, setOcrMessage] = useState<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
   const [canCheckOcr, setCanCheckOcr] = useState(false);
@@ -156,7 +156,7 @@ const HealthCheckInputScreen = () => {
       clearPendingCertificate(submission.ownerId, submission.petId, submission.id, submission.session).catch(() => undefined);
     }
   }, []);
-  const checkupDate = certificateOverrides.diagnosisDate ?? ocrFields.diagnosisDate ?? defaultCheckupDate;
+  const checkupDate = certificateOverrides.diagnosisDate ?? (ocrFields ? ocrFields.diagnosisDate ?? '' : defaultCheckupDate);
   const selectedPet = pets.find(pet => pet.id === selectedPetId);
   const species = selectedPet?.species?.trim() ?? '';
   const sex = selectedPet?.gender?.trim() || selectedPet?.sex?.trim() || '';
@@ -272,11 +272,12 @@ const HealthCheckInputScreen = () => {
   });
 
   const clearCertificateImage = (discard = true) => {
+    if (certificateImageUri || ocrSubmission.current) setHospitalName('');
     cancelOcrRequest();
     if (discard && ocrSubmission.current) removeRecovery(ocrSubmission.current);
     ocrSubmission.current = null;
     setCertificateImageUri(null);
-    setOcrFields({});
+    setOcrFields(null);
     setOcrMessage(null);
     setOcrBusy(false);
     setCanCheckOcr(false);
@@ -439,6 +440,7 @@ const HealthCheckInputScreen = () => {
 
   const handleSubmit = () => {
     if (ocrRequest.current || pickerOpen.current) return;
+    if (ocrSubmission.current && !ocrSubmission.current.completed) return;
     const trimmedCertificate = { ...certificate };
     CERTIFICATE_FIELDS.forEach(({ key }) => {
       trimmedCertificate[key] = certificate[key].trim();
@@ -455,10 +457,21 @@ const HealthCheckInputScreen = () => {
     const submission = ocrSubmission.current;
     if (submission && (submission.session !== getAuthSession() || submission.petId !== selectedPetId)) return;
 
+    const certificateChanges: Partial<DiagnosisCertificate> = {};
+    if (submission?.completed) {
+      for (const { key } of CERTIFICATE_FIELDS) {
+        if (certificateOverrides[key] === undefined) continue;
+        const value = trimmedCertificate[key];
+        if (value === (ocrFields?.[key] ?? '')) continue;
+        certificateChanges[key] = value;
+      }
+    }
+
     navigation.navigate('HealthCheckResult', {
       petId: selectedPetId,
       petName: selectedPetName,
       summary,
+      certificateChanges,
       certificateSubmissionId: submission?.completed ? submission.id : undefined,
       certificateOwnerId: submission?.completed ? submission.ownerId : undefined,
     });
@@ -468,6 +481,7 @@ const HealthCheckInputScreen = () => {
     if (pet.id !== selectedPetId) {
       const switchingOcr = ocrSubmission.current !== null;
       clearCertificateImage(false);
+      setHospitalName('');
       setCertificateOverrides(prev => {
         if (switchingOcr) return {};
         const next = { ...prev };
@@ -549,18 +563,6 @@ const HealthCheckInputScreen = () => {
           />
         </View>
 
-        {/* 병원명 */}
-        <View style={styles.inputBox}>
-          <TextInput
-            style={styles.inputValue}
-            onFocus={revealFocusedInput}
-            value={hospitalName}
-            onChangeText={setHospitalName}
-            placeholder="병원명 (선택)"
-            placeholderTextColor="#aaa"
-          />
-        </View>
-
         {/* ── 진단서 이미지 ── */}
         <View style={styles.certBox}>
           <Text style={styles.certTitle}>진단서 이미지</Text>
@@ -606,6 +608,18 @@ const HealthCheckInputScreen = () => {
 
         {/* ── 진단서 정보 ── */}
         <Text style={[styles.sectionTitle, { marginTop: 28 }]}>진단서 정보</Text>
+        <View>
+          <Text style={styles.fieldLabel}>병원명 (선택)</Text>
+          <View style={styles.inputBox}>
+            <TextInput
+              accessibilityLabel="병원명 (선택)"
+              style={styles.inputValue}
+              onFocus={revealFocusedInput}
+              value={hospitalName}
+              onChangeText={setHospitalName}
+            />
+          </View>
+        </View>
         {CERTIFICATE_FIELDS.map(({ key, label, placeholder, multiline }) => (
           <View key={key}>
             <Text style={styles.fieldLabel}>{label}</Text>
@@ -650,7 +664,7 @@ const HealthCheckInputScreen = () => {
         >
           <Text style={styles.cancelBtnText}>취소</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.submitBtn, ocrBusy && styles.ocrDisabled]} disabled={ocrBusy} onPress={handleSubmit}>
+        <TouchableOpacity style={[styles.submitBtn, (ocrBusy || canCheckOcr) && styles.ocrDisabled]} disabled={ocrBusy || canCheckOcr} onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>다음</Text>
         </TouchableOpacity>
       </View>

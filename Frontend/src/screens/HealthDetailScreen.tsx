@@ -1,10 +1,11 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Image } from 'react-native';
-import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect, useIsFocused } from '@react-navigation/native';
 import type { StackNavigationProp } from '@react-navigation/stack';
 import type { RouteProp } from '@react-navigation/native';
 import type { RootStackParamList } from '../../App';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { getCertificateFields, getPetSubmissions, type SubmissionSummary } from '../api/diagnosis';
 import { healthStore } from '../store/healthStore';
 import { getMyPets, PetListItem } from '../api/pets';
 import type { HealthSummary } from '../types/health';
@@ -23,6 +24,7 @@ type RoutePropType = RouteProp<RootStackParamList, 'HealthDetail'>;
 const TAB_LABELS = ['검진 기록', '변화 추이', '모니터링', '혈통 위험도'];
 
 type ActiveTab = '검진 기록' | '변화 추이' | '모니터링' | '혈통 위험도';
+type HospitalLookup = { status: 'done'; name?: string } | { status: 'error' };
 
 const MONITORING_MEMO = '일상 생활에서 건강 상태를 지속적으로 관찰하고 있습니다.';
 
@@ -74,12 +76,16 @@ const mapGenderSuffix = (sex?: string) => {
 
 const HealthDetailScreen = () => {
   const insets = useSafeAreaInsets();
+  const focused = useIsFocused();
   const navigation = useNavigation<NavProp>();
   const route = useRoute<RoutePropType>();
   const { petId, petName } = route.params;
 
   const [pet, setPet] = useState<PetListItem | null>(null);
-  const [summary, setSummary] = useState<HealthSummary | undefined>(undefined);
+  const [serverHospitals, setServerHospitals] = useState<Partial<Record<string, HospitalLookup>>>({});
+  const [serverHistory, setServerHistory] = useState<SubmissionSummary[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<'loading' | 'error' | 'done'>('loading');
+  const [historyRevision, setHistoryRevision] = useState(0);
   const [history, setHistory] = useState<HealthSummary[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>('검진 기록');
   const [scoreRecords, setScoreRecords] = useState<SelfCheckRecord[]>([]);
@@ -88,7 +94,6 @@ const HealthDetailScreen = () => {
     useCallback(() => {
       const records = healthStore.getHistory(petId);
       setHistory(records);
-      setSummary(records[0]);
       let mounted = true;
       getMyPets()
         .then((pets) => {
@@ -102,6 +107,76 @@ const HealthDetailScreen = () => {
       };
     }, [petId])
   );
+
+  useEffect(() => {
+    if (!focused) return;
+    const controller = new AbortController();
+    const { signal } = controller;
+    let completedIds: string[] | undefined;
+    setServerHistory([]);
+    setServerHospitals({});
+    setHistoryStatus('loading');
+
+    const timeout = setTimeout(() => {
+      controller.abort();
+      if (!completedIds) {
+        setHistoryStatus('error');
+        return;
+      }
+      const ids = completedIds;
+      setServerHospitals(current => {
+        const next = { ...current };
+        for (const id of ids) {
+          if (!next[id]) next[id] = { status: 'error' };
+        }
+        return next;
+      });
+    }, 30_000);
+
+    const load = async () => {
+      try {
+        const records = await getPetSubmissions(petId, signal, true, 'HEALTH_CERTIFICATE');
+        if (signal.aborted) return;
+        const registrationTime = (record: SubmissionSummary) => Date.parse(record.submittedAt ?? '') || 0;
+        const visible = records.filter(record => record.id && record.type === 'HEALTH_CERTIFICATE' && record.status !== 'DELETED')
+          .sort((first, second) => registrationTime(second) - registrationTime(first));
+        const ids = visible.flatMap(record => record.status === 'COMPLETED' && record.id ? [record.id] : []);
+        completedIds = ids;
+        setServerHistory(visible);
+        setHistoryStatus('done');
+
+        let index = 0;
+        const worker = async () => {
+          while (!signal.aborted && index < ids.length) {
+            const id = ids[index++];
+            let detail: HospitalLookup;
+            try {
+              const { hospitalName } = await getCertificateFields(id, signal);
+              detail = { status: 'done', name: hospitalName };
+            } catch {
+              detail = { status: 'error' };
+            }
+            if (!signal.aborted) setServerHospitals(current => ({ ...current, [id]: detail }));
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker));
+      } catch {
+        if (!signal.aborted) setHistoryStatus('error');
+      } finally {
+        clearTimeout(timeout);
+      }
+    };
+    load();
+    return () => { clearTimeout(timeout); controller.abort(); };
+  }, [focused, petId, historyRevision]);
+
+  const serverIds = new Set(serverHistory.map(item => item.id));
+  const localHistory = history.filter(record => !serverIds.has(record.certificateSubmissionId));
+  const hospitalLabel = (id: string | undefined, loadingLabel: string, namePrefix = '') => {
+    const detail = id ? serverHospitals[id] : undefined;
+    if (!detail) return loadingLabel;
+    return detail.status === 'error' ? '조회 실패' : (detail.name ? namePrefix + detail.name : '병원명 미입력');
+  };
 
   // 건강 점수 추이: 자가진단 기록(최근 20건)을 최신순으로 불러온다. 목록 응답에는 항목별 점수가 없어 상세를 함께 조회한다.
   const scoresRequest = useRef<AbortController | null>(null);
@@ -150,10 +225,12 @@ const HealthDetailScreen = () => {
   const weightLabel = typeof weightKg === 'number' && Number.isFinite(weightKg) && weightKg > 0 ? `${weightKg}kg` : '';
   const subInfoText = [breedLabel, ageLabel, genderLabel, weightLabel].filter(Boolean).join(' · ');
 
-  const recentStatusText = summary
-    ? summary.hospitalName || '병원명 미입력'
-    : '등록된 검진 기록이 없습니다.';
-  const recentStatusColor = summary ? '#040505' : '#7B7C7D';
+  const latestCompleted = serverHistory.find(record => record.status === 'COMPLETED');
+  const displayDate = latestCompleted?.submittedAt ? formatScoreDate(latestCompleted.submittedAt) : undefined;
+  const recentStatusText = latestCompleted ? hospitalLabel(latestCompleted.id, '불러오는 중...', '병원: ')
+    : historyStatus === 'loading' ? '불러오는 중...'
+    : historyStatus === 'error' ? '검진 기록을 불러오지 못했어요.' : '등록된 검진 기록이 없습니다.';
+  const recentStatusColor = latestCompleted ? '#040505' : '#7B7C7D';
 
   return (
     <View style={styles.screen}>
@@ -186,11 +263,11 @@ const HealthDetailScreen = () => {
             </TouchableOpacity>
           </View>
 
-          {/* 최근 건강 상태 */}
+          {/* 최근 검진 기록 */}
           <View style={styles.recentStatusBox}>
             <View style={styles.recentStatusHeaderRow}>
-              <Text style={styles.recentStatusLabel}>최근 건강 상태</Text>
-              {summary && <Text style={styles.recentStatusDate}>{summary.checkupDate}</Text>}
+              <Text style={styles.recentStatusLabel}>최근 검진 기록</Text>
+              {displayDate && <Text style={styles.recentStatusDate}>{displayDate}</Text>}
             </View>
             <Text style={[styles.recentStatusValue, { color: recentStatusColor }]}>
               {recentStatusText}
@@ -231,21 +308,35 @@ const HealthDetailScreen = () => {
         {/* 탭별 콘텐츠 */}
         <View style={styles.recordListContainer}>
           {activeTab === '검진 기록' && (
-            history.length > 0 ? (
-              history.map((record, index) => (
+            <>
+              {serverHistory.map(record => (
+                <TouchableOpacity key={record.id} style={styles.examCard} accessibilityRole="button"
+                  disabled={record.status !== 'COMPLETED'}
+                  onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, historySubmissionId: record.id, viewOnly: true })}>
+                  <View style={styles.examCardTopRow}>
+                    <Text style={styles.examHospitalName}>{record.status === 'COMPLETED' ? hospitalLabel(record.id, '진단서') :
+                      record.status === 'FAILED' ? '분석 실패' : '분석 중'}</Text>
+                    <Text style={styles.examDate}>{record.submittedAt ? formatScoreDate(record.submittedAt) : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+              {localHistory.map((record, index) => (
                 <TouchableOpacity key={`${record.checkupDate}-${index}`} style={styles.examCard} accessibilityRole="button"
                   onPress={() => navigation.navigate('HealthCheckResult', { petId, petName: displayName, summary: record, viewOnly: true })}>
                   <View style={styles.examCardTopRow}>
                     <Text style={styles.examHospitalName}>
                       {record.hospitalName || '병원명 미입력'}
                     </Text>
-                    <Text style={styles.examDate}>{record.checkupDate}</Text>
                   </View>
                 </TouchableOpacity>
-              ))
-            ) : (
-              <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>
-            )
+              ))}
+              {historyStatus === 'loading' && <Text style={styles.emptyRecordText}>불러오는 중...</Text>}
+              {historyStatus === 'error' && <TouchableOpacity accessibilityRole="button" onPress={() => setHistoryRevision(value => value + 1)}>
+                <Text style={styles.emptyRecordText}>검진 기록을 불러오지 못했어요. 다시 시도</Text>
+              </TouchableOpacity>}
+              {historyStatus === 'done' && !localHistory.length && !serverHistory.length &&
+                <Text style={styles.emptyRecordText}>등록된 검진 기록이 없습니다.</Text>}
+            </>
           )}
 
           {activeTab === '변화 추이' && (
@@ -282,6 +373,9 @@ const HealthDetailScreen = () => {
 
           {activeTab === '모니터링' && (
             <>
+              <View style={styles.scopeNotice}>
+                <Text style={styles.scopeNoticeTitle}>현재 준비중인 기능입니다</Text>
+              </View>
               <View style={styles.monitoringMemoCard}>
                 <View style={styles.monitoringMemoRow}>
                   <View style={styles.monitoringMemoIconWrap}>
@@ -315,8 +409,8 @@ const HealthDetailScreen = () => {
 
           {activeTab === '혈통 위험도' && (
             <>
-              <View style={styles.pedigreeScopeNotice}>
-                <Text style={styles.pedigreeScopeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
+              <View style={styles.scopeNotice}>
+                <Text style={styles.scopeNoticeTitle}>현재는 견종별 유전 질환만 확인할 수 있어요.</Text>
               </View>
 
               {/* 목록 안내 (단순 텍스트 카드) */}
@@ -412,20 +506,20 @@ const styles = StyleSheet.create({
   addExamBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 
   recentStatusBox: {
-    backgroundColor: '#F8F9FA',
-    borderLeftWidth: 3,
-    borderLeftColor: '#0081D5',
-    borderRadius: 10,
-    padding: 16,
-    gap: 8,
+    backgroundColor: '#F7F8FA',
+    borderWidth: 1,
+    borderColor: '#E8EBEF',
+    borderRadius: 12,
+    padding: 14,
+    gap: 6,
   },
   recentStatusHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  recentStatusLabel: { fontSize: 14, color: '#7B7C7D' },
-  recentStatusDate: { fontSize: 13, color: '#7B7C7D' },
+  recentStatusLabel: { fontSize: 13, fontWeight: '600', color: '#4B5563', flexShrink: 1 },
+  recentStatusDate: { fontSize: 12, color: '#5B6470', fontVariant: ['tabular-nums'], marginStart: 8 },
   recentStatusValue: { fontSize: 18, fontWeight: '700' },
 
   tabRow: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: '#EAECEE', marginTop: 24 },
@@ -532,9 +626,8 @@ const styles = StyleSheet.create({
   monitoringWarningTitle: { fontSize: 14, color: '#8B6914' },
   monitoringWarningDesc: { fontSize: 13, color: '#8B6914', lineHeight: 19.5 },
 
-  // 혈통 위험도 탭
-  pedigreeScopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
-  pedigreeScopeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
+  scopeNotice: { backgroundColor: '#FFF9E6', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 10, gap: 3 },
+  scopeNoticeTitle: { color: '#5C4210', fontSize: 14, fontWeight: '700', lineHeight: 20 },
 
   pedigreeInfoCard: {
     backgroundColor: '#EAF4FB',

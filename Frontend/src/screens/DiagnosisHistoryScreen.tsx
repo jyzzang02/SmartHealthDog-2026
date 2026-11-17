@@ -12,11 +12,13 @@ import {
 import { useFocusEffect } from '@react-navigation/native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../App';
-import { getPetSubmissions, SubmissionSummary } from '../api/diagnosis';
+import { getPetDiagnosisHistory, SubmissionSummary } from '../api/diagnosis';
+import { listRespirationRecords } from '../api/respiration';
 import { getMyPets, PetListItem } from '../api/pets';
 import { resolveImageUri } from '../utils/imageUri';
 
 const STATUS_LABELS: Record<string, string> = {
+  UPLOADING: '영상 등록 중',
   PENDING: '분석 대기',
   PROCESSING: '분석 중',
   COMPLETED: '완료',
@@ -27,6 +29,7 @@ const STATUS_LABELS: Record<string, string> = {
 const TYPE_LABELS: Record<string, string> = {
   EYE: '안구 진단',
   URINE: '소변키트 진단',
+  RESPIRATION: '수면 호흡 분석',
 };
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DiagnosisHistory'>;
@@ -123,12 +126,32 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
     setErrorMessage(null);
 
     try {
-      const submissions = await getPetSubmissions(petToLoad, signal, true);
+      const [diagnosis, respiration] = await Promise.allSettled([
+        getPetDiagnosisHistory(petToLoad, signal),
+        listRespirationRecords(petToLoad, signal),
+      ]);
       if (signal.aborted) return;
-      const normalized = submissions
-        .map(normalizeSubmission)
-        .filter((item): item is NormalizedSubmission => !!item)
-        .sort((a, b) => b.submittedAtMs - a.submittedAtMs);
+      if (diagnosis.status === 'rejected' && respiration.status === 'rejected') {
+        throw new Error('진단 이력을 불러오지 못했습니다.');
+      }
+      if (diagnosis.status === 'rejected' || respiration.status === 'rejected') {
+        setErrorMessage('일부 진단 이력을 불러오지 못했습니다.');
+      }
+      const normalized = diagnosis.status === 'fulfilled'
+        ? diagnosis.value.map(normalizeSubmission)
+          .filter((item): item is NormalizedSubmission => !!item && (item.type === 'EYE' || item.type === 'URINE'))
+        : [];
+      if (respiration.status === 'fulfilled') {
+        if (!Array.isArray(respiration.value)) throw new Error('진단 이력을 불러오지 못했습니다.');
+        for (const record of respiration.value) {
+          if (record.petId !== petToLoad || !record.videoId || record.status === 'UPLOADING') continue;
+          const submittedAt = record.uploadedAt ?? record.createdAt ?? '';
+          const time = Date.parse(submittedAt);
+          normalized.push({ id: record.videoId, type: 'RESPIRATION', status: record.status,
+            submittedAt, submittedAtMs: Number.isFinite(time) ? time : 0 });
+        }
+      }
+      normalized.sort((first, second) => second.submittedAtMs - first.submittedAtMs);
 
       setItems(normalized);
     } catch (error) {
@@ -188,6 +211,10 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
       origin: 'history' as const,
       petName: petNameToSend,
     };
+    if (item.type === 'RESPIRATION') {
+      navigation.navigate('RespirationResult', { petId: petToSend, petName: petNameToSend ?? '', videoId: item.id });
+      return;
+    }
     if (item.type === 'EYE') {
       navigation.navigate('EyeDiagnosisResult', commonParams as any);
       return;
@@ -288,7 +315,7 @@ const DiagnosisHistoryScreen: React.FC<Props> = ({ route, navigation }) => {
 
           {items.map(item => (
             <TouchableOpacity
-              key={item.id}
+              key={item.type + ":" + item.id}
               style={styles.historyCard}
               activeOpacity={0.85}
               onPress={() => handlePressItem(item)}

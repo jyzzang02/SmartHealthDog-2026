@@ -18,6 +18,8 @@
 		FD46234A44B045C89CED76F1 /* Pretendard-Regular.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 0E080BD10E5B4821AC3E9A96 /* Pretendard-Regular.ttf */; };
 		6FB4093D682049669CA0766C /* Pretendard-SemiBold.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 57CCD3027AEE4F769CC575E5 /* Pretendard-SemiBold.ttf */; };
 		A10C5F1B3A2D4E0000000001 /* KakaoOAuth.m in Sources */ = {isa = PBXBuildFile; fileRef = A10C5F1B3A2D4E0000000002 /* KakaoOAuth.m */; };
+		B82F790E34C641E28E447101 /* HealthReportPdf.m in Sources */ = {isa = PBXBuildFile; fileRef = B82F790E34C641E28E447102 /* HealthReportPdf.m */; };
+		B82F790E34C641E28E447103 /* HealthMediaModules.m in Sources */ = {isa = PBXBuildFile; fileRef = B82F790E34C641E28E447104 /* HealthMediaModules.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +39,8 @@
 		0E080BD10E5B4821AC3E9A96 /* Pretendard-Regular.ttf */ = {isa = PBXFileReference; name = "Pretendard-Regular.ttf"; path = "../assets/fonts/Pretendard-Regular.ttf"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		57CCD3027AEE4F769CC575E5 /* Pretendard-SemiBold.ttf */ = {isa = PBXFileReference; name = "Pretendard-SemiBold.ttf"; path = "../assets/fonts/Pretendard-SemiBold.ttf"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 		A10C5F1B3A2D4E0000000002 /* KakaoOAuth.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = KakaoOAuth.m; path = SmartHealthDog/KakaoOAuth.m; sourceTree = "<group>"; };
+		B82F790E34C641E28E447102 /* HealthReportPdf.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = HealthReportPdf.m; path = SmartHealthDog/HealthReportPdf.m; sourceTree = "<group>"; };
+		B82F790E34C641E28E447104 /* HealthMediaModules.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = HealthMediaModules.m; path = SmartHealthDog/HealthMediaModules.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -56,6 +60,8 @@
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
+				B82F790E34C641E28E447102 /* HealthReportPdf.m */,
+				B82F790E34C641E28E447104 /* HealthMediaModules.m */,
 				A10C5F1B3A2D4E0000000002 /* KakaoOAuth.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -279,6 +285,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				B82F790E34C641E28E447101 /* HealthReportPdf.m in Sources */,
+				B82F790E34C641E28E447103 /* HealthMediaModules.m in Sources */,
 				A10C5F1B3A2D4E0000000001 /* KakaoOAuth.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

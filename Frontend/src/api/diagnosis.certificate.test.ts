@@ -1,4 +1,4 @@
-import { getCertificateOcrResult, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
+import { createManualCertificate, getCertificateFields, getSavedCertificate, updateSavedCertificate, deleteCertificateSubmission, updateCertificateHospital, createPetOwnershipCheck, getCertificateImageUrl, getCertificateOcrResult, getLatestCompletedPetSubmission, getPetDiagnosisHistory, getPetSubmissions, mapCertificateOcrFields, requestCertificateOcr, updateCertificate } from './diagnosis';
 import { storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
@@ -13,6 +13,7 @@ const response = (status: number, body: unknown) => ({
   status,
   ok: status >= 200 && status < 300,
   json: async () => body,
+  text: async () => JSON.stringify(body),
 });
 const image = { uri: 'file:///image.jpg', type: 'image/jpeg', fileSize: 1024 };
 
@@ -25,6 +26,35 @@ beforeEach(async () => {
 afterEach(() => {
   globalThis.fetch = originalFetch;
   jest.restoreAllMocks();
+});
+
+const manualCertificate = {
+  animalName: 'Hana', species: 'CAT', breed: '', sex: '', coatColor: '', age: '',
+  features: '', diseaseName: 'Condition', onsetDate: '', diagnosisDate: '2026-11-16', prognosis: '', remarks: '',
+};
+
+it('creates a completed manual certificate with camelCase fields and no image', async () => {
+  fetchMock.mockResolvedValueOnce(response(201, { submissionId: id, petId: 12, status: 'COMPLETED' }));
+  const { signal } = new AbortController();
+  await expect(createManualCertificate(12, manualCertificate, signal, '우리동네동물병원')).resolves.toBe(id);
+  const [[url, request]] = fetchMock.mock.calls;
+  expect(new URL(url).pathname).toBe('/api/pets/12/submissions/certificate/manual');
+  expect(request).toMatchObject({ method: 'POST', signal, headers: { Authorization: 'Bearer test-access' } });
+  expect(JSON.parse(request.body)).toEqual({
+    hospitalName: '우리동네동물병원', animalName: 'Hana', speciesText: 'CAT', breed: '', genderText: '', coatColor: '', ageText: '',
+    features: '', diseaseName: 'Condition', onsetDateText: '', diagnosedDateText: '2026-11-16', prognosis: '', remarks: '',
+  });
+});
+
+it('rejects manual save failures without retrying the POST', async () => {
+  fetchMock.mockResolvedValueOnce(response(400, { code: ['INVALID_INPUT'] }));
+  await expect(createManualCertificate(12, manualCertificate)).rejects.toThrow();
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('treats a missing certificate image as optional', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, {}));
+  await expect(getCertificateImageUrl(id, new AbortController().signal)).resolves.toBeUndefined();
 });
 
 it('uploads one multipart image and reads the accepted submission ID', async () => {
@@ -57,6 +87,31 @@ it('reads the same submission from the filtered list if the OCR result row does 
 
   await expect(getCertificateOcrResult(12, id, new AbortController().signal)).resolves.toEqual({ status: 'PROCESSING' });
   expect(fetchMock.mock.calls[1][0]).toMatch(/\/api\/submissions\/pets\/12\?type=HEALTH_CERTIFICATE$/);
+});
+
+it('distinguishes a completed list entry with a missing result and reads the same result next time', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(404, { code: ['HEALTH_CERTIFICATE_NOT_FOUND'] }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ id, status: 'COMPLETED' }] }))
+    .mockResolvedValueOnce(response(200, { status: 'COMPLETED', results: [{ animal_name: 'Hana' }] }));
+  const { signal } = new AbortController();
+
+  await expect(getCertificateOcrResult(12, id, signal)).resolves.toEqual({ status: 'RESULT_UNAVAILABLE' });
+  await expect(getCertificateOcrResult(12, id, signal)).resolves.toEqual({
+    status: 'COMPLETED',
+    fields: { animalName: 'Hana' },
+  });
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+  expect(fetchMock.mock.calls[0][0]).toBe(fetchMock.mock.calls[2][0]);
+  expect(fetchMock.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
+});
+
+it('preserves a failed list status even when the detail is missing', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(404, { code: ['HEALTH_CERTIFICATE_NOT_FOUND'] }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ id, status: 'FAILED', failureReason: 'LOW_CONFIDENCE' }] }));
+
+  await expect(getCertificateOcrResult(12, id, new AbortController().signal)).resolves.toEqual({ status: 'FAILED' });
 });
 
 it('maps OCR fields without overwriting inputs with blanks or unparsed dates', async () => {
@@ -104,6 +159,15 @@ it('does not fall back when the server returns an empty history', async () => {
   expect(fetchMock).toHaveBeenCalledTimes(1);
 });
 
+it('distinguishes an invalid certificate history payload from a valid empty page', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(200, { pageNumber: 1, hasNext: false }))
+    .mockResolvedValueOnce(response(200, { submissions: [], pageNumber: 1, hasNext: false }));
+  await expect(getPetSubmissions(12, undefined, true, 'HEALTH_CERTIFICATE')).rejects.toThrow();
+  await expect(getPetSubmissions(12, undefined, true, 'HEALTH_CERTIFICATE')).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
 it('uses the OCR diagnosis date text only as a valid date fallback', () => {
   expect(mapCertificateOcrFields({ diagnosed_date: null, diagnosed_date_text: '2026년 2월 3일' }))
     .toEqual({ diagnosisDate: '2026-02-03' });
@@ -138,4 +202,135 @@ it('rejects a failed certificate update without resubmitting', async () => {
   };
   await expect(updateCertificate(id, certificate)).rejects.toThrow('404');
   expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('sends only changed fields, leaving OCR gaps and default dates untouched', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateCertificate(id, { prognosis: 'Observe' });
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ prognosis: 'Observe' });
+  await updateCertificate(id, {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('finds the exact OCR submission beyond the first page and stops there', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, {}))
+    .mockResolvedValueOnce(response(200, { submissions: [{ submissionId: 'other' }], pageNumber: 1, hasNext: true }))
+    .mockResolvedValueOnce(response(200, { submissions: [{ submissionId: id, status: 'PROCESSING' }], pageNumber: 2, hasNext: true }));
+  await expect(getCertificateOcrResult(12, id, new AbortController().signal)).resolves.toEqual({ status: 'PROCESSING' });
+  expect(fetchMock.mock.calls[2][0]).toContain('?type=HEALTH_CERTIFICATE&page=1');
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('reads the signed original image URL through the authenticated submission endpoint', async () => {
+  const imageUrl = 'https://images.example.test/certificate?signature=test';
+  fetchMock.mockResolvedValueOnce(response(200, { image_url: imageUrl, expires_in: 300 }));
+  await expect(getCertificateImageUrl(id, new AbortController().signal)).resolves.toBe(imageUrl);
+  expect(fetchMock.mock.calls[0][0]).toContain('/api/submissions/' + id + '/image');
+});
+
+it('finds the latest completed eye submission without downloading the rest of history', async () => {
+  fetchMock
+    .mockResolvedValueOnce(response(200, { pageNumber: 1, hasNext: true, submissions: [
+      { submissionId: 'pending', type: 'EYE', status: 'PENDING' },
+    ] }))
+    .mockResolvedValueOnce(response(200, { pageNumber: 2, hasNext: true, submissions: [
+      { submissionId: 'complete', type: 'EYE', status: 'COMPLETED', submittedAt: '2026-11-16T00:00:00Z' },
+      { submissionId: 'older', type: 'EYE', status: 'COMPLETED' },
+    ] }));
+  await expect(getLatestCompletedPetSubmission(12, 'EYE', new AbortController().signal))
+    .resolves.toMatchObject({ id: 'complete' });
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+  expect(fetchMock.mock.calls[1][0]).toContain('?type=EYE&page=1');
+});
+
+const missingResource = { code: ['RESOURCE_NOT_FOUND'] };
+
+it('treats a missing history as empty only after confirming the pet', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource)).mockResolvedValueOnce(response(200, { id: 12 }));
+  await expect(getPetDiagnosisHistory(12, new AbortController().signal)).resolves.toEqual([]);
+  expect(fetchMock.mock.calls[1][0]).toMatch(/\/api\/pets\/12$/);
+});
+
+it('does not treat an inaccessible pet as empty history', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource)).mockResolvedValueOnce(response(404, missingResource));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('RESOURCE_NOT_FOUND');
+});
+
+it('does not treat a different 404 code as empty history', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, { code: ['ENDPOINT_NOT_FOUND'] }));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('ENDPOINT_NOT_FOUND');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+});
+
+it('does not suppress a missing later page', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissions: [{ id: 'one' }], pageNumber: 1, hasNext: true }))
+    .mockResolvedValueOnce(response(404, missingResource));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('RESOURCE_NOT_FOUND');
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('shares one pet verification when eye and urine lists both return 404', async () => {
+  fetchMock.mockResolvedValueOnce(response(404, missingResource))
+    .mockResolvedValueOnce(response(404, missingResource))
+    .mockResolvedValueOnce(response(200, { id: 12 }));
+  const { signal } = new AbortController();
+  const verify = createPetOwnershipCheck(12, signal);
+  await expect(Promise.all([
+    getLatestCompletedPetSubmission(12, 'EYE', signal, verify),
+    getLatestCompletedPetSubmission(12, 'URINE', signal, verify),
+  ])).resolves.toEqual([undefined, undefined]);
+  expect(fetchMock).toHaveBeenCalledTimes(3);
+});
+
+it('distinguishes malformed unfiltered history from a successful empty page', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissions: null, hasNext: false }))
+    .mockResolvedValueOnce(response(200, { submissions: [], hasNext: false }));
+  await expect(getPetDiagnosisHistory(12)).rejects.toThrow('진단 이력을 불러오지 못했습니다.');
+  await expect(getPetDiagnosisHistory(12)).resolves.toEqual([]);
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it('reads the optional hospital name from certificate fields', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, { submissionId: id, hospitalName: '우리동네동물병원' }));
+  await expect(getCertificateFields(id)).resolves.toEqual({ hospitalName: '우리동네동물병원' });
+});
+
+it('updates only the hospital name on an OCR certificate', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateCertificateHospital(id, '  우리 병원  ');
+  const [[url, request]] = fetchMock.mock.calls;
+  expect(new URL(url).pathname).toBe('/api/submissions/' + id + '/certificate/fields');
+  expect(request.method).toBe('PATCH');
+  expect(JSON.parse(request.body)).toEqual({ hospitalName: '우리 병원' });
+});
+
+it('reads editable certificate fields only for the requested completed record and pet', async () => {
+  const body = { submissionId: id, petId: 12, status: 'COMPLETED', hospitalName: '병원',
+    speciesText: 'CAT', genderText: 'FEMALE', diagnosedDateText: '2026-11-16' };
+  fetchMock.mockResolvedValueOnce(response(200, body)).mockResolvedValueOnce(response(200, body));
+  await expect(getSavedCertificate(12, id)).resolves.toMatchObject({
+    checkupDate: '2026-11-16', hospitalName: '병원',
+    certificate: { species: 'CAT', sex: 'FEMALE', diagnosisDate: '2026-11-16', remarks: '' },
+  });
+  await expect(getSavedCertificate(13, id)).rejects.toThrow();
+});
+
+it('patches only changed fields and sends empty strings for explicitly cleared values', async () => {
+  fetchMock.mockResolvedValueOnce(response(200, {}));
+  await updateSavedCertificate(id, { diagnosisDate: '2026-11-15', remarks: '' }, '');
+  await updateSavedCertificate(id, {});
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(fetchMock.mock.calls[0][0]).toContain('/' + id + '/certificate/fields');
+  expect(fetchMock.mock.calls[0][1].method).toBe('PATCH');
+  expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+    diagnosedDateText: '2026-11-15', remarks: '', hospitalName: '',
+  });
+});
+
+it('deletes a certificate submission and rejects server failures', async () => {
+  fetchMock.mockResolvedValueOnce(response(204, undefined)).mockResolvedValueOnce(response(403, {}));
+  await expect(deleteCertificateSubmission(id)).resolves.toBeUndefined();
+  expect(fetchMock.mock.calls[0][0]).toContain('/api/submissions/' + id);
+  expect(fetchMock.mock.calls[0][1].method).toBe('DELETE');
+  await expect(deleteCertificateSubmission(id)).rejects.toThrow();
 });

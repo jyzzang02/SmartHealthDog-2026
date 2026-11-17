@@ -11,6 +11,7 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useIsFocused, useNavigation } from '@react-navigation/native';
@@ -33,6 +34,7 @@ import {
   type PinchGestureHandlerStateChangeEvent,
 } from 'react-native-gesture-handler';
 import { getMyPets, PetListItem } from '../api/pets';
+import { getUrinePhotoCrop } from '../utils/urinePhotoCrop';
 
 type CapturedDiagnosisImage = {
   uri: string;
@@ -117,6 +119,12 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   const navigation = useNavigation<any>();
   const isFocused = useIsFocused();
   const insets = useSafeAreaInsets();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const isUrine = type === 'urine';
+  const galleryFrameWidth = isUrine ? Math.min(GALLERY_GUIDE_SIZE, Math.max(1, windowWidth - 40)) : GALLERY_GUIDE_SIZE;
+  const galleryFrameHeight = isUrine
+    ? Math.min(Math.round(galleryFrameWidth * 1.38), Math.max(120, windowHeight - insets.top - insets.bottom - 248))
+    : GALLERY_GUIDE_SIZE;
   const cameraRef = useRef<Camera>(null);
   const hasPromptedPetRef = useRef(false);
   const isMountedRef = useRef(true);
@@ -153,10 +161,8 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
   const galleryImageLayout = useMemo(() => {
     if (!galleryImage) return null;
 
-    const baseScale = Math.max(
-      GALLERY_GUIDE_SIZE / galleryImage.width,
-      GALLERY_GUIDE_SIZE / galleryImage.height
-    );
+    const fit = isUrine ? Math.min : Math.max;
+    const baseScale = fit(galleryFrameWidth / galleryImage.width, galleryFrameHeight / galleryImage.height);
     const renderedScale = baseScale * galleryAlignment.scale;
     const width = galleryImage.width * renderedScale;
     const height = galleryImage.height * renderedScale;
@@ -164,11 +170,11 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
     return {
       width,
       height,
-      left: (GALLERY_GUIDE_SIZE - width) / 2 + galleryAlignment.x,
-      top: (GALLERY_GUIDE_SIZE - height) / 2 + galleryAlignment.y,
+      left: (galleryFrameWidth - width) / 2 + galleryAlignment.x,
+      top: (galleryFrameHeight - height) / 2 + galleryAlignment.y,
       renderedScale,
     };
-  }, [galleryAlignment, galleryImage]);
+  }, [galleryAlignment, galleryFrameHeight, galleryFrameWidth, galleryImage, isUrine]);
 
   const guideCopy = useMemo(() => {
     if (type === 'eye') {
@@ -243,7 +249,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       updateGalleryAlignment({
         ...galleryAlignmentRef.current,
         scale: Math.max(
-          MIN_GALLERY_SCALE,
+          isUrine ? 0.75 : MIN_GALLERY_SCALE,
           Math.min(
             MAX_GALLERY_SCALE,
             galleryPinchStartScaleRef.current * event.nativeEvent.scale
@@ -251,7 +257,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
         ),
       });
     },
-    [updateGalleryAlignment]
+    [isUrine, updateGalleryAlignment]
   );
 
   useEffect(() => {
@@ -565,16 +571,24 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
       Math.min(galleryImage.height - cropHeight, -galleryImageLayout.top / galleryImageLayout.renderedScale)
     );
 
+    const crop = isUrine
+      ? getUrinePhotoCrop(galleryImage, galleryImageLayout, { width: galleryFrameWidth, height: galleryFrameHeight })
+      : { x: cropX, y: cropY, width: cropWidth, height: cropHeight };
+    if (!crop) {
+      Alert.alert('오류', '사진을 정렬하지 못했습니다. 다시 시도해 주세요.');
+      return;
+    }
+
     uploadLock.current = true;
     let croppedUri: string | undefined;
     try {
       setIsUploading(true);
       croppedUri = await diagnosisImageCropper.cropImage(
         galleryImage.uri,
-        cropX,
-        cropY,
-        cropWidth,
-        cropHeight
+        crop.x,
+        crop.y,
+        crop.width,
+        crop.height
       );
       if (!isMountedRef.current) return;
 
@@ -595,7 +609,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
         setIsUploading(false);
       }
     }
-  }, [galleryImage, galleryImageLayout, handleUploadFromGallery, type]);
+  }, [galleryFrameHeight, galleryFrameWidth, galleryImage, galleryImageLayout, handleUploadFromGallery, isUrine, type]);
 
   const canInteract = !isLoading && !isUploading;
   const canUseFlash = Boolean(device?.hasFlash);
@@ -661,15 +675,15 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
                   <View style={styles.eyeGuideInner} />
                 </View>
               ) : (
-                <View style={styles.urineGuideBox} />
+                <View style={[styles.urineGuideBox, styles.urineCameraGuide]} />
               )}
               <Text style={styles.guideText}>{guideCopy.overlayText}</Text>
             </View>
           )}
         </View>
 
-        <View style={[styles.bottomPanel, { paddingBottom: insets.bottom + 14 }]}>
-          <View style={styles.petRow}>
+        <View style={[styles.bottomPanel, isUrine && styles.urineBottomPanel, { paddingBottom: insets.bottom + (isUrine ? 8 : 14) }]}>
+          <View style={[styles.petRow, isUrine && styles.urinePetRow]}>
             <Text style={styles.petLabel}>진단 대상</Text>
             <Text style={styles.petName}>
               {selectedPet ? selectedPet.name : '선택 필요'}
@@ -807,7 +821,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
               onGestureEvent={handleGalleryPanGesture}
               onHandlerStateChange={handleGalleryPanStateChange}
             >
-              <View style={styles.galleryGuideFrame}>
+              <View style={[styles.galleryGuideFrame, isUrine && { width: galleryFrameWidth, height: galleryFrameHeight }]}>
                 {galleryImage && galleryImageLayout && (
                   <Image
                     source={{ uri: galleryImage.uri }}
@@ -828,7 +842,7 @@ const DiagnosisCameraCapture: React.FC<DiagnosisCameraCaptureProps> = ({
                       <View style={styles.eyeGuideInner} />
                     </View>
                   ) : (
-                    <View style={styles.urineGuideBox} />
+                    <View style={[styles.urineGuideBox, styles.urineGalleryGuide]} />
                   )}
                 </View>
               </View>
@@ -1004,6 +1018,8 @@ const styles = StyleSheet.create({
     borderColor: '#0081D5',
     borderStyle: 'dashed',
   },
+  urineCameraGuide: { height: 340, maxHeight: '70%' },
+  urineGalleryGuide: { width: '60%', height: '90%' },
   guideText: {
     color: '#FFFFFF',
     fontSize: 15,
@@ -1021,6 +1037,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 28,
     paddingTop: 14,
   },
+  urineBottomPanel: { paddingTop: 8 },
+  urinePetRow: { marginBottom: 8 },
   petRow: {
     minHeight: 28,
     flexDirection: 'row',

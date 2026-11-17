@@ -1,3 +1,4 @@
+import { EYE_EPIPHORA_DESCRIPTION, EYE_EPIPHORA_NAME, isLegacyEpiphoraName } from '../utils/eyeConditionDisplay';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
@@ -367,8 +368,9 @@ const EyeDiagnosisResultScreen: React.FC<Props> = ({ route, navigation }) => {
       probability: item.probability !== null && item.probability !== undefined && item.probability !== '' && Number.isFinite(Number(item.probability)) && Number(item.probability) >= 0 && Number(item.probability) <= 1
         ? Number(item.probability)
         : null,
-      name: item.condition?.name || '미확인',
-      description: item.condition?.description || '',
+      ...(isLegacyEpiphoraName(item.condition?.name)
+        ? { name: EYE_EPIPHORA_NAME, description: EYE_EPIPHORA_DESCRIPTION }
+        : { name: item.condition?.name || '미확인', description: item.condition?.description || '' }),
     }))
       .sort((a, b) => (b.probability ?? -1) - (a.probability ?? -1))
       .map(item => ({

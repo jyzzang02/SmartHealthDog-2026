@@ -14,6 +14,7 @@ import {
   Alert,
   AppState,
   DeviceEventEmitter,
+  NativeEventEmitter,
   NativeModules,
 } from 'react-native';
 import type { AppStateStatus } from 'react-native';
@@ -486,9 +487,11 @@ export default function WalkActiveScreen() {
   }, [badgeAnim]);
 
   useEffect(() => {
-    if (!isSessionReady || Platform.OS !== 'android' || !compassHeadingModule) return;
+    if (!isSessionReady || !compassHeadingModule) return;
 
-    const subscription = DeviceEventEmitter.addListener(
+    const emitter = Platform.OS === 'ios'
+      ? new NativeEventEmitter(NativeModules.SmartHealthDogCompass) : DeviceEventEmitter;
+    const subscription = emitter.addListener(
       'smartHealthDogCompassHeading',
       (event: { heading?: unknown }) => {
         const heading = normalizeHeading(event?.heading);

@@ -27,11 +27,22 @@ const getSortedRecords = (petId: number): HealthSummary[] =>
     })
     .map(({ summary }) => summary);
 
+const removeRecord = (records: HealthSummary[] | undefined, submissionId: string) => {
+  if (!records) return;
+  for (let index = records.length - 1; index >= 0; index--) {
+    if (records[index].certificateSubmissionId === submissionId) records.splice(index, 1);
+  }
+};
+
 export const healthStore = {
   set(petId: number, summary: HealthSummary): void {
     const _store = currentStore();
     if (!_store[petId]) _store[petId] = [];
+    if (summary.certificateSubmissionId) removeRecord(_store[petId], summary.certificateSubmissionId);
     _store[petId].push(summary);
+  },
+  remove(petId: number, submissionId: string): void {
+    removeRecord(currentStore()[petId], submissionId);
   },
   getHistory(petId: number): HealthSummary[] {
     return getSortedRecords(petId);
