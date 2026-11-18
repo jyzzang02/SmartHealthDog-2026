@@ -23,7 +23,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { RootStackParamList } from '../../App';
 import type { DiagnosisCertificate, HealthSummary } from '../types/health';
 import { getMyPets, PetListItem } from '../api/pets';
-import { getCertificateOcrResult, requestCertificateOcr } from '../api/diagnosis';
+import { deleteCertificateSubmission, getCertificateOcrResult, requestCertificateOcr } from '../api/diagnosis';
 import { assertAuthSession, getAuthSession } from '../storage/tokenStorage';
 import { getMyProfile } from '../api/users';
 import { clearPendingCertificate, readPendingCertificate, storePendingCertificate } from '../storage/certificateRecovery';
@@ -60,7 +60,7 @@ const IMAGE_PICKER_OPTIONS = {
 const OCR_POLL_INTERVAL_MS = 5000;
 const OCR_TIMEOUT_MS = 90_000;
 
-type OcrSubmission = { id: string; petId: number; ownerId?: number; session: symbol; completed?: boolean };
+type OcrSubmission = { id: string; petId: number; ownerId?: number; session: symbol; completed?: boolean; failed?: boolean };
 
 const todayString = () => {
   const d = new Date();
@@ -130,9 +130,13 @@ const HealthCheckInputScreen = () => {
   const [ocrFields, setOcrFields] = useState<Partial<DiagnosisCertificate> | null>(null);
   const [ocrMessage, setOcrMessage] = useState<string | null>(null);
   const [ocrBusy, setOcrBusy] = useState(false);
+  const [deletingOcr, setDeletingOcr] = useState(false);
   const [canCheckOcr, setCanCheckOcr] = useState(false);
   const ocrSubmission = useRef<OcrSubmission | null>(null);
   const ocrRequest = useRef<AbortController | null>(null);
+  const deleteRequest = useRef<AbortController | null>(null);
+  const uploadReceipt = useRef<Promise<OcrSubmission> | null>(null);
+  const uploadUnconfirmed = useRef(false);
   const ocrPollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ocrDeadlineTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pickerOpen = useRef(false);
@@ -262,7 +266,7 @@ const HealthCheckInputScreen = () => {
     if (ocrDeadlineTimer.current !== null) clearTimeout(ocrDeadlineTimer.current);
   }, []);
 
-  usePreventRemove(ocrBusy, () => {
+  usePreventRemove(ocrBusy || deletingOcr, () => {
     Alert.alert(
       '진단서 처리 중',
       ocrSubmission.current
@@ -276,6 +280,7 @@ const HealthCheckInputScreen = () => {
     cancelOcrRequest();
     if (discard && ocrSubmission.current) removeRecovery(ocrSubmission.current);
     ocrSubmission.current = null;
+    uploadUnconfirmed.current = false;
     setCertificateImageUri(null);
     setOcrFields(null);
     setOcrMessage(null);
@@ -284,7 +289,7 @@ const HealthCheckInputScreen = () => {
   };
 
   const runCertificateOcr = useCallback(async (image?: NonNullable<ImagePickerResponse['assets']>[number] & { uri: string }) => {
-    if (ocrRequest.current) return;
+    if (ocrRequest.current || deleteRequest.current) return;
     const session = getAuthSession();
     if (!image && ocrSubmission.current?.session !== session) return;
 
@@ -314,12 +319,24 @@ const HealthCheckInputScreen = () => {
         const ownerId = await resolveOwner(session);
         if (!isCurrent()) return;
         if (ownerId === undefined) throw new TypeError();
-        const id = await requestCertificateOcr(selectedPetId, image, controller.signal);
-        if (!isCurrent()) return;
-        ocrSubmission.current = { id, petId: selectedPetId, session, ownerId };
-        const persist = () => storePendingCertificate(ownerId, selectedPetId, id, session);
-        await persist().catch(() => persist()).catch(() => undefined);
-        if (!isCurrent()) return;
+        uploadUnconfirmed.current = true;
+        const receipt = requestCertificateOcr(selectedPetId, image, controller.signal).then(async id => {
+          const submission = { id, petId: selectedPetId, session, ownerId };
+          if (isCurrent()) {
+            ocrSubmission.current = submission;
+            uploadUnconfirmed.current = false;
+            const persist = () => storePendingCertificate(ownerId, selectedPetId, id, session);
+            await persist().catch(() => persist()).catch(() => undefined);
+          }
+          return submission;
+        });
+        uploadReceipt.current = receipt;
+        try {
+          await receipt;
+        } finally {
+          if (uploadReceipt.current === receipt) uploadReceipt.current = null;
+        }
+        if (!isCurrent() || deleteRequest.current) return;
         setOcrMessage('진단서를 분석 중이에요.');
       }
       const submission = ocrSubmission.current;
@@ -337,7 +354,7 @@ const HealthCheckInputScreen = () => {
               : '자동으로 채울 수 있는 내용이 없어요. 직접 입력해 주세요.');
           } else if (result.status === 'FAILED') {
             removeRecovery(submission);
-            ocrSubmission.current = null;
+            submission.failed = true;
             finish('진단서를 인식하지 못했어요. 다른 사진을 선택하거나 직접 입력해 주세요.');
           } else {
             ocrPollTimer.current = setTimeout(() => { checkResult(); }, OCR_POLL_INTERVAL_MS);
@@ -369,7 +386,7 @@ const HealthCheckInputScreen = () => {
     const resume = async () => {
       const current = ocrSubmission.current;
       if (current?.session === session && current.petId === selectedPetId) {
-        if (!current.completed) await runCertificateOcr();
+        if (!current.completed && !current.failed) await runCertificateOcr();
         return;
       }
       const ownerId = await resolveOwner(session);
@@ -383,6 +400,7 @@ const HealthCheckInputScreen = () => {
     return () => {
       active = false;
       cancelOcrRequest();
+      deleteRequest.current?.abort();
     };
   }, [cancelOcrRequest, resolveOwner, runCertificateOcr, selectedPetId]));
 
@@ -419,8 +437,48 @@ const HealthCheckInputScreen = () => {
     }
   };
 
+  const deleteOcrImage = async () => {
+    if (deleteRequest.current || pickerOpen.current) return;
+    const session = getAuthSession();
+    const controller = new AbortController();
+    const isCurrent = () => !controller.signal.aborted && getAuthSession() === session;
+    deleteRequest.current = controller;
+    setDeletingOcr(true);
+    let submission = ocrSubmission.current;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Once the upload was sent, wait for its exact ID before deleting.
+      if (uploadReceipt.current) submission = await uploadReceipt.current;
+      if (!isCurrent()) return;
+      if (submission) {
+        if (submission.session !== session || submission.petId !== selectedPetId) return;
+        cancelOcrRequest();
+        timeout = setTimeout(() => controller.abort(), 20_000);
+        await deleteCertificateSubmission(submission.id, controller.signal);
+        if (controller.signal.aborted) throw new Error();
+        if (!isCurrent()) return;
+      } else if (uploadUnconfirmed.current) {
+        throw new Error();
+      }
+      clearCertificateImage();
+    } catch {
+      if (deleteRequest.current !== controller || getAuthSession() !== session) return;
+      setOcrBusy(false);
+      setCanCheckOcr(Boolean(submission && !submission.completed && !submission.failed));
+      Alert.alert('오류', submission
+        ? '진단서를 삭제하지 못했어요. 다시 시도해 주세요.'
+        : '서버 접수 여부를 확인하지 못했어요. 검진 기록에서 확인해 주세요.');
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+      if (deleteRequest.current === controller) {
+        deleteRequest.current = null;
+        setDeletingOcr(false);
+      }
+    }
+  };
+
   const openCertificatePicker = async (source: 'camera' | 'album') => {
-    if (pickerOpen.current || ocrRequest.current) return;
+    if (pickerOpen.current || ocrRequest.current || deleteRequest.current) return;
     pickerOpen.current = true;
     try {
       if (source === 'camera' && !(await requestCameraPermission())) {
@@ -439,8 +497,8 @@ const HealthCheckInputScreen = () => {
   };
 
   const handleSubmit = () => {
-    if (ocrRequest.current || pickerOpen.current) return;
-    if (ocrSubmission.current && !ocrSubmission.current.completed) return;
+    if (ocrRequest.current || pickerOpen.current || deleteRequest.current) return;
+    if (ocrSubmission.current && !ocrSubmission.current.completed && !ocrSubmission.current.failed) return;
     const trimmedCertificate = { ...certificate };
     CERTIFICATE_FIELDS.forEach(({ key }) => {
       trimmedCertificate[key] = certificate[key].trim();
@@ -478,6 +536,7 @@ const HealthCheckInputScreen = () => {
   };
 
   const handleSelectPet = (pet: PetListItem) => {
+    if (deleteRequest.current || uploadReceipt.current) return;
     if (pet.id !== selectedPetId) {
       const switchingOcr = ocrSubmission.current !== null;
       clearCertificateImage(false);
@@ -540,7 +599,7 @@ const HealthCheckInputScreen = () => {
         <TouchableOpacity
           style={styles.inputBox}
           activeOpacity={pets.length > 1 ? 0.75 : 1}
-          disabled={pets.length <= 1}
+          disabled={pets.length <= 1 || deletingOcr}
           onPress={() => setPetSelectorVisible(true)}
         >
           <Text style={styles.inputValue}>{selectedPetName}</Text>
@@ -578,17 +637,18 @@ const HealthCheckInputScreen = () => {
               />
               <TouchableOpacity
                 style={styles.certRemoveBtn}
-                onPress={() => clearCertificateImage()}
+                disabled={deletingOcr}
+                onPress={deleteOcrImage}
               >
                 <Text style={styles.certRemoveBtnText}>삭제</Text>
               </TouchableOpacity>
             </View>
           )}
           <View style={styles.certBtnRow}>
-            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy} accessibilityState={{ disabled: ocrBusy }} onPress={() => openCertificatePicker('camera')}>
+            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy || deletingOcr} accessibilityState={{ disabled: ocrBusy || deletingOcr }} onPress={() => openCertificatePicker('camera')}>
               <Text style={styles.certBtnText}>촬영하기</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy} accessibilityState={{ disabled: ocrBusy }} onPress={() => openCertificatePicker('album')}>
+            <TouchableOpacity style={styles.certBtn} disabled={ocrBusy || deletingOcr} accessibilityState={{ disabled: ocrBusy || deletingOcr }} onPress={() => openCertificatePicker('album')}>
               <Text style={styles.certBtnText}>앨범에서 선택</Text>
             </TouchableOpacity>
           </View>
@@ -598,7 +658,7 @@ const HealthCheckInputScreen = () => {
           <View style={styles.ocrStatus} accessibilityLiveRegion="polite">
             {ocrBusy && <ActivityIndicator color="#0081D5" />}
             <Text style={styles.ocrStatusText}>{ocrMessage}</Text>
-            {canCheckOcr && (
+            {canCheckOcr && !deletingOcr && (
               <TouchableOpacity accessibilityRole="button" onPress={() => runCertificateOcr()}>
                 <Text style={styles.ocrRetry}>결과 다시 확인</Text>
               </TouchableOpacity>
@@ -664,7 +724,7 @@ const HealthCheckInputScreen = () => {
         >
           <Text style={styles.cancelBtnText}>취소</Text>
         </TouchableOpacity>
-        <TouchableOpacity style={[styles.submitBtn, (ocrBusy || canCheckOcr) && styles.ocrDisabled]} disabled={ocrBusy || canCheckOcr} onPress={handleSubmit}>
+        <TouchableOpacity style={[styles.submitBtn, (ocrBusy || canCheckOcr || deletingOcr) && styles.ocrDisabled]} disabled={ocrBusy || canCheckOcr || deletingOcr} onPress={handleSubmit}>
           <Text style={styles.submitBtnText}>다음</Text>
         </TouchableOpacity>
       </View>
