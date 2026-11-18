@@ -17,7 +17,7 @@ import {
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import CustomButton from '../components/CustomButton';
 import { login, isApiError } from '../api/auth';
-import { storeAuthTokens } from '../storage/tokenStorage';
+import { getAuthSession, storeAuthTokens } from '../storage/tokenStorage';
 
 type RootStackParamList = {
   Login: undefined;
@@ -60,15 +60,19 @@ const OrdinaryLogin: React.FC<Props> = ({ navigation }) => {
   const handleLogin = async () => {
     if (!isLoginEnabled || isLoading) return;
 
+    const session = getAuthSession();
     setIsLoading(true);
     try {
       const tokens = await login(email, password);
+      if (!navigation.isFocused() || getAuthSession() !== session) return;
       await storeAuthTokens(tokens);
+      if (!navigation.isFocused()) return;
       navigation.reset({
         index: 0,
         routes: [{ name: 'Main' }],
       });
     } catch (error) {
+      if (!navigation.isFocused()) return;
       if (isApiError(error)) {
         Alert.alert('로그인 실패', error.message);
       } else {

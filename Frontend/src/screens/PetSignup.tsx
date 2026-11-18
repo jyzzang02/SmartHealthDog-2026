@@ -21,7 +21,7 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import CustomButton from '../components/CustomButton';
 import { registerUser, isApiError, login } from '../api/auth';
 import { createPet } from '../api/pets';
-import { storeAuthTokens, clearAuthTokens } from '../storage/tokenStorage';
+import { getAuthSession } from '../storage/tokenStorage';
 
 type PetSignupRouteParams = {
   mode?: 'add';
@@ -302,6 +302,8 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
   const handleRegister = async (shouldCreatePet: boolean) => {
     if (isLoading) return;
 
+    const session = getAuthSession();
+    const isCurrent = () => navigation.isFocused() && getAuthSession() === session;
     setIsLoading(true);
 
     try {
@@ -312,10 +314,11 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
         emailVerificationToken: verificationCode,
         profilePictureUri: profileImage ?? null,
       });
+      if (!isCurrent()) return;
 
       if (shouldCreatePet) {
         const tokens = await login(email, password);
-        await storeAuthTokens(tokens);
+        if (!isCurrent()) return;
 
         const formattedBirthday = formatBirthday();
 
@@ -323,16 +326,16 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
           await createPet({
             request: buildPetRequest(formattedBirthday),
             profilePictureUri: petImage ?? null,
-          });
+          }, { accessToken: tokens.accessToken });
         }
-
-        await clearAuthTokens();
       }
+      if (!isCurrent()) return;
 
       Alert.alert('회원가입 완료', '회원가입이 완료되었습니다.', [
         {
           text: '확인',
           onPress: () => {
+            if (!isCurrent()) return;
             navigation.reset({
               index: 0,
               routes: [{ name: 'Login' }],
@@ -341,6 +344,7 @@ const PetSignup: React.FC<Props> = ({ navigation, route }) => {
         },
       ]);
     } catch (error) {
+      if (!isCurrent()) return;
       if (isApiError(error)) {
         Alert.alert('오류', error.message);
       } else {

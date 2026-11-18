@@ -24,7 +24,7 @@ import {
 } from 'react-native-safe-area-context';
 import LogoAnimation from '../components/LogoAnimation';
 import { isApiError, loginWithKakaoCode } from '../api/auth';
-import { storeAuthTokens } from '../storage/tokenStorage';
+import { getAuthSession, storeAuthTokens } from '../storage/tokenStorage';
 
 type RootStackParamList = {
   Login: undefined;
@@ -96,15 +96,18 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
       return;
     }
 
+    const session = getAuthSession();
     openingKakao.current = true;
     try {
       const state: unknown = await NativeModules.KakaoOAuth?.createState();
+      if (!navigation.isFocused() || getAuthSession() !== session) return;
       if (typeof state !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(state)) throw new Error('OAuth state unavailable');
       pendingState.current = state;
       setOAuthState(state);
       hasHandledKakaoCallback.current = false;
       setIsKakaoLoginVisible(true);
     } catch {
+      if (!navigation.isFocused() || getAuthSession() !== session) return;
       Alert.alert('카카오 로그인 실패', '로그인 처리 중 오류가 발생했습니다. 다시 시도해 주세요.');
     } finally {
       openingKakao.current = false;
@@ -113,7 +116,7 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
 
   const handleKakaoNavigation = useCallback(
     async (url: string) => {
-      if (!isKakaoCallbackUrl(url) || hasHandledKakaoCallback.current) return;
+      if (!navigation.isFocused() || !isKakaoCallbackUrl(url) || hasHandledKakaoCallback.current) return;
 
       hasHandledKakaoCallback.current = true;
       const expectedState = pendingState.current;
@@ -138,17 +141,24 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         return;
       }
 
+      const session = getAuthSession();
       setIsKakaoSubmitting(true);
       try {
         const tokens = await loginWithKakaoCode(code);
+        if (!navigation.isFocused() || getAuthSession() !== session) {
+          setIsKakaoLoginVisible(false);
+          return;
+        }
         await storeAuthTokens(tokens);
         setIsKakaoLoginVisible(false);
+        if (!navigation.isFocused()) return;
         navigation.reset({
           index: 0,
           routes: [{ name: 'Main' }],
         });
       } catch (error) {
         setIsKakaoLoginVisible(false);
+        if (!navigation.isFocused()) return;
         const message = isApiError(error)
           ? error.message
           : '네트워크 오류가 발생했습니다. 다시 시도해 주세요.';

@@ -1,5 +1,5 @@
-import { getMyPets, updatePetPartial, requestUrineDiagnosis } from './pets';
-import { storeAuthTokens } from '../storage/tokenStorage';
+import { createPet, getMyPets, updatePetPartial, requestUrineDiagnosis } from './pets';
+import { getAuthSession, getStoredAccessToken, storeAuthTokens } from '../storage/tokenStorage';
 
 jest.mock('@react-native-async-storage/async-storage', () => ({
   __esModule: true,
@@ -18,6 +18,22 @@ beforeEach(async () => {
   globalThis.fetch = fetchMock = jest.fn();
 });
 afterEach(() => { globalThis.fetch = originalFetch; formDataGlobal.FormData = originalFormData; });
+
+it('uses the signup token only for its pet creation request, even if the request fails', async () => {
+  const session = getAuthSession();
+  fetchMock.mockRejectedValueOnce(new Error('offline'));
+  await expect(createPet({ request: { name: 'Pet', species: 'CAT', gender: 'MALE', neutered: false } }, {
+    accessToken: 'signup-access',
+  })).rejects.toThrow('offline');
+
+  const [url, init] = fetchMock.mock.calls[0];
+  expect(url).toMatch(/\/api\/pets$/);
+  expect(init.method).toBe('POST');
+  expect(init.headers.Authorization).toBe('Bearer signup-access');
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  expect(getAuthSession()).toBe(session);
+  await expect(getStoredAccessToken()).resolves.toBe('test-access');
+});
 
 it('uses PATCH without an empty picture part when editing fields only, and preserves the returned picture', async () => {
   fetchMock.mockResolvedValueOnce(response(existing));

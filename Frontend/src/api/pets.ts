@@ -272,12 +272,17 @@ export const getPetDetail = async (id: number, signal?: AbortSignal): Promise<Pe
 };
 
 export const createPet = async (
-  payload: CreatePetPayload
+  payload: CreatePetPayload,
+  options?: { accessToken: string },
 ): Promise<PetListItem> => {
-  const response = await authorizedFetch(`${API_BASE_URL}/api/pets`, {
+  const url = `${API_BASE_URL}/api/pets`;
+  const request = {
     method: 'POST',
     body: buildPetFormData(payload),
-  });
+  };
+  const response = options
+    ? await fetch(url, { ...request, headers: buildAuthHeaders(options.accessToken) })
+    : await authorizedFetch(url, request);
 
   if (!response.ok) {
     const message = await getResponseErrorMessage(
