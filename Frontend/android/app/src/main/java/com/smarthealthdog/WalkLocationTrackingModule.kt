@@ -1,6 +1,8 @@
 package com.smarthealthdog
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
@@ -19,6 +21,12 @@ class WalkLocationTrackingModule(
   @ReactMethod
   fun start(walkId: Double, startedAtMs: Double, promise: Promise) {
     try {
+      if (
+        reactContext.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+        reactContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+      ) {
+        throw SecurityException("Location permission unavailable")
+      }
       val intent = Intent(reactContext, WalkLocationService::class.java).apply {
         putExtra(WalkLocationService.EXTRA_WALK_ID, walkId.toLong())
         putExtra(WalkLocationService.EXTRA_STARTED_AT_MS, startedAtMs.toLong())

@@ -78,7 +78,12 @@ class WalkLocationService : Service(), LocationListener, SensorEventListener {
   override fun onBind(intent: Intent?): IBinder? = null
 
   override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-    startForegroundNotification()
+    try {
+      startForegroundNotification()
+    } catch (_: SecurityException) {
+      stopSelf(startId)
+      return START_NOT_STICKY
+    }
     locationManager.removeUpdates(this)
     requestLocationUpdates()
     stopLightTracking()
